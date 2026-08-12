@@ -1,0 +1,61 @@
+<!doctype html>
+<html lang="ru">
+  <head>
+    <meta charset="UTF-8" />
+    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <title>SAMARKAND — Пробуждение</title>
+    <style>
+      :root {
+        --bg: #07070a;
+        --ink: #e8e2d4;
+        --muted: #8b8578;
+        --blood: #a8232a;
+        --gold: #d8a13a;
+      }
+      * { box-sizing: border-box; }
+      html, body {
+        margin: 0;
+        padding: 0;
+        height: 100%;
+        overflow: hidden;
+        background: var(--bg);
+        color: var(--ink);
+        font-family: 'Georgia', 'Times New Roman', serif;
+        -webkit-font-smoothing: antialiased;
+      }
+      #app {
+        position: fixed;
+        inset: 0;
+        display: block;
+      }
+      canvas {
+        display: block;
+        width: 100%;
+        height: 100%;
+        image-rendering: auto;
+        cursor: crosshair;
+      }
+      #boot {
+        position: fixed;
+        inset: 0;
+        display: grid;
+        place-items: center;
+        background: var(--bg);
+        z-index: 10;
+        transition: opacity 0.4s;
+      }
+      #boot .title {
+        font-size: 2rem;
+        letter-spacing: 0.5em;
+        color: var(--blood);
+        text-transform: uppercase;
+      }
+      #boot.gone { opacity: 0; pointer-events: none; }
+    </style>
+  </head>
+  <body>
+    <div id="app"><canvas id="stage"></canvas></div>
+    <div id="boot"><div class="title">Samarkand</div></div>
+    <script type="module" src="/src/main.ts"></script>
+  </body>
+</html>
