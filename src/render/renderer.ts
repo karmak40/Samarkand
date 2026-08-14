@@ -92,10 +92,23 @@ export class Renderer {
   syncCamera(camera: Camera): void {
     camera.viewW = this.width;
     camera.viewH = this.height;
+
     // Zoom to keep the monster a readable size on any window. At 1:1 the creature
     // is a ~36px smudge and none of its procedural detail reads; tying zoom to
     // viewport height keeps roughly the same number of body-widths on screen.
-    camera.zoom = clamp(this.height / 460, 1.4, 2.4);
+    const heightZoom = clamp(this.height / 460, 1.4, 2.4);
+
+    // A phone in portrait has plenty of height but little width, and zooming by
+    // height alone was cropping ranged attackers out of the frame while they were
+    // still well inside firing range — the first anyone knew of an archer was the
+    // arrow. This guarantees a minimum width of world space is visible too, and
+    // whichever axis is more constrained wins. Landscape windows already show more
+    // than this much width, so the desktop view is untouched; only narrow windows
+    // pull back.
+    const MIN_VIEW_WIDTH = 460;
+    const widthZoom = this.width / MIN_VIEW_WIDTH;
+
+    camera.zoom = clamp(Math.min(heightZoom, widthZoom), 0.6, 2.4);
   }
 
   drawWorld(world: World, camera: Camera, exit: Vec2 | null, exitOpen: boolean): void {

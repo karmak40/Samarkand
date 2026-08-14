@@ -385,7 +385,13 @@ export class Ui {
     return rectContains(rect, this.mouseX, this.mouseY);
   }
 
-  /** Draws a button and returns true on the frame it is clicked. */
+  /**
+   * Draws a button and returns true on the frame it is clicked.
+   *
+   * The label shrinks to fit the button's width first, since the same layout has to
+   * hold "Resume" and "Fortsetzen" and "Продолжить" without the caller hand-tuning a
+   * font size per locale. Padding leaves room for the rounded border on both sides.
+   */
   button(rect: Rect, label: string, options: ButtonOptions = {}): boolean {
     const { disabled = false, accent = PALETTE.gold, sub, size = 16, active = false } = options;
     const hovered = !disabled && this.isHovered(rect);
@@ -408,9 +414,13 @@ export class Ui {
 
     const color = disabled ? PALETTE.dim : hovered ? PALETTE.ink : PALETTE.ink;
     const centerY = sub ? rect.y + rect.h * 0.42 : rect.y + rect.h / 2;
+    const padding = 16;
+    const labelMaxWidth = Math.max(10, rect.w - padding);
 
-    this.text(label, rect.x + rect.w / 2, centerY, {
+    this.fittedText(label, rect.x + rect.w / 2, centerY, {
       size,
+      maxWidth: labelMaxWidth,
+      minScale: 0.55,
       color,
       align: 'center',
       baseline: 'middle',
@@ -418,8 +428,10 @@ export class Ui {
     });
 
     if (sub) {
-      this.text(sub, rect.x + rect.w / 2, rect.y + rect.h * 0.74, {
+      this.fittedText(sub, rect.x + rect.w / 2, rect.y + rect.h * 0.74, {
         size: size * 0.75,
+        maxWidth: labelMaxWidth,
+        minScale: 0.6,
         color: disabled ? PALETTE.dim : PALETTE.muted,
         align: 'center',
         baseline: 'middle',
