@@ -1,4 +1,5 @@
 import { type DamageType, type PlayerDamageType } from '../combat/damage';
+import { t } from '../i18n';
 
 /**
  * Every number that a skill, mutation or meta upgrade is allowed to touch.
@@ -102,58 +103,10 @@ export interface StatModifier {
   source: string;
 }
 
-export const STAT_LABELS: Partial<Record<StatKey, string>> = {
-  maxHp: 'Здоровье',
-  hpRegen: 'Регенерация',
-  lifesteal: 'Вампиризм',
-  armor: 'Броня',
-  dodge: 'Уклонение',
-  thorns: 'Шипы',
-  shieldOnRoom: 'Щит за комнату',
-  moveSpeed: 'Скорость',
-  dashCharges: 'Заряды рывка',
-  dashCooldown: 'Откат рывка',
-  dashDistance: 'Дальность рывка',
-  damage: 'Урон',
-  attackSpeed: 'Скорость атаки',
-  critChance: 'Шанс крита',
-  critDamage: 'Сила крита',
-  armorPen: 'Пробитие брони',
-  knockback: 'Отбрасывание',
-  executeThreshold: 'Добивание',
-  projectiles: 'Снарядов',
-  projectileSpeed: 'Скорость снаряда',
-  projectileSize: 'Размер снаряда',
-  pierce: 'Пробитие',
-  bounce: 'Рикошеты',
-  range: 'Дальность',
-  spread: 'Разброс',
-  areaSize: 'Радиус эффектов',
-  statusPower: 'Сила эффектов',
-  statusDuration: 'Длительность эффектов',
-  statusChance: 'Шанс эффектов',
-  pickupRadius: 'Радиус подбора',
-  soulGain: 'Добыча душ',
-  healingReceived: 'Получаемое лечение',
-  dmgPhysical: 'Физический урон',
-  dmgFire: 'Урон огнём',
-  dmgPoison: 'Урон ядом',
-  dmgFrost: 'Урон морозом',
-  dmgLightning: 'Урон молнией',
-  dmgUnholy: 'Урон скверной',
-  convFire: 'Огненная пропитка',
-  convPoison: 'Ядовитая пропитка',
-  convFrost: 'Морозная пропитка',
-  convLightning: 'Грозовая пропитка',
-  convUnholy: 'Пропитка скверной',
-  resPhysical: 'Сопр. физическому',
-  resFire: 'Сопр. огню',
-  resPoison: 'Сопр. яду',
-  resFrost: 'Сопр. морозу',
-  resLightning: 'Сопр. молнии',
-  resUnholy: 'Сопр. скверне',
-  resHoly: 'Сопр. свету',
-};
+/** Display label for a stat, e.g. in the build sheet. */
+export function statLabel(key: StatKey): string {
+  return t(`stat.${key}`);
+}
 
 /** Stats shown as percentages in the UI rather than raw numbers. */
 export const PERCENT_STATS = new Set<StatKey>([
@@ -476,8 +429,8 @@ export function formatStat(key: StatKey, value: number): string {
   if (key === 'projectiles' || key === 'pierce' || key === 'bounce' || key === 'dashCharges') {
     return value.toFixed(0);
   }
-  if (key === 'attackSpeed') return `${value.toFixed(2)}/с`;
-  if (key === 'dashCooldown') return `${value.toFixed(1)}с`;
+  if (key === 'attackSpeed') return `${value.toFixed(2)}/${t('unit.secondsAbbrev')}`;
+  if (key === 'dashCooldown') return `${value.toFixed(1)}${t('unit.secondsAbbrev')}`;
   if (Math.abs(value) >= 100) return value.toFixed(0);
   return value.toFixed(1);
 }

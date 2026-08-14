@@ -1,4 +1,5 @@
 import { type DamagePacket, type DamageType } from './damage';
+import { t } from '../i18n';
 
 export type StatusId =
   | 'burn'
@@ -28,87 +29,87 @@ export interface StatusDef {
 export const STATUS_DEFS: Record<StatusId, StatusDef> = {
   burn: {
     id: 'burn',
-    name: 'Горение',
+    get name() { return t('status.burn.name'); },
     color: '#ff7b31',
     maxStacks: 10,
     dotType: 'fire',
     tickInterval: 0.4,
     maxDuration: 8,
-    description: 'Урон огнём каждые 0.4с. Стаки складываются.',
+    get description() { return t('status.burn.description'); },
   },
   poison: {
     id: 'poison',
-    name: 'Отравление',
+    get name() { return t('status.poison.name'); },
     color: '#8ed44f',
     maxStacks: 20,
     dotType: 'poison',
     tickInterval: 0.5,
     maxDuration: 14,
-    description: 'Долгий урон ядом. Много стаков — очень быстрая смерть.',
+    get description() { return t('status.poison.description'); },
   },
   bleed: {
     id: 'bleed',
-    name: 'Кровотечение',
+    get name() { return t('status.bleed.name'); },
     color: '#c0343c',
     maxStacks: 8,
     dotType: 'physical',
     tickInterval: 0.5,
     maxDuration: 10,
-    description: 'Физический урон по времени, удваивается если цель бежит.',
+    get description() { return t('status.bleed.description'); },
   },
   chill: {
     id: 'chill',
-    name: 'Охлаждение',
+    get name() { return t('status.chill.name'); },
     color: '#6fd0ff',
     maxStacks: 10,
     tickInterval: 0,
     maxDuration: 6,
-    description: 'Замедляет на 6% за стак. На 10 стаках цель замерзает.',
+    get description() { return t('status.chill.description'); },
   },
   freeze: {
     id: 'freeze',
-    name: 'Заморозка',
+    get name() { return t('status.freeze.name'); },
     color: '#a9e8ff',
     maxStacks: 1,
     tickInterval: 0,
     maxDuration: 3,
-    description: 'Цель не может двигаться и атаковать.',
+    get description() { return t('status.freeze.description'); },
   },
   shock: {
     id: 'shock',
-    name: 'Разряд',
+    get name() { return t('status.shock.name'); },
     color: '#ffe45c',
     maxStacks: 5,
     tickInterval: 0,
     maxDuration: 5,
-    description: 'Цель получает на 8% больше урона за стак.',
+    get description() { return t('status.shock.description'); },
   },
   curse: {
     id: 'curse',
-    name: 'Проклятие',
+    get name() { return t('status.curse.name'); },
     color: '#b06cff',
     maxStacks: 5,
     tickInterval: 0,
     maxDuration: 8,
-    description: 'Уязвимость ко всему урону: +10% за стак.',
+    get description() { return t('status.curse.description'); },
   },
   fear: {
     id: 'fear',
-    name: 'Ужас',
+    get name() { return t('status.fear.name'); },
     color: '#9b8fb0',
     maxStacks: 1,
     tickInterval: 0,
     maxDuration: 5,
-    description: 'Цель в панике бежит прочь и не атакует.',
+    get description() { return t('status.fear.description'); },
   },
   weaken: {
     id: 'weaken',
-    name: 'Слабость',
+    get name() { return t('status.weaken.name'); },
     color: '#7d8a99',
     maxStacks: 5,
     tickInterval: 0,
     maxDuration: 8,
-    description: 'Цель наносит на 12% меньше урона за стак.',
+    get description() { return t('status.weaken.description'); },
   },
 };
 
@@ -240,7 +241,7 @@ export class StatusContainer {
         // Chill decays into nothing; freeze leaves the target briefly chilled so it
         // doesn't snap back to full speed the instant the ice breaks.
         if (status.id === 'freeze') {
-          this.apply({ id: 'chill', duration: 1.5, stacks: 4, sourceLabel: 'Оттепель' });
+          this.apply({ id: 'chill', duration: 1.5, stacks: 4, sourceLabel: t('effect.thaw') });
         }
       }
     }
@@ -249,7 +250,7 @@ export class StatusContainer {
     const chill = this.active.get('chill');
     if (chill && chill.stacks >= STATUS_DEFS.chill.maxStacks) {
       this.active.delete('chill');
-      this.apply({ id: 'freeze', duration: 1.6, sourceLabel: 'Мороз' });
+      this.apply({ id: 'freeze', duration: 1.6, sourceLabel: t('damageType.frost.name') });
     }
 
     return this.tickBuffer;

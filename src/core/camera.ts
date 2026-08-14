@@ -61,8 +61,18 @@ export class Camera {
     else this.y = clamp(this.y, b.y + halfH, b.y + b.h - halfH);
   }
 
+  /**
+   * Scales every shake request, 0 to 1.
+   *
+   * Set from the player's comfort setting rather than checked at each of the fifteen
+   * call sites — those know how hard the hit was, not how much motion this person can
+   * take, and a flag threaded through all of them would be forgotten by the sixteenth.
+   */
+  shakeScale = 1;
+
   /** Additive: the strongest recent shake wins rather than stacking into nausea. */
-  shake(amount: number, decay = 6): void {
+  shake(requested: number, decay = 6): void {
+    const amount = requested * this.shakeScale;
     if (amount > this.shakeAmount) {
       this.shakeAmount = amount;
       this.shakeDecay = decay;

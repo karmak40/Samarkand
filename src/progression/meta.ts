@@ -1,121 +1,21 @@
 import { DAMAGE_TYPES, type DamageType } from '../combat/damage';
 import { type RunStats } from '../stats/tracker';
-import { type RawModifier } from './skills';
-import { type StatSheet } from './stats';
+import {
+  ACHIEVEMENT_COUNT,
+  type AchievementContext,
+  type AchievementDef,
+  evaluateAchievements,
+  getAchievement,
+} from './achievements';
+import { dailyKey } from './daily';
+import { type ContentGate, type UnlockCategory } from './gate';
+import { defaultSettings, sanitizeSettings, type Settings } from './settings';
+import { DEFAULT_SPECIES_ID, getSpecies, resolveSpecies, type Species } from './species';
+import { getUnlock, isContentAvailable, UNLOCKS } from './unlocks';
 
 const SAVE_KEY = 'samarkand.save.v1';
-const SAVE_VERSION = 1;
+const SAVE_VERSION = 5;
 
-export interface MetaUpgrade {
-  readonly id: string;
-  readonly name: string;
-  readonly description: string;
-  readonly maxLevel: number;
-  /** Souls for the first level; each level costs more. */
-  readonly baseCost: number;
-  readonly costGrowth: number;
-  /** Applied once per level. */
-  readonly perLevel: readonly RawModifier[];
-}
-
-export const META_UPGRADES: readonly MetaUpgrade[] = [
-  {
-    id: 'vitality',
-    name: 'Живучесть',
-    description: '+14 к максимальному здоровью за уровень.',
-    maxLevel: 12,
-    baseCost: 25,
-    costGrowth: 1.35,
-    perLevel: [{ key: 'maxHp', flat: 14 }],
-  },
-  {
-    id: 'claws',
-    name: 'Когти',
-    description: '+6% урона за уровень.',
-    maxLevel: 12,
-    baseCost: 30,
-    costGrowth: 1.4,
-    perLevel: [{ key: 'damage', mult: 0.06 }],
-  },
-  {
-    id: 'ferocity',
-    name: 'Свирепость',
-    description: '+5% скорости атаки за уровень.',
-    maxLevel: 8,
-    baseCost: 40,
-    costGrowth: 1.45,
-    perLevel: [{ key: 'attackSpeed', mult: 0.05 }],
-  },
-  {
-    id: 'swiftness',
-    name: 'Прыть',
-    description: '+4% скорости передвижения за уровень.',
-    maxLevel: 6,
-    baseCost: 35,
-    costGrowth: 1.4,
-    perLevel: [{ key: 'moveSpeed', mult: 0.04 }],
-  },
-  {
-    id: 'carapace',
-    name: 'Хитин',
-    description: '+7 брони за уровень.',
-    maxLevel: 8,
-    baseCost: 35,
-    costGrowth: 1.38,
-    perLevel: [{ key: 'armor', flat: 7 }],
-  },
-  {
-    id: 'fortune',
-    name: 'Чутьё',
-    description: '+3% шанса крита за уровень.',
-    maxLevel: 6,
-    baseCost: 45,
-    costGrowth: 1.5,
-    perLevel: [{ key: 'critChance', flat: 0.03 }],
-  },
-  {
-    id: 'hunger',
-    name: 'Голод',
-    description: '+2% вампиризма за уровень.',
-    maxLevel: 5,
-    baseCost: 60,
-    costGrowth: 1.6,
-    perLevel: [{ key: 'lifesteal', flat: 0.02 }],
-  },
-  {
-    id: 'greed',
-    name: 'Алчность',
-    description: '+12% добываемых душ за уровень.',
-    maxLevel: 6,
-    baseCost: 30,
-    costGrowth: 1.4,
-    perLevel: [{ key: 'soulGain', mult: 0.12 }],
-  },
-  {
-    id: 'aegis',
-    name: 'Скорлупа',
-    description: '+15 щита в начале каждой комнаты за уровень.',
-    maxLevel: 5,
-    baseCost: 55,
-    costGrowth: 1.5,
-    perLevel: [{ key: 'shieldOnRoom', flat: 15 }],
-  },
-  {
-    id: 'sprint',
-    name: 'Второе сердце',
-    description: '-8% отката рывка за уровень.',
-    maxLevel: 5,
-    baseCost: 50,
-    costGrowth: 1.45,
-    perLevel: [{ key: 'dashCooldown', mult: -0.08 }],
-  },
-];
-
-const UPGRADES_BY_ID = new Map(META_UPGRADES.map((u) => [u.id, u]));
-
-export function upgradeCost(upgrade: MetaUpgrade, currentLevel: number): number {
-  return Math.round(upgrade.baseCost * Math.pow(upgrade.costGrowth, currentLevel));
-}
 
 /** Aggregated numbers across every run ever played. */
 export interface LifetimeStats {
@@ -139,6 +39,29 @@ export interface LifetimeStats {
   mutationPicks: Record<string, number>;
   /** How each run ended, keyed by the thing that killed you. */
   deathsBySource: Record<string, number>;
+  /** Runs played on a daily seed, ever. */
+  dailyRuns: number;
+}
+
+/**
+ * Today's showing on the shared seed.
+ *
+ * Only one day is kept. A daily is a thing you compare with other people *today*;
+ * a personal archive of past dailies would be a different feature, and storing it
+ * would grow the save forever for no one's benefit.
+ */
+export interface DailyRecord {
+  /** `YYYY-MM-DD` in UTC. A mismatch with today means the record is stale. */
+  key: string;
+  runs: number;
+  bestRooms: number;
+  bestKills: number;
+  bestSouls: number;
+  victory: boolean;
+}
+
+function emptyDaily(key: string): DailyRecord {
+  return { key, runs: 0, bestRooms: 0, bestKills: 0, bestSouls: 0, victory: false };
 }
 
 function emptyLifetime(): LifetimeStats {
@@ -165,14 +88,26 @@ function emptyLifetime(): LifetimeStats {
     skillPicks: {},
     mutationPicks: {},
     deathsBySource: {},
+    dailyRuns: 0,
   };
 }
 
 export interface SaveData {
   version: number;
   souls: number;
-  upgrades: Record<string, number>;
+  /** Namespaced unlock keys the player owns. */
+  unlocked: string[];
   lifetime: LifetimeStats;
+  /** Ids of trials already earned; rewards are paid once. */
+  achievements: string[];
+  daily: DailyRecord;
+  /** Id of the body the next run starts in. */
+  speciesId: string;
+  /** Presentation and controls. Never anything that changes difficulty. */
+  settings: Settings;
+  /** Master volume, 0..1. */
+  volume: number;
+  muted: boolean;
   /** Wall-clock of the last save, for display only. */
   updatedAt: number;
 }
@@ -183,9 +118,43 @@ export interface SaveData {
  * Everything is kept in one localStorage blob and written on meaningful events
  * (run end, upgrade purchase) rather than every frame.
  */
-export class MetaProgress {
+export class MetaProgress implements ContentGate {
   souls = 0;
-  readonly upgrades = new Map<string, number>();
+
+  /**
+   * Content bought with souls, as namespaced unlock keys.
+   *
+   * Souls buy *variety*, never raw numbers. An earlier version sold stat upgrades;
+   * "+6% damage per level" gives a player nothing to look forward to, whereas a new
+   * legendary changes what a run can become.
+   */
+  readonly unlocked = new Set<string>();
+
+  /**
+   * The body the next run starts in.
+   *
+   * Stored rather than asked for each run: the choice is a standing preference, and
+   * making the player re-pick it before every hunt would be friction, not a decision.
+   */
+  speciesId: string = DEFAULT_SPECIES_ID;
+
+  /** Trials earned. Their soul reward is paid on the frame they land, once. */
+  readonly achievements = new Set<string>();
+
+  /** Today's daily result, or a stale day's until the next daily run is played. */
+  daily: DailyRecord = emptyDaily(dailyKey());
+
+  /**
+   * Presentation and controls.
+   *
+   * In the profile rather than in the run: someone who turned the camera shake off
+   * did not mean 'for this hunt'.
+   */
+  settings: Settings = defaultSettings();
+
+  /** Audio settings live in the profile so they survive a reload. */
+  volume = 0.7;
+  muted = false;
   lifetime: LifetimeStats = emptyLifetime();
 
   /** Set when loading found no save — the game shows the intro in that case. */
@@ -195,61 +164,142 @@ export class MetaProgress {
     this.load();
   }
 
-  levelOf(id: string): number {
-    return this.upgrades.get(id) ?? 0;
+  // ---- unlocks -------------------------------------------------------------
+
+  /** ContentGate: is this card / mutation / boon allowed to appear in a run? */
+  has(category: UnlockCategory, refId: string): boolean {
+    return isContentAvailable(this.unlocked, category, refId);
   }
 
-  costOf(id: string): number | null {
-    const upgrade = UPGRADES_BY_ID.get(id);
-    if (!upgrade) return null;
-    const level = this.levelOf(id);
-    if (level >= upgrade.maxLevel) return null;
-    return upgradeCost(upgrade, level);
+  isUnlocked(unlockId: string): boolean {
+    return this.unlocked.has(unlockId);
   }
 
-  canAfford(id: string): boolean {
-    const cost = this.costOf(id);
-    return cost !== null && this.souls >= cost;
+  canAfford(unlockId: string): boolean {
+    const unlock = getUnlock(unlockId);
+    return unlock !== undefined && !this.unlocked.has(unlockId) && this.souls >= unlock.price;
   }
 
-  purchase(id: string): boolean {
-    const cost = this.costOf(id);
-    if (cost === null || this.souls < cost) return false;
-    this.souls -= cost;
-    this.upgrades.set(id, this.levelOf(id) + 1);
+  buy(unlockId: string): boolean {
+    const unlock = getUnlock(unlockId);
+    if (!unlock || this.unlocked.has(unlockId) || this.souls < unlock.price) return false;
+
+    this.souls -= unlock.price;
+    this.unlocked.add(unlockId);
+    // Buying the last locked thing completes a trial; claim it here rather than
+    // making the player finish another run before the shelf reads as full.
+    this.claimAchievements(null);
     this.save();
     return true;
   }
 
-  /** Total souls spent so far, for the profile screen. */
+  // ---- starting body -------------------------------------------------------
+
+  /** Whether this body is owned, i.e. free from the start or already bought. */
+  canUseSpecies(id: string): boolean {
+    return getSpecies(id) !== undefined && this.has('species', id);
+  }
+
+  /** The body the next run will use, resolved and guaranteed to be a real one. */
+  get species(): Species {
+    return this.canUseSpecies(this.speciesId)
+      ? resolveSpecies(this.speciesId)
+      : resolveSpecies(DEFAULT_SPECIES_ID);
+  }
+
+  chooseSpecies(id: string): boolean {
+    if (!this.canUseSpecies(id) || this.speciesId === id) return false;
+    this.speciesId = id;
+    this.save();
+    return true;
+  }
+
+  /** Total souls spent on unlocks, for the profile screen. */
   soulsInvested(): number {
     let total = 0;
-    for (const upgrade of META_UPGRADES) {
-      const level = this.levelOf(upgrade.id);
-      for (let i = 0; i < level; i++) total += upgradeCost(upgrade, i);
-    }
+    for (const id of this.unlocked) total += getUnlock(id)?.price ?? 0;
     return total;
   }
 
-  /** Apply every purchased upgrade to a fresh run's stat sheet. */
-  applyTo(stats: StatSheet): void {
-    for (const upgrade of META_UPGRADES) {
-      const level = this.levelOf(upgrade.id);
-      if (level <= 0) continue;
-
-      for (const mod of upgrade.perLevel) {
-        stats.addModifier({
-          key: mod.key,
-          flat: mod.flat !== undefined ? mod.flat * level : undefined,
-          mult: mod.mult !== undefined ? mod.mult * level : undefined,
-          source: `${upgrade.name} ${level}`,
-        });
-      }
-    }
+  get unlockedCount(): number {
+    return this.unlocked.size;
   }
 
-  /** Fold a finished run into the lifetime record and bank its souls. */
-  recordRun(run: RunStats, soulsEarned: number): void {
+  get unlockableCount(): number {
+    return UNLOCKS.length;
+  }
+
+  get achievementCount(): number {
+    return this.achievements.size;
+  }
+
+  get achievementTotal(): number {
+    return ACHIEVEMENT_COUNT;
+  }
+
+  // ---- trials --------------------------------------------------------------
+
+  /** What the trials are judged against. `run` is null outside a finished run. */
+  achievementContext(run: RunStats | null): AchievementContext {
+    return {
+      run,
+      lifetime: this.lifetime,
+      unlockedContent: this.unlockedCount,
+      unlockableContent: this.unlockableCount,
+    };
+  }
+
+  hasAchievement(id: string): boolean {
+    return this.achievements.has(id);
+  }
+
+  get achievementSouls(): number {
+    let total = 0;
+    for (const id of this.achievements) total += getAchievement(id)?.reward ?? 0;
+    return total;
+  }
+
+  /**
+   * Award everything the context now satisfies.
+   *
+   * Called after the lifetime record is updated, so a trial can be earned by the
+   * very run that finished it. Rewards are banked immediately — a trial that pays
+   * out only on the next launch would feel broken.
+   */
+  private claimAchievements(run: RunStats | null): AchievementDef[] {
+    const fresh = evaluateAchievements(this.achievementContext(run), this.achievements);
+    for (const def of fresh) {
+      this.achievements.add(def.id);
+      this.souls += def.reward;
+    }
+    return fresh;
+  }
+
+  /** Today's record, or a fresh one when the stored day has rolled over. */
+  todaysDaily(now: number = Date.now()): DailyRecord {
+    const key = dailyKey(now);
+    return this.daily.key === key ? this.daily : emptyDaily(key);
+  }
+
+  private recordDaily(run: RunStats, soulsEarned: number): void {
+    const key = dailyKey();
+    // A new day wipes yesterday's line rather than merging into it.
+    if (this.daily.key !== key) this.daily = emptyDaily(key);
+
+    const d = this.daily;
+    d.runs++;
+    if (run.roomsCleared > d.bestRooms) d.bestRooms = run.roomsCleared;
+    if (run.totalKills > d.bestKills) d.bestKills = run.totalKills;
+    if (soulsEarned > d.bestSouls) d.bestSouls = soulsEarned;
+    if (run.outcome === 'victory') d.victory = true;
+  }
+
+  /**
+   * Fold a finished run into the lifetime record and bank its souls.
+   *
+   * Returns the trials the run just earned, so the results screen can show them.
+   */
+  recordRun(run: RunStats, soulsEarned: number, options: { daily?: boolean } = {}): AchievementDef[] {
     const l = this.lifetime;
 
     l.runs++;
@@ -284,7 +334,15 @@ export class MetaProgress {
     }
 
     this.souls += soulsEarned;
+
+    if (options.daily) {
+      l.dailyRuns++;
+      this.recordDaily(run, soulsEarned);
+    }
+
+    const earned = this.claimAchievements(run);
     this.save();
+    return earned;
   }
 
   /** The enemy that has killed you the most, for the profile screen. */
@@ -311,8 +369,14 @@ export class MetaProgress {
     const data: SaveData = {
       version: SAVE_VERSION,
       souls: this.souls,
-      upgrades: Object.fromEntries(this.upgrades),
+      unlocked: [...this.unlocked],
+      speciesId: this.speciesId,
+      settings: this.settings,
       lifetime: this.lifetime,
+      achievements: [...this.achievements],
+      daily: this.daily,
+      volume: this.volume,
+      muted: this.muted,
       updatedAt: Date.now(),
     };
     try {
@@ -332,28 +396,88 @@ export class MetaProgress {
     if (!raw) return;
 
     try {
-      const data = JSON.parse(raw) as Partial<SaveData>;
-      if (!data || data.version !== SAVE_VERSION) return;
+      const data = JSON.parse(raw) as Partial<LegacySaveData>;
+      if (!data || typeof data.version !== 'number') return;
+      // A save from the future belongs to a newer build; leave it untouched rather
+      // than overwrite it with a downgrade.
+      if (data.version > SAVE_VERSION) return;
 
       this.souls = typeof data.souls === 'number' ? data.souls : 0;
-      this.upgrades.clear();
-      for (const [id, level] of Object.entries(data.upgrades ?? {})) {
-        if (UPGRADES_BY_ID.has(id) && typeof level === 'number') {
-          this.upgrades.set(id, level);
-        }
+      if (typeof data.volume === 'number') this.volume = Math.min(1, Math.max(0, data.volume));
+      if (typeof data.muted === 'boolean') this.muted = data.muted;
+
+      this.unlocked.clear();
+      for (const id of data.unlocked ?? []) {
+        if (typeof id === 'string' && getUnlock(id)) this.unlocked.add(id);
       }
+
+      // Rebuilt rather than assigned: a save is editable text, and a settings block
+      // with a broken binding map would leave the player unable to walk.
+      this.settings = sanitizeSettings(data.settings);
+
+      // A body the profile no longer owns (or that this build removed) falls back to
+      // the starter rather than leaving the player with an invalid creature.
+      this.speciesId = this.canUseSpecies(data.speciesId ?? '') ? data.speciesId! : DEFAULT_SPECIES_ID;
+
       // Merge rather than replace, so a save written by an older build that lacks
       // newer counters still loads with sane defaults.
       this.lifetime = { ...emptyLifetime(), ...(data.lifetime ?? {}) };
+
+      this.achievements.clear();
+      for (const id of data.achievements ?? []) {
+        // Drop ids for trials this build no longer has, so a removed trial can't
+        // keep occupying a slot in the count forever.
+        if (typeof id === 'string' && getAchievement(id)) this.achievements.add(id);
+      }
+
+      const daily = data.daily;
+      if (daily && typeof daily.key === 'string') {
+        this.daily = { ...emptyDaily(daily.key), ...daily };
+      }
+
       this.isNewProfile = false;
+
+      if (data.version < SAVE_VERSION) this.migrate(data);
     } catch {
       // Corrupt save: fall back to a fresh profile rather than refusing to start.
     }
   }
 
+  /**
+   * Bring an older save forward.
+   *
+   * v1 sold permanent stat upgrades. Those no longer exist, so rather than silently
+   * deleting what the player paid for, every soul they had invested is refunded to
+   * spend on unlocks instead. Losing progress on an update is worse than any balance
+   * concern about a one-off windfall.
+   *
+   * v2 knew nothing of trials. Rather than ask a veteran to re-earn what their
+   * record already proves, every lifetime trial they satisfy is granted on load.
+   */
+  private migrate(data: Partial<LegacySaveData>): void {
+    this.claimAchievements(null);
+
+    if (data.upgrades) {
+      let refund = 0;
+      for (const [id, level] of Object.entries(data.upgrades)) {
+        const upgrade = LEGACY_UPGRADE_COSTS[id];
+        if (!upgrade || typeof level !== 'number') continue;
+        for (let i = 0; i < level; i++) {
+          refund += Math.round(upgrade.base * Math.pow(upgrade.growth, i));
+        }
+      }
+      this.souls += refund;
+    }
+    this.save();
+  }
+
   reset(): void {
     this.souls = 0;
-    this.upgrades.clear();
+    this.speciesId = DEFAULT_SPECIES_ID;
+    this.settings = defaultSettings();
+    this.unlocked.clear();
+    this.achievements.clear();
+    this.daily = emptyDaily(dailyKey());
     this.lifetime = emptyLifetime();
     this.isNewProfile = true;
     try {
@@ -363,3 +487,28 @@ export class MetaProgress {
     }
   }
 }
+
+/** Shape of any save we might read, including fields only older versions wrote. */
+interface LegacySaveData extends SaveData {
+  /** v1 only: permanent stat upgrades, since replaced by content unlocks. */
+  upgrades?: Record<string, number>;
+}
+
+/**
+ * Prices the v1 shop charged, kept only so a migration can refund them.
+ *
+ * Frozen on purpose — this is a historical record, not live balance, and it must not
+ * change when the current economy does.
+ */
+const LEGACY_UPGRADE_COSTS: Record<string, { base: number; growth: number }> = {
+  vitality: { base: 25, growth: 1.35 },
+  claws: { base: 30, growth: 1.4 },
+  ferocity: { base: 40, growth: 1.45 },
+  swiftness: { base: 35, growth: 1.4 },
+  carapace: { base: 35, growth: 1.38 },
+  fortune: { base: 45, growth: 1.5 },
+  hunger: { base: 60, growth: 1.6 },
+  greed: { base: 30, growth: 1.4 },
+  aegis: { base: 55, growth: 1.5 },
+  sprint: { base: 50, growth: 1.45 },
+};

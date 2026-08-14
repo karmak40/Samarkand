@@ -4,6 +4,34 @@
     <meta charset="UTF-8" />
     <meta name="viewport" content="width=device-width, initial-scale=1.0" />
     <title>SAMARKAND — Пробуждение</title>
+
+    <!--
+      The interface is drawn on a canvas, so none of this is for the layout. It is for
+      everything that reads the document instead: the tab strip, the share preview, the
+      browser's own chrome. `lang` is a starting value only — the game rewrites it to
+      match the chosen language, so a screen reader is never told the wrong one.
+    -->
+    <meta name="description" content="You are the monster. Every room is a human settlement, and the way out opens when nobody is left standing. A procedural action roguelite drawn entirely in code — no sprites, no asset files." />
+    <meta name="theme-color" content="#07070a" />
+    <meta name="color-scheme" content="dark" />
+    <meta name="robots" content="index, follow" />
+
+    <meta property="og:type" content="website" />
+    <meta property="og:title" content="Samarkand" />
+    <meta property="og:site_name" content="Samarkand" />
+    <meta property="og:description" content="You are the monster. Every room is a human settlement, and the way out opens when nobody is left standing." />
+    <meta name="twitter:card" content="summary" />
+    <meta name="twitter:title" content="Samarkand" />
+    <meta name="twitter:description" content="You are the monster. Every room is a human settlement, and the way out opens when nobody is left standing." />
+
+    <!--
+      The icon is procedural too, and inline: an SVG data URI keeps the promise that
+      this project ships no asset files, and costs one fewer request than a .ico would.
+    -->
+    <link
+      rel="icon"
+      href="data:image/svg+xml,%3Csvg xmlns='http://www.w3.org/2000/svg' viewBox='0 0 64 64'%3E%3Crect width='64' height='64' rx='12' fill='%2307070a'/%3E%3Ccircle cx='32' cy='34' r='20' fill='%232b1f2e'/%3E%3Ccircle cx='32' cy='34' r='20' fill='none' stroke='%235c2740' stroke-width='2'/%3E%3Cpath d='M16 22 L20 8 L26 20 Z' fill='%232b1f2e'/%3E%3Cpath d='M48 22 L44 8 L38 20 Z' fill='%232b1f2e'/%3E%3Ccircle cx='25' cy='31' r='4.5' fill='%23c0343c'/%3E%3Ccircle cx='39' cy='31' r='4.5' fill='%23c0343c'/%3E%3Cpath d='M22 43 Q32 52 42 43 Q32 47 22 43 Z' fill='%23c0343c'/%3E%3C/svg%3E"
+    />
     <style>
       :root {
         --bg: #07070a;

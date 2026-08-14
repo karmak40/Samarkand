@@ -2,12 +2,14 @@ import {
   type DamageOptions,
   type DamagePacket,
   type DamageResult,
+  type DamageType,
   type Defenses,
   type PlayerDamageType,
 } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
 import { type Input } from '../core/input';
 import { clamp, damp, TAU } from '../core/math';
+import { t } from '../i18n';
 import { type BoonDef } from '../progression/boons';
 import {
   cloneBody,
@@ -15,6 +17,7 @@ import {
   type Mutation,
   type MonsterBody,
 } from '../progression/evolution';
+import { DEFAULT_SPECIES_ID, resolveSpecies, speciesBody, type Species } from '../progression/species';
 import { StatSheet } from '../progression/stats';
 import { drawMonster } from '../render/monster-render';
 import type { World } from '../world/world';
@@ -60,10 +63,13 @@ export function xpRequirement(level: number): number {
  * on-kill effects) is layered on top by the stat sheet and behaviour flags.
  */
 export class Monster extends Combatant {
-  readonly stats = new StatSheet();
+  /** The body this run started in. Fixed for the whole run. */
+  readonly species: Species;
+
+  readonly stats: StatSheet;
 
   /** The permanent body: base shape plus every mutation taken this run. */
-  body: MonsterBody = createBaseBody();
+  body: MonsterBody;
 
   /**
    * The body as it currently looks, with temporary forms layered on top.
@@ -87,6 +93,9 @@ export class Monster extends Combatant {
 
   /** Mutation ids already taken, so they are never offered twice. */
   readonly mutations = new Set<string>();
+
+  /** Curse ids carried for the rest of the run, taken willingly at cursed altars. */
+  readonly curses = new Set<string>();
 
   // --- combat timing --------------------------------------------------------
   private attackTimer = 0;
@@ -128,8 +137,14 @@ export class Monster extends Combatant {
   /** Current target, cached for the renderer's gaze direction. */
   target: Human | null = null;
 
-  constructor(x: number, y: number) {
+  constructor(x: number, y: number, species: Species = resolveSpecies(DEFAULT_SPECIES_ID)) {
     super();
+    this.species = species;
+    // Species set *base* stats rather than modifiers, so every percentage the run
+    // layers on top compounds with the body instead of drowning it out.
+    this.stats = new StatSheet(species.stats);
+    for (const flag of species.behaviors ?? []) this.stats.addBehavior(flag);
+    this.body = speciesBody(species);
     this.x = x;
     this.y = y;
     this.faction = 'monster';
@@ -197,7 +212,7 @@ export class Monster extends Combatant {
           key: m.key,
           flat: m.flat,
           mult: m.mult,
-          source: mutation.name,
+          source: mutation.id,
         })),
       );
     }
@@ -208,6 +223,7 @@ export class Monster extends Combatant {
     this.refreshForm();
 
     world.tracker.recordMutation(mutation.id, mutation.name);
+    world.sound.mutation();
     world.particles.ring(this.x, this.y, this.form.glowColor, 120, 0.8);
     world.camera.shake(8);
   }
@@ -247,7 +263,7 @@ export class Monster extends Combatant {
             key: m.key,
             flat: m.flat,
             mult: m.mult,
-            source: def.name,
+            source: def.id,
           })),
         );
       }
@@ -271,19 +287,21 @@ export class Monster extends Combatant {
       drag: 3,
     });
     world.camera.shake(5);
+    world.sound.boon(this);
   }
 
   private expireBoon(index: number, world: World): void {
     const boon = this.boons[index]!;
     this.boons.splice(index, 1);
 
-    this.stats.removeBySource(boon.def.name);
+    this.stats.removeBySource(boon.def.id);
     for (const behavior of boon.def.behaviors ?? []) this.stats.removeBehavior(behavior);
     // Losing max HP must not kill you: keep the ratio rather than the absolute.
     this.syncMaxHp(false);
     this.refreshForm();
 
-    world.texts.add(this.x, this.y - this.radius - 24, `${boon.def.name} угасает`, '#8b8578', 13);
+    world.texts.add(this.x, this.y - this.radius - 24, t('text.boonFading', { name: boon.def.name }), '#8b8578', 13);
+    world.sound.boonExpire(this);
     world.particles.emit({
       count: 12,
       x: this.x,
@@ -360,13 +378,14 @@ export class Monster extends Combatant {
     }
 
     if (levelled > 0) {
-      world.texts.add(this.x, this.y - this.radius - 30, `УРОВЕНЬ ${this.level}`, '#ffe28a', 20, 1);
+      world.texts.add(this.x, this.y - this.radius - 30, t('text.levelUp', { n: this.level }), '#ffe28a', 20, 1);
+      world.sound.levelUp();
       world.particles.ring(this.x, this.y, '#ffe28a', 90, 0.6);
       world.camera.shake(3);
     }
 
     if (this.stats.has('soulHarvest')) {
-      this.heal(amount * 0.6, world, 'Жатва душ');
+      this.heal(amount * 0.6, world, t('skill.soul-harvest.name'));
       this.grantFrenzy(0.35, world);
     }
   }
@@ -457,7 +476,7 @@ export class Monster extends Combatant {
         attacker.takeDamage(
           {
             packets: [{ type: 'unholy', amount: result.applied * thorns }],
-            sourceLabel: 'Шипы',
+            sourceLabel: t('effect.thorns'),
             kind: 'thorns',
             dodgeable: false,
           },
@@ -476,13 +495,14 @@ export class Monster extends Combatant {
       this.deathTime = -1;
       world.camera.shake(14);
       world.particles.ring(this.x, this.y, '#ffe28a', 180, 0.9);
-      world.texts.add(this.x, this.y - 40, 'ВТОРОЕ ДЫХАНИЕ', '#ffe28a', 22, 1);
+      world.texts.add(this.x, this.y - 40, t('effect.secondWind').toUpperCase(), '#ffe28a', 22, 1);
+      world.sound.secondWind();
       // Push everyone off so the revive isn't immediately undone.
       for (const human of world.humansInRadius(this.x, this.y, 200)) {
         const angle = Math.atan2(human.y - this.y, human.x - this.x);
         human.vx += Math.cos(angle) * 420;
         human.vy += Math.sin(angle) * 420;
-        human.statuses.apply({ id: 'fear', duration: 2.5, sourceLabel: 'Второе дыхание' });
+        human.statuses.apply({ id: 'fear', duration: 2.5, sourceLabel: t('effect.secondWind') });
       }
     }
 
@@ -494,6 +514,7 @@ export class Monster extends Combatant {
     world.tracker.killedBy = ctx.sourceLabel;
     world.camera.shake(20);
     world.camera.freeze(0.35);
+    world.sound.death();
     world.particles.emit({
       count: 70,
       x: this.x,
@@ -546,7 +567,7 @@ export class Monster extends Combatant {
         duration: 5 * statusDuration,
         stacks: 2,
         power: base * 0.12 * statusPower,
-        sourceLabel: 'Кровопускание',
+        sourceLabel: t('effect.hemorrhage'),
       });
     }
 
@@ -555,7 +576,7 @@ export class Monster extends Combatant {
         id: 'curse',
         duration: 5 * statusDuration,
         stacks: 1,
-        sourceLabel: 'Проклятие',
+        sourceLabel: t('status.curse.name'),
       });
     }
 
@@ -621,7 +642,7 @@ export class Monster extends Combatant {
         speed: projectileSpeed,
         packets: scaled,
         faction: 'monster',
-        sourceLabel: 'Коготь скверны',
+        sourceLabel: t('effect.corruptedClaw'),
         radius: 6 * this.stats.get('projectileSize'),
         range: this.stats.get('range'),
         pierce: this.stats.getInt('pierce'),
@@ -644,20 +665,20 @@ export class Monster extends Combatant {
               human.takeDamage(
                 {
                   packets: [{ type: 'true', amount: human.hp + 1 }],
-                  sourceLabel: 'Добивание',
+                  sourceLabel: t('effect.execute'),
                   kind: 'execute',
                   dodgeable: false,
                 },
                 w,
                 this,
               );
-              w.texts.add(human.x, human.y - 24, 'КАЗНЬ', '#ffe28a', 16, 1);
+              w.texts.add(human.x, human.y - 24, t('text.executed'), '#ffe28a', 16, 1);
             }
           }
           if (chain && hitTarget.faction === 'human') {
             const lightning = scaled.filter((p) => p.type === 'lightning');
             if (lightning.length > 0) {
-              w.chainLightning(hitTarget as Human, lightning, chainJumps, 220, 'Цепная гроза');
+              w.chainLightning(hitTarget as Human, lightning, chainJumps, 220, t('effect.chainLightning'));
             }
           }
         },
@@ -671,13 +692,13 @@ export class Monster extends Combatant {
                 dps: this.stats.get('damage') * 0.25 * this.stats.damageMultiplierFor('fire'),
                 type: 'fire',
                 color: '#ff7b31',
-                sourceLabel: 'Выжженная земля',
+                sourceLabel: t('effect.scorchedGround'),
                 status: {
                   id: 'burn',
                   duration: 3,
                   stacks: 1,
                   power: this.stats.get('damage') * 0.08,
-                  sourceLabel: 'Выжженная земля',
+                  sourceLabel: t('effect.scorchedGround'),
                 },
               });
             }
@@ -687,6 +708,7 @@ export class Monster extends Combatant {
 
     this.attackAnim = 1;
     world.tracker.attacksFired++;
+    world.sound.monsterShot(dominantElement(scaled), this);
     world.camera.shake(0.8);
 
     world.particles.emit({
@@ -722,6 +744,7 @@ export class Monster extends Combatant {
 
     world.tracker.dashesUsed++;
     world.camera.shake(2);
+    world.sound.dash(this);
     world.particles.emit({
       count: 14,
       x: this.x,
@@ -738,7 +761,7 @@ export class Monster extends Combatant {
     if (this.stats.has('frostNova')) {
       const power2 = this.stats.get('damage') * 0.8 * this.stats.damageMultiplierFor('frost');
       const radius = 130 * this.stats.get('areaSize');
-      world.explode(this.x, this.y, radius, [{ type: 'frost', amount: power2 }], 'Ледяная вспышка', {
+      world.explode(this.x, this.y, radius, [{ type: 'frost', amount: power2 }], t('effect.frostNova'), {
         color: '#6fd0ff',
         knockback: 40,
         hurtsBuildings: false,
@@ -747,7 +770,7 @@ export class Monster extends Combatant {
             id: 'chill',
             duration: 4 * this.stats.get('statusDuration'),
             stacks: 4,
-            sourceLabel: 'Ледяная вспышка',
+            sourceLabel: t('effect.frostNova'),
           },
         ],
       });
@@ -925,7 +948,7 @@ export class Monster extends Combatant {
         human.takeDamage(
           {
             packets: [{ type: 'unholy', amount: damage }],
-            sourceLabel: 'Выводок',
+            sourceLabel: t('effect.broodContact'),
             kind: 'contact',
             knockback: 30,
             dirX: human.x - this.x,
@@ -982,7 +1005,7 @@ export class Monster extends Combatant {
         if (human.archetype.role === 'boss') continue;
         // Only the weak break; knights and priests hold the line.
         if (human.archetype.courage >= 0.9) continue;
-        human.statuses.apply({ id: 'fear', duration: 1.2, sourceLabel: 'Аура ужаса' });
+        human.statuses.apply({ id: 'fear', duration: 1.2, sourceLabel: t('effect.terrorAura') });
       }
     }
   }
@@ -1031,6 +1054,19 @@ function interceptPoint(
   return { x, y };
 }
 
+/** Largest packet in an attack — decides which element colours the shot's sound. */
+function dominantElement(packets: readonly DamagePacket[]): DamageType {
+  let best: DamageType = 'physical';
+  let bestAmount = -1;
+  for (const packet of packets) {
+    if (packet.amount > bestAmount) {
+      bestAmount = packet.amount;
+      best = packet.type;
+    }
+  }
+  return best;
+}
+
 /** Status applied by an elemental conversion on hit. */
 function statusFor(
   type: PlayerDamageType,
@@ -1045,7 +1081,7 @@ function statusFor(
         duration: 4 * duration,
         stacks: 1,
         power: elementalDamage * 0.35 * power,
-        sourceLabel: 'Горение',
+        sourceLabel: t('status.burn.name'),
       };
     case 'poison':
       return {
@@ -1053,14 +1089,14 @@ function statusFor(
         duration: 7 * duration,
         stacks: 2,
         power: elementalDamage * 0.22 * power,
-        sourceLabel: 'Яд',
+        sourceLabel: t('damageType.poison.name'),
       };
     case 'frost':
-      return { id: 'chill', duration: 3 * duration, stacks: 2, sourceLabel: 'Мороз' };
+      return { id: 'chill', duration: 3 * duration, stacks: 2, sourceLabel: t('damageType.frost.name') };
     case 'lightning':
-      return { id: 'shock', duration: 4 * duration, stacks: 1, sourceLabel: 'Разряд' };
+      return { id: 'shock', duration: 4 * duration, stacks: 1, sourceLabel: t('status.shock.name') };
     case 'unholy':
-      return { id: 'curse', duration: 5 * duration, stacks: 1, sourceLabel: 'Скверна' };
+      return { id: 'curse', duration: 5 * duration, stacks: 1, sourceLabel: t('damageType.unholy.name') };
     default:
       return null;
   }

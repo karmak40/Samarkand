@@ -1,9 +1,13 @@
 import { type BuildingKind } from '../entities/building';
-import { HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
-import { clamp, type Rect, rectsOverlap, TAU, type Vec2 } from '../core/math';
+import { BOSS_IDS, type BossId, HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
+import { clamp, type Rect, rectsOverlap, segmentRectHit, TAU, type Vec2 } from '../core/math';
 import { RNG } from '../core/rng';
+import { roomNameBossSuffix, roomNamePrefixes, roomNameRoots } from '../i18n';
 
-export type RoomKind = 'hamlet' | 'village' | 'fortified' | 'shrine' | 'boss';
+export type RoomKind = 'hamlet' | 'village' | 'fortified' | 'shrine' | 'elite' | 'boss';
+
+/** What the run map asked for. `battle` is expanded into one of the flavour kinds. */
+export type ArenaRequest = 'battle' | 'elite' | 'boss';
 
 export interface PlannedBuilding {
   kind: BuildingKind;
@@ -26,6 +30,8 @@ export interface RoomPlan {
   monsterStart: Vec2;
   /** Where the portal opens once the settlement is cleared. */
   exit: Vec2;
+  /** Which boss holds this room. Only set on the boss arena. */
+  bossId: BossId | null;
   /** Relics lying in the settlement, each granting a temporary form. */
   relics: Vec2[];
   /** Deterministic tint for the ground, so each room reads as its own place. */
@@ -38,30 +44,14 @@ export interface RoomPlan {
   isBoss: boolean;
 }
 
-const NAME_PREFIX = [
-  'Тихий',
-  'Серый',
-  'Старый',
-  'Дальний',
-  'Мокрый',
-  'Кривой',
-  'Волчий',
-  'Пепельный',
-  'Глухой',
-  'Последний',
-];
-
-const NAME_ROOT: Record<RoomKind, string[]> = {
-  hamlet: ['Хутор', 'Выселок', 'Двор', 'Займище'],
-  village: ['Погост', 'Посад', 'Селище', 'Городище'],
-  fortified: ['Острог', 'Застава', 'Крепь', 'Вал'],
-  shrine: ['Скит', 'Часовня', 'Обитель', 'Придел'],
-  boss: ['Собор', 'Оплот', 'Твердыня'],
-};
-
-/** Room kind by depth. Boss caps the biome. */
+/**
+ * Flavour for an ordinary fight.
+ *
+ * The run map decides *what kind of stop* a node is; this only picks how a plain
+ * settlement looks, so consecutive battles don't feel identical.
+ */
 export function roomKindForDepth(index: number, totalRooms: number, rng: RNG): RoomKind {
-  if (index >= totalRooms - 1) return 'boss';
+  void totalRooms;
   if (index === 0) return 'hamlet';
   if (index % 4 === 3) return 'shrine';
   if (index >= 6 && rng.bool(0.45)) return 'fortified';
@@ -110,6 +100,15 @@ const KIND_CONFIG: Record<RoomKind, KindConfig> = {
     palisade: false,
     enemyBudgetScale: 1.1,
   },
+  elite: {
+    // Deliberately tight: an elite is a stand-and-fight, not a chase. Fewer
+    // buildings also means fewer places for the player to break line of sight.
+    size: [1180, 940],
+    buildingCount: [5, 8],
+    palette: ['watchtower', 'longhouse', 'house', 'well', 'cart'],
+    palisade: true,
+    enemyBudgetScale: 1.15,
+  },
   boss: {
     size: [1560, 1240],
     buildingCount: [6, 10],
@@ -131,6 +130,8 @@ const SPAWN_COST: Record<HumanId, number> = {
   knight: 9,
   ballista: 7,
   inquisitor: 0,
+  warlord: 0,
+  pyromancer: 0,
 };
 
 /**
@@ -141,8 +142,14 @@ const SPAWN_COST: Record<HumanId, number> = {
  * would plausibly be guarding. The monster always starts at the arena edge furthest
  * from the densest cluster, so the first thing you see is the village, not a wall.
  */
-export function generateRoom(index: number, totalRooms: number, rng: RNG): RoomPlan {
-  const kind = roomKindForDepth(index, totalRooms, rng);
+export function generateRoom(
+  index: number,
+  totalRooms: number,
+  rng: RNG,
+  request: ArenaRequest = 'battle',
+): RoomPlan {
+  const kind: RoomKind =
+    request === 'boss' ? 'boss' : request === 'elite' ? 'elite' : roomKindForDepth(index, totalRooms, rng);
   const config = KIND_CONFIG[kind];
 
   // Arenas grow only slightly with depth. Earlier tuning at 3% per room reached
@@ -227,12 +234,15 @@ export function generateRoom(index: number, totalRooms: number, rng: RNG): RoomP
   const relics = placeRelics(index, kind, bounds, buildings, monsterStart, rng);
 
   // --- defenders -----------------------------------------------------------
-  const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng);
+  // Drawn from the run seed, so the finale differs between runs and every player
+  // on a daily seed faces the same one.
+  const bossId: BossId | null = kind === 'boss' ? rng.pick(BOSS_IDS) : null;
+  const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId);
 
   const name =
     kind === 'boss'
-      ? `${rng.pick(NAME_ROOT.boss)} Инквизиции`
-      : `${rng.pick(NAME_PREFIX)} ${rng.pick(NAME_ROOT[kind])}`;
+      ? `${rng.pick(roomNameRoots('boss'))} ${roomNameBossSuffix(bossId ?? 'inquisitor')}`
+      : `${rng.pick(roomNamePrefixes())} ${rng.pick(roomNameRoots(kind))}`;
 
   return {
     index,
@@ -243,6 +253,7 @@ export function generateRoom(index: number, totalRooms: number, rng: RNG): RoomP
     spawns,
     monsterStart,
     exit,
+    bossId,
     relics,
     groundSeed: rng.int(0, 100000),
     wallThickness: WALL_THICKNESS,
@@ -345,6 +356,49 @@ function addPalisade(buildings: PlannedBuilding[], bounds: Rect, rng: RNG): void
   });
 }
 
+/**
+ * Scatter relics through the settlement.
+ *
+ * They sit away from the entry — a relic you can grab before the fight starts is a
+ * free win — and away from each other, so collecting one means crossing contested
+ * ground rather than hoovering up a pile.
+ */
+function placeRelics(
+  index: number,
+  kind: RoomKind,
+  bounds: Rect,
+  buildings: PlannedBuilding[],
+  monsterStart: Vec2,
+  rng: RNG,
+): Vec2[] {
+  // Elites promise a relic and must deliver two, since they are the reason to pick
+  // the harder branch at all.
+  const count = kind === 'boss' ? 3 : kind === 'elite' ? 2 : 1 + (index >= 4 ? 1 : 0);
+  const placed: Vec2[] = [];
+  const minFromEntry = 420;
+  const minApart = 300;
+
+  for (let i = 0; i < count; i++) {
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const x = rng.range(bounds.x + 110, bounds.x + bounds.w - 110);
+      const y = rng.range(bounds.y + 110, bounds.y + bounds.h - 110);
+
+      if (Math.hypot(x - monsterStart.x, y - monsterStart.y) < minFromEntry) continue;
+      if (insideAnyBuilding(x, y, buildings)) continue;
+      if (placed.some((p) => Math.hypot(p.x - x, p.y - y) < minApart)) continue;
+
+      placed.push({ x, y });
+      break;
+    }
+  }
+
+  // A settlement with none at all would silently drop the mechanic for that room.
+  if (placed.length === 0) {
+    placed.push({ x: bounds.x + bounds.w * 0.5, y: bounds.y + bounds.h * 0.35 });
+  }
+  return placed;
+}
+
 function pickEntry(bounds: Rect, buildings: PlannedBuilding[], rng: RNG): Vec2 {
   const margin = 70;
   const candidates: Vec2[] = [
@@ -389,11 +443,22 @@ function planSpawns(
   buildings: PlannedBuilding[],
   monsterStart: Vec2,
   rng: RNG,
+  bossId: BossId | null,
 ): PlannedSpawn[] {
   const spawns: PlannedSpawn[] = [];
 
+  // An elite garrison is defined by *who* holds it, not by how many. Champions are
+  // seeded first so the fight has a shape even before the budget is spent.
+  if (kind === 'elite') {
+    const champions: HumanId[] = index >= 6 ? ['knight', 'knight', 'priest'] : ['knight', 'priest'];
+    for (const id of champions) {
+      const point = placementFor(id, bounds, buildings, monsterStart, rng);
+      spawns.push({ id, x: point.x, y: point.y });
+    }
+  }
+
   if (kind === 'boss') {
-    spawns.push({ id: 'inquisitor', x: bounds.w / 2, y: bounds.h / 2 });
+    spawns.push({ id: bossId ?? 'inquisitor', x: bounds.w / 2, y: bounds.h / 2 });
   }
 
   // Raised from 8 to cover the guaranteed ranged defender, which otherwise ate
@@ -405,16 +470,16 @@ function planSpawns(
     return a.spawnWeight > 0 && a.minDepth <= index;
   });
 
-  // Watchtowers get a ballista each; that's what makes them worth destroying.
-  // It sits just below the tower rather than inside it — a turret that cannot be
-  // reached or shot at would stop the room from ever being cleared.
+  // Watchtowers field a ballista each; that's what makes them worth destroying.
+  //
+  // Placement is critical: a ballista cannot move, so if it ends up in a building's
+  // shadow neither side can ever see the other and the room becomes uncompletable.
+  // It is therefore stood off in open ground with a clear line to the arena centre.
   for (const building of buildings) {
     if (building.kind !== 'watchtower') continue;
-    spawns.push({
-      id: 'ballista',
-      x: building.rect.x + building.rect.w / 2,
-      y: building.rect.y + building.rect.h + 26,
-    });
+    const spot = placeTurret(building.rect, bounds, buildings, rng);
+    if (!spot) continue;
+    spawns.push({ id: 'ballista', x: spot.x, y: spot.y });
     budget -= SPAWN_COST.ballista * 0.5;
   }
 
@@ -495,6 +560,64 @@ function placementFor(
   // Fallback: centre of the arena is always valid enough to avoid a failed spawn.
   return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
 }
+
+/**
+ * Find open ground for an immobile siege engine.
+ *
+ * Requires a clear line to the arena centre through every sight-blocking structure.
+ * Without that guarantee a turret can sit forever in a blind spot, and since it can
+ * neither move nor be shot the settlement can never be cleared.
+ */
+function placeTurret(
+  tower: Rect,
+  bounds: Rect,
+  buildings: PlannedBuilding[],
+  rng: RNG,
+): Vec2 | null {
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  const originX = tower.x + tower.w / 2;
+  const originY = tower.y + tower.h / 2;
+
+  for (let attempt = 0; attempt < 48; attempt++) {
+    // Spiral outward from the tower so the engine still reads as belonging to it.
+    const angle = rng.next() * TAU;
+    const distance = 70 + attempt * 6;
+    const x = clamp(originX + Math.cos(angle) * distance, bounds.x + 80, bounds.x + bounds.w - 80);
+    const y = clamp(originY + Math.sin(angle) * distance, bounds.y + 80, bounds.y + bounds.h - 80);
+
+    if (insideAnyBuilding(x, y, buildings)) continue;
+    if (!hasClearLine(x, y, cx, cy, buildings)) continue;
+    return { x, y };
+  }
+  return null;
+}
+
+/** Segment test against every structure that stops sight. */
+function hasClearLine(
+  ax: number,
+  ay: number,
+  bx: number,
+  by: number,
+  buildings: PlannedBuilding[],
+): boolean {
+  for (const building of buildings) {
+    if (!OPAQUE_KINDS.has(building.kind)) continue;
+    if (segmentRectHit(ax, ay, bx, by, building.rect)) return false;
+  }
+  return true;
+}
+
+/** Mirrors `BuildingProfile.opaque`; kept here so planning needs no live entities. */
+const OPAQUE_KINDS = new Set<BuildingKind>([
+  'hut',
+  'house',
+  'longhouse',
+  'granary',
+  'chapel',
+  'watchtower',
+  'wall',
+]);
 
 function insideAnyBuilding(x: number, y: number, buildings: PlannedBuilding[]): boolean {
   for (const b of buildings) {

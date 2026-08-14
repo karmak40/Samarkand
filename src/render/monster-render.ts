@@ -127,6 +127,63 @@ export function drawMonster(ctx: CanvasRenderingContext2D, monster: Monster, wor
   void world;
 }
 
+/**
+ * The same creature, drawn from a bare body description with no entity behind it.
+ *
+ * Used by menu screens that need to show a body the player does not currently have.
+ * It idles rather than animates: no velocity, no attack, just the breathing wobble,
+ * so the portrait reads as a specimen and not as a frozen frame of combat.
+ *
+ * `size` is the radius the portrait should fit into; bodies of different bulk are
+ * scaled to fill it equally, which is what makes a row of them comparable.
+ */
+export function drawBodyPortrait(
+  ctx: CanvasRenderingContext2D,
+  body: MonsterBody,
+  cx: number,
+  cy: number,
+  size: number,
+  t: number,
+): void {
+  // Everything hanging off the body — wings, horns, tails — reaches well past the
+  // core, so the core has to sit at a fraction of the box or the silhouette clips.
+  const r = size * 0.46;
+  const aim = -Math.PI / 2;
+
+  ctx.save();
+  ctx.translate(cx, cy);
+  ctx.scale(1, 1 + Math.sin(t * 2.4) * 0.03);
+
+  if (body.aura !== 'none' || body.glowStrength > 0.6) {
+    ctx.globalCompositeOperation = 'lighter';
+    const auraR = r * (2.4 + Math.sin(t * 3) * 0.12);
+    const grad = ctx.createRadialGradient(0, 0, r * 0.4, 0, 0, auraR);
+    grad.addColorStop(0, hexAlpha(body.glowColor, 0.3 * body.glowStrength));
+    grad.addColorStop(0.5, hexAlpha(body.glowColor, 0.1 * body.glowStrength));
+    grad.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(0, 0, auraR, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  ctx.save();
+  ctx.rotate(aim);
+  drawWings(ctx, body, r, t * 3, 0.15);
+  drawTails(ctx, body, r, t, 0.15);
+  ctx.restore();
+
+  drawLimbs(ctx, body, r, t * 2, 0, 0);
+  drawBlob(ctx, body, r, t);
+  drawSpikes(ctx, body, r, t);
+  drawHorns(ctx, body, r, aim);
+  drawMaw(ctx, body, r, aim, 0, t);
+  drawEyes(ctx, body, r, aim, t, 0);
+
+  ctx.restore();
+}
+
 // ---------------------------------------------------------------------------
 
 /** Irregular blob outline. Lobes wobble over time so the body never looks static. */

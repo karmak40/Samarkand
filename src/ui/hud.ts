@@ -2,6 +2,7 @@ import { DAMAGE_INFO } from '../combat/damage';
 import { STATUS_DEFS } from '../combat/status';
 import { clamp, TAU } from '../core/math';
 import type { Monster } from '../entities/monster';
+import { t } from '../i18n';
 import { RARITY, type SkillCard } from '../progression/skills';
 import type { RunStats } from '../stats/tracker';
 import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
@@ -39,6 +40,7 @@ export function drawHud(ui: Ui, state: HudState): void {
   drawProgress(ui, state);
   drawResources(ui, state);
   drawDash(ui, monster);
+  drawBoons(ui, state);
   drawBuild(ui, state);
   if (state.bossName) drawBossBar(ui, state);
   drawHints(ui, state);
@@ -132,7 +134,7 @@ function drawHealthCluster(ui: Ui, state: HudState): void {
 
   // Frenzy indicator.
   if (monster.isFrenzied) {
-    ui.text('НЕИСТОВСТВО', x, sy + (monster.statuses.size > 0 ? 34 : 8), {
+    ui.text(t('hud.frenzy'), x, sy + (monster.statuses.size > 0 ? 34 : 8), {
       size: 12,
       color: '#ffb347',
       bold: true,
@@ -145,9 +147,9 @@ function drawHealthCluster(ui: Ui, state: HudState): void {
 /**
  * Level and experience.
  *
- * Sits directly under the health bar because the two are read together, and the
- * "level ready" prompt has to be impossible to miss — banked levels are useless if
- * the player forgets they are holding them.
+ * Sits directly under the health bar because the two are read together. There is no
+ * "claim your level" prompt: the draft opens by itself the moment the bar fills, so
+ * the only job here is showing how close the next one is.
  */
 function drawExperience(ui: Ui, state: HudState): void {
   const { monster } = state;
@@ -161,7 +163,7 @@ function drawExperience(ui: Ui, state: HudState): void {
     radius: 2,
   });
 
-  ui.text(`ур. ${monster.level}`, x, y + 20, {
+  ui.text(t('hud.levelAbbrev', { n: monster.level }), x, y + 20, {
     size: 12,
     color: PALETTE.muted,
     baseline: 'middle',
@@ -173,31 +175,6 @@ function drawExperience(ui: Ui, state: HudState): void {
     y + 20,
     { size: 11, color: PALETTE.dim, align: 'right', baseline: 'middle' },
   );
-
-  if (monster.pendingLevels <= 0) return;
-
-  // Pulsing call to action. Position is fixed so muscle memory can find it.
-  const pulse = 0.65 + 0.35 * Math.sin(state.elapsed * 5);
-  const label =
-    monster.pendingLevels > 1
-      ? `ENTER — развитие ×${monster.pendingLevels}`
-      : 'ENTER — развитие';
-
-  const badge = rect(x, y + 32, 214, 26);
-  ui.panel(badge, {
-    fill: `rgba(60,44,18,${(0.55 + pulse * 0.3).toFixed(2)})`,
-    border: PALETTE.gold,
-    radius: 4,
-    shadow: false,
-  });
-  ui.text(label, badge.x + badge.w / 2, badge.y + badge.h / 2, {
-    size: 13,
-    color: PALETTE.gold,
-    align: 'center',
-    baseline: 'middle',
-    bold: true,
-    alpha: 0.75 + pulse * 0.25,
-  });
 }
 
 function drawProgress(ui: Ui, state: HudState): void {
@@ -212,7 +189,7 @@ function drawProgress(ui: Ui, state: HudState): void {
     outline: true,
   });
 
-  ui.text(`комната ${state.roomIndex + 1} / ${state.totalRooms}`, cx, 46, {
+  ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), cx, 46, {
     size: 11,
     color: PALETTE.muted,
     align: 'center',
@@ -226,7 +203,7 @@ function drawProgress(ui: Ui, state: HudState): void {
   const fraction = state.humansTotal > 0 ? state.humansAlive / state.humansTotal : 0;
   ui.bar(barRect, fraction, { color: '#8b2a30', radius: 2 });
 
-  const label = state.cleared ? 'ЗАЧИЩЕНО — ИДИ К ПОРТАЛУ' : `осталось ${state.humansAlive}`;
+  const label = state.cleared ? t('hud.cleared') : t('hud.remaining', { n: state.humansAlive });
   ui.text(label, cx, 76, {
     size: 12,
     color: state.cleared ? PALETTE.gold : PALETTE.muted,
@@ -250,12 +227,12 @@ function drawResources(ui: Ui, state: HudState): void {
     baseline: 'middle',
     bold: true,
   });
-  ui.text('душ', x - 86, 26, { size: 12, color: PALETTE.muted, baseline: 'middle' });
+  ui.text(t('hud.soulsLabel'), x - 86, 26, { size: 12, color: PALETTE.muted, baseline: 'middle' });
 
   const rows: Array<[string, string]> = [
-    ['убито', `${tracker.totalKills}`],
-    ['время', formatTime(tracker.elapsed)],
-    ['урон', formatNumber(tracker.totalDamageDealt)],
+    [t('hud.killedShort'), `${tracker.totalKills}`],
+    [t('hud.timeShort'), formatTime(tracker.elapsed)],
+    [t('hud.damageShort'), formatNumber(tracker.totalDamageDealt)],
     ['DPS', formatNumber(tracker.averageDps)],
   ];
 
@@ -302,7 +279,64 @@ function drawDash(ui: Ui, monster: Monster): void {
     ui.ctx.restore();
   }
 
-  ui.text('ПРОБЕЛ — рывок', x - 6, y + 22, { size: 11, color: PALETTE.dim, baseline: 'middle' });
+  ui.text(t('hint.dash'), x - 6, y + 22, { size: 11, color: PALETTE.dim, baseline: 'middle' });
+}
+
+/**
+ * Active temporary forms, bottom-centre.
+ *
+ * A boon changes how the monster plays as much as how it looks, so its remaining
+ * time needs to be readable at a glance — the bar drains and the whole chip flashes
+ * over the last three seconds.
+ */
+function drawBoons(ui: Ui, state: HudState): void {
+  const boons = state.monster.activeBoons;
+  if (boons.length === 0) return;
+
+  const chipW = 150;
+  const chipH = 34;
+  const gap = 8;
+  const totalW = boons.length * chipW + (boons.length - 1) * gap;
+  const startX = (ui.width - totalW) / 2;
+  const y = ui.height - 86;
+
+  boons.forEach((boon, i) => {
+    const x = startX + i * (chipW + gap);
+    const fraction = clamp(boon.remaining / boon.total, 0, 1);
+    const expiring = boon.remaining < 3;
+    const flash = expiring ? 0.55 + 0.45 * Math.sin(state.elapsed * 12) : 1;
+
+    ui.panel(rect(x, y, chipW, chipH), {
+      fill: 'rgba(12,11,15,0.86)',
+      border: boon.def.color,
+      radius: 4,
+      shadow: false,
+    });
+
+    ui.text(boon.def.name, x + chipW / 2, y + 12, {
+      size: 12,
+      color: boon.def.color,
+      align: 'center',
+      baseline: 'middle',
+      bold: true,
+      alpha: flash,
+    });
+
+    ui.bar(rect(x + 8, y + 22, chipW - 16, 5), fraction, {
+      color: boon.def.color,
+      background: 'rgba(0,0,0,0.6)',
+      radius: 2,
+      border: false,
+    });
+
+    ui.text(`${Math.ceil(boon.remaining)}`, x + chipW - 6, y + 12, {
+      size: 11,
+      color: expiring ? PALETTE.bad : PALETTE.dim,
+      align: 'right',
+      baseline: 'middle',
+      alpha: flash,
+    });
+  });
 }
 
 function drawBuild(ui: Ui, state: HudState): void {
@@ -355,7 +389,7 @@ function drawBuild(ui: Ui, state: HudState): void {
     if (zone.hovered) drawSkillTooltip(ui, entry.card, entry.stacks, x + size / 2, y - 8);
   });
 
-  ui.text('TAB — статистика', right, bottom - rows * (size + gap) - 12, {
+  ui.text(t('hint.buildSheet'), right, bottom - rows * (size + gap) - 12, {
     size: 11,
     color: PALETTE.dim,
     align: 'right',
@@ -445,7 +479,7 @@ function drawHints(ui: Ui, state: HudState): void {
 
   const alpha = state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > 11 ? (14 - state.elapsed) / 3 : 1;
 
-  ui.text('ТЫ БЬЁШЬ САМ — ДАЖЕ НА БЕГУ', ui.width / 2, ui.height - 120, {
+  ui.text(t('hint.autoAttackTitle'), ui.width / 2, ui.height - 120, {
     size: 16,
     color: PALETTE.gold,
     align: 'center',
@@ -454,7 +488,7 @@ function drawHints(ui: Ui, state: HudState): void {
     alpha: clamp(alpha, 0, 1),
     outline: true,
   });
-  ui.text('WASD — движение · остановишься — бьёшь точнее', ui.width / 2, ui.height - 98, {
+  ui.text(t('hint.autoAttackSub'), ui.width / 2, ui.height - 98, {
     size: 12,
     color: PALETTE.muted,
     align: 'center',

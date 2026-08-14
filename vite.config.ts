@@ -1,3 +1,4 @@
+/// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
 import { mkdirSync, writeFileSync } from 'node:fs';
@@ -60,11 +61,21 @@ export default defineConfig({
     },
   },
   server: {
-    port: 5173,
+    // Honour PORT when the launcher assigns one, so two sessions can serve the
+    // project side by side; otherwise fall back to Vite's usual port.
+    port: process.env.PORT ? Number(process.env.PORT) : 5173,
     strictPort: false,
   },
   build: {
     target: 'es2022',
     outDir: 'dist',
+  },
+  test: {
+    include: ['src/**/*.test.ts'],
+    // Save migration and profile tests need a localStorage; jsdom is the cheapest way
+    // to get one without stubbing the API and testing the stub instead.
+    environment: 'jsdom',
+    setupFiles: ['./src/test-setup.ts'],
+    restoreMocks: true,
   },
 });

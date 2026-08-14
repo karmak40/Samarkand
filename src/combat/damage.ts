@@ -1,3 +1,5 @@
+import { t } from '../i18n';
+
 /**
  * Damage model.
  *
@@ -45,59 +47,59 @@ export interface DamageTypeInfo {
 export const DAMAGE_INFO: Record<DamageType, DamageTypeInfo> = {
   physical: {
     id: 'physical',
-    name: 'Физический',
+    get name() { return t('damageType.physical.name'); },
     color: '#d9cfbc',
     glow: '#fffaf0',
-    description: 'Когти и клыки. Снижается бронёй противника.',
+    get description() { return t('damageType.physical.description'); },
   },
   fire: {
     id: 'fire',
-    name: 'Огонь',
+    get name() { return t('damageType.fire.name'); },
     color: '#ff7b31',
     glow: '#ffd27a',
-    description: 'Поджигает: урон по времени, который складывается в стаки.',
+    get description() { return t('damageType.fire.description'); },
   },
   poison: {
     id: 'poison',
-    name: 'Яд',
+    get name() { return t('damageType.poison.name'); },
     color: '#8ed44f',
     glow: '#d4ff9a',
-    description: 'Долгий урон, игнорирует броню. Чем больше стаков — тем быстрее.',
+    get description() { return t('damageType.poison.description'); },
   },
   frost: {
     id: 'frost',
-    name: 'Мороз',
+    get name() { return t('damageType.frost.name'); },
     color: '#6fd0ff',
     glow: '#cdf1ff',
-    description: 'Замедляет. При полном охлаждении цель замерзает.',
+    get description() { return t('damageType.frost.description'); },
   },
   lightning: {
     id: 'lightning',
-    name: 'Молния',
+    get name() { return t('damageType.lightning.name'); },
     color: '#ffe45c',
     glow: '#fffbd0',
-    description: 'Бьёт по цепи между врагами и оглушает.',
+    get description() { return t('damageType.lightning.description'); },
   },
   unholy: {
     id: 'unholy',
-    name: 'Скверна',
+    get name() { return t('damageType.unholy.name'); },
     color: '#b06cff',
     glow: '#e6ccff',
-    description: 'Проклинает: цель получает больше урона всех типов.',
+    get description() { return t('damageType.unholy.description'); },
   },
   holy: {
     id: 'holy',
-    name: 'Свет',
+    get name() { return t('damageType.holy.name'); },
     color: '#fff2b8',
     glow: '#ffffff',
-    description: 'Оружие жрецов. Особенно болезненно для порождений тьмы.',
+    get description() { return t('damageType.holy.description'); },
   },
   true: {
     id: 'true',
-    name: 'Чистый',
+    get name() { return t('damageType.true.name'); },
     color: '#ffffff',
     glow: '#ffffff',
-    description: 'Не снижается ничем.',
+    get description() { return t('damageType.true.description'); },
   },
 };
 

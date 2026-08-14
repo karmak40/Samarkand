@@ -1,0 +1,70 @@
+name: CI
+
+# Everything that can be checked without a human looking at the screen. What it
+# cannot check is how the game feels — that is still a person playing it.
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  check:
+    name: Types, lint, unit tests
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Test
+        run: npm test
+
+      - name: Build
+        run: npx vite build
+
+      # A dependency advisory is worth a red build: this ships to a browser.
+      - name: Audit
+        run: npm audit --audit-level=high
+
+  browsers:
+    name: ${{ matrix.browser }}
+    runs-on: ubuntu-latest
+    # One job per engine rather than one job running all three: a WebKit-only failure
+    # should say "WebKit" on the pull request, not "browsers".
+    strategy:
+      fail-fast: false
+      matrix:
+        browser: [chromium, firefox, webkit]
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 22
+          cache: npm
+
+      - run: npm ci
+
+      - name: Install ${{ matrix.browser }}
+        run: npx playwright install --with-deps ${{ matrix.browser }}
+
+      - name: Run
+        run: npx playwright test --project=${{ matrix.browser }}
+
+      - uses: actions/upload-artifact@v4
+        if: failure()
+        with:
+          name: playwright-report-${{ matrix.browser }}
+          path: playwright-report/
+          retention-days: 7

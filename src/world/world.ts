@@ -16,13 +16,16 @@ import {
   TAU,
 } from '../core/math';
 import { RNG } from '../core/rng';
+import { t } from '../i18n';
 import { Combatant, type DeathContext, type Entity } from '../entities/entity';
 import type { Building } from '../entities/building';
 import type { Human, HumanId } from '../entities/human';
 import type { Monster } from '../entities/monster';
 import { Pickup, type PickupKind } from '../entities/pickup';
 import { rollBoon } from '../progression/boons';
+import { type ContentGate, OPEN_GATE } from '../progression/gate';
 import { Projectile, type ProjectileConfig } from '../entities/projectile';
+import { type SoundBank } from '../audio/sfx';
 import { DecalLayer, FloatingTextSystem, ParticleSystem } from '../render/effects';
 import type { RunStats } from '../stats/tracker';
 
@@ -38,6 +41,10 @@ export class World {
   readonly rng: RNG;
   readonly tracker: RunStats;
   readonly camera: Camera;
+  /** Shared across runs; entities reach audio through the world like everything else. */
+  readonly sound: SoundBank;
+  /** Which relics this profile has unlocked. Assigned by the run. */
+  contentGate: ContentGate = OPEN_GATE;
 
   /** Assigned by the game once the monster exists; never null during play. */
   monster!: Monster;
@@ -92,10 +99,11 @@ export class World {
   /** Why monster projectiles stopped. Surfaced in the debug snapshot only. */
   readonly shotOutcomes = { hitBuilding: 0, outOfRange: 0, leftBounds: 0 };
 
-  constructor(rng: RNG, tracker: RunStats, camera: Camera) {
+  constructor(rng: RNG, tracker: RunStats, camera: Camera, sound: SoundBank) {
     this.rng = rng;
     this.tracker = tracker;
     this.camera = camera;
+    this.sound = sound;
   }
 
   // ---- setup ---------------------------------------------------------------
@@ -287,11 +295,12 @@ export class World {
    */
   spawnBoon(x: number, y: number): void {
     const active = new Set(this.monster.activeBoons.map((b) => b.def.id));
-    const def = rollBoon(this.rng, active);
+    const def = rollBoon(this.rng, active, this.contentGate);
     const pickup = new Pickup('boon', x, y, 1, def);
     this.pickups.push(pickup);
 
     this.particles.ring(x, y, def.color, 70, 0.6);
+    this.sound.portal({ x, y });
   }
 
   spawnPickup(kind: PickupKind, x: number, y: number, value: number): void {
@@ -347,6 +356,7 @@ export class World {
     });
     this.decals.scorch(x, y, radius * 0.7);
     this.camera.shake(shake);
+    this.sound.explosion({ x, y }, radius / 160);
 
     for (const human of this.humansInRadius(x, y, radius)) {
       const d = Math.hypot(human.x - x, human.y - y);
@@ -419,6 +429,7 @@ export class World {
       current = current.map((p) => ({ type: p.type, amount: p.amount * falloffPerJump }));
 
       this.arcs.push({ x1: source.x, y1: source.y, x2: next.x, y2: next.y, life: 0.14 });
+      this.sound.lightning(next);
       next.takeDamage(
         { packets: current, sourceLabel, kind: 'chain', dodgeable: false },
         this,
@@ -588,6 +599,8 @@ export class World {
     if (target.faction === 'human') {
       this.tracker.recordDamageDealt(result.byType, result.total, options.sourceLabel, result.crit);
       if (options.kind === 'attack') this.tracker.projectilesHit++;
+      // Damage over time ticks constantly; only real impacts get a sound.
+      if (options.kind !== 'dot') this.sound.hit(target, result.crit);
 
       const dirX = options.dirX ?? 0;
       const dirY = options.dirY ?? 0;
@@ -610,10 +623,11 @@ export class World {
       this.tracker.recordDamageTaken(result.byType, result.total, options.sourceLabel);
       this.camera.shake(Math.min(9, 2 + result.total * 0.12));
       this.camera.freeze(Math.min(0.09, result.total * 0.002));
+      this.sound.hurt(target, result.total / Math.max(1, target.maxHp * 0.3));
     }
 
     if (attacker && attacker.faction === 'monster' && options.lifesteal) {
-      const healed = attacker.heal(result.total * options.lifesteal, this, 'Вампиризм');
+      const healed = attacker.heal(result.total * options.lifesteal, this, t('effect.vampirism'));
       if (healed > 0) this.tracker.lifestealHealing += healed;
     }
   }
@@ -636,7 +650,8 @@ export class World {
   }
 
   onDodge(target: Combatant): void {
-    this.texts.add(target.x, target.y - target.radius - 8, 'мимо', '#9fb4c7', 13);
+    this.texts.add(target.x, target.y - target.radius - 8, t('effect.dodgeText'), '#9fb4c7', 13);
+    this.sound.dodge(target);
     if (target.faction === 'monster') this.tracker.dodgesPerformed++;
   }
 

@@ -1,6 +1,7 @@
 import { type Rect, TAU } from '../core/math';
 import { RNG } from '../core/rng';
 import type { RoomPlan } from '../world/roomgen';
+import { blitVisible } from './blit';
 
 /**
  * Bakes the ground for a room into a single offscreen canvas.
@@ -299,8 +300,8 @@ export class Terrain {
     }
   }
 
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(ctx: CanvasRenderingContext2D, view: Rect): void {
     if (!this.canvas) return;
-    ctx.drawImage(this.canvas, this.origin.x, this.origin.y);
+    blitVisible(ctx, this.canvas, this.origin, view);
   }
 }

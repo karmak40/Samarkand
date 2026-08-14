@@ -1,6 +1,7 @@
 import { type DamageOptions, type DamagePacket, type DamageResult, type Defenses, type DamageType } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
 import { angleDelta, clamp, damp, dist2, TAU } from '../core/math';
+import { t } from '../i18n';
 import type { World } from '../world/world';
 import { Combatant, type DeathContext } from './entity';
 
@@ -16,7 +17,14 @@ export type HumanId =
   | 'priest'
   | 'knight'
   | 'ballista'
-  | 'inquisitor';
+  | 'inquisitor'
+  | 'warlord'
+  | 'pyromancer';
+
+/** Every boss the run can end on. One is drawn per run from the seed. */
+export const BOSS_IDS = ['inquisitor', 'warlord', 'pyromancer'] as const;
+
+export type BossId = (typeof BOSS_IDS)[number];
 
 export interface HumanArchetype {
   readonly id: HumanId;
@@ -49,6 +57,8 @@ export interface HumanArchetype {
   readonly minDepth: number;
   /** Chance to drop a blood (healing) orb. */
   readonly bloodChance: number;
+  /** Chance this unit drops a relic granting a temporary form. */
+  readonly relicChance: number;
   readonly courage: number;
 }
 
@@ -57,7 +67,7 @@ const NO_RESIST: Partial<Record<DamageType, number>> = {};
 export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
   peasant: {
     id: 'peasant',
-    name: 'Крестьянин',
+    get name() { return t('enemy.peasant.name'); },
     role: 'civilian',
     hp: 22,
     armor: 0,
@@ -77,11 +87,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 30,
     minDepth: 0,
     bloodChance: 0.18,
+    relicChance: 0,
     courage: 0,
   },
   militia: {
     id: 'militia',
-    name: 'Ополченец',
+    get name() { return t('enemy.militia.name'); },
     role: 'melee',
     hp: 52,
     armor: 6,
@@ -101,11 +112,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 26,
     minDepth: 0,
     bloodChance: 0.1,
+    relicChance: 0,
     courage: 0.5,
   },
   archer: {
     id: 'archer',
-    name: 'Лучник',
+    get name() { return t('enemy.archer.name'); },
     role: 'ranged',
     hp: 40,
     armor: 2,
@@ -125,11 +137,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 20,
     minDepth: 0,
     bloodChance: 0.1,
+    relicChance: 0,
     courage: 0.35,
   },
   spearman: {
     id: 'spearman',
-    name: 'Копейщик',
+    get name() { return t('enemy.spearman.name'); },
     role: 'melee',
     hp: 78,
     armor: 14,
@@ -149,11 +162,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 16,
     minDepth: 1,
     bloodChance: 0.12,
+    relicChance: 0.03,
     courage: 0.7,
   },
   crossbowman: {
     id: 'crossbowman',
-    name: 'Арбалетчик',
+    get name() { return t('enemy.crossbowman.name'); },
     role: 'ranged',
     hp: 54,
     armor: 8,
@@ -173,11 +187,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 12,
     minDepth: 2,
     bloodChance: 0.12,
+    relicChance: 0.05,
     courage: 0.5,
   },
   torchbearer: {
     id: 'torchbearer',
-    name: 'Факельщик',
+    get name() { return t('enemy.torchbearer.name'); },
     role: 'melee',
     hp: 46,
     armor: 2,
@@ -197,15 +212,16 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     knockbackResist: 0.8,
     tunic: '#7a4a2e',
     accent: '#ff9a3c',
-    onHitStatuses: [{ id: 'burn', duration: 4, stacks: 2, power: 2.5, sourceLabel: 'Факел' }],
+    onHitStatuses: [{ id: 'burn', duration: 4, stacks: 2, power: 2.5, get sourceLabel() { return t('effect.torch'); } }],
     spawnWeight: 14,
     minDepth: 2,
     bloodChance: 0.1,
+    relicChance: 0.03,
     courage: 0.6,
   },
   priest: {
     id: 'priest',
-    name: 'Жрец',
+    get name() { return t('enemy.priest.name'); },
     role: 'support',
     hp: 66,
     armor: 4,
@@ -225,11 +241,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 10,
     minDepth: 3,
     bloodChance: 0.2,
+    relicChance: 0.14,
     courage: 0.8,
   },
   knight: {
     id: 'knight',
-    name: 'Рыцарь',
+    get name() { return t('enemy.knight.name'); },
     role: 'melee',
     hp: 190,
     armor: 46,
@@ -249,11 +266,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 8,
     minDepth: 4,
     bloodChance: 0.25,
+    relicChance: 0.22,
     courage: 1,
   },
   ballista: {
     id: 'ballista',
-    name: 'Баллиста',
+    get name() { return t('enemy.ballista.name'); },
     role: 'turret',
     hp: 120,
     armor: 20,
@@ -273,11 +291,12 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 0,
     minDepth: 4,
     bloodChance: 0,
+    relicChance: 0.08,
     courage: 1,
   },
   inquisitor: {
     id: 'inquisitor',
-    name: 'Инквизитор',
+    get name() { return t('enemy.inquisitor.name'); },
     role: 'boss',
     hp: 1400,
     armor: 40,
@@ -297,6 +316,74 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     spawnWeight: 0,
     minDepth: 99,
     bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
+
+  /**
+   * The Warlord: a pure bruiser.
+   *
+   * Where the Inquisitor punishes standing still, this one punishes standing
+   * anywhere near it. Heavy armour and physical resistance mean an elemental build
+   * handles it far better than a claws-and-crits one.
+   */
+  warlord: {
+    id: 'warlord',
+    get name() { return t('enemy.warlord.name'); },
+    role: 'boss',
+    hp: 1750,
+    armor: 75,
+    resist: { physical: 0.3, frost: 0.2 },
+    speed: 142,
+    radius: 24,
+    damage: [{ type: 'physical', amount: 34 }],
+    attackRange: 74,
+    preferredRange: 66,
+    attackCooldown: 1.5,
+    windup: 0.6,
+    recover: 0.55,
+    souls: 85,
+    knockbackResist: 12,
+    tunic: '#6b3b2e',
+    accent: '#c8cdd6',
+    onHitStatuses: [{ id: 'bleed', duration: 6, stacks: 3, power: 3, sourceLabel: 'Warlord' }],
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
+
+  /**
+   * The Pyromancer: fragile, but turns the arena itself against you.
+   *
+   * Low armour and the least health of the three — the difficulty is in the floor
+   * catching fire, not in the health bar.
+   */
+  pyromancer: {
+    id: 'pyromancer',
+    get name() { return t('enemy.pyromancer.name'); },
+    role: 'boss',
+    hp: 1150,
+    armor: 18,
+    resist: { fire: 0.9, poison: 0.3 },
+    speed: 130,
+    radius: 20,
+    damage: [{ type: 'fire', amount: 26 }],
+    attackRange: 430,
+    preferredRange: 300,
+    attackCooldown: 1.5,
+    windup: 0.55,
+    recover: 0.45,
+    souls: 80,
+    knockbackResist: 5,
+    tunic: '#8a3417',
+    accent: '#ff9a3c',
+    onHitStatuses: [{ id: 'burn', duration: 5, stacks: 3, power: 4, sourceLabel: 'Pyromancer' }],
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
     courage: 1,
   },
 };
@@ -334,6 +421,8 @@ export class Human extends Combatant {
   private timeSinceAttack = 0;
   /** Seconds left of a stalemate-breaking charge straight at the monster. */
   private charging = 0;
+  /** Edge-detects the freeze status so the ice sound plays once, not every frame. */
+  private wasFrozen = false;
 
   // --- obstacle avoidance ---------------------------------------------------
   /** Seconds spent trying to move but going nowhere (walking into a wall). */
@@ -410,6 +499,7 @@ export class Human extends Combatant {
     const a = this.archetype;
 
     world.tracker.recordKill(a.id, a.name, ctx.sourceLabel, ctx.overkill);
+    world.sound.kill(this, Math.min(1, this.maxHp / 400));
 
     world.particles.emit({
       count: a.role === 'boss' ? 60 : 14,
@@ -427,6 +517,10 @@ export class Human extends Combatant {
     world.spawnPickup('soul', this.x, this.y, a.souls * (1 + this.tier * 0.1));
     if (world.rng.next() < a.bloodChance) {
       world.spawnPickup('blood', this.x, this.y, 6 + this.tier);
+    }
+    // Champions carry relics. Killing the knight is worth the risk beyond its souls.
+    if (a.relicChance > 0 && world.rng.next() < a.relicChance) {
+      world.spawnBoon(this.x, this.y);
     }
 
     if (a.role === 'boss') world.camera.shake(16);
@@ -489,10 +583,16 @@ export class Human extends Combatant {
     }
 
     if (this.statuses.isIncapacitated()) {
+      // Ring the ice only on the transition, not every frame it stays frozen.
+      if (!this.wasFrozen) {
+        this.wasFrozen = true;
+        world.sound.freeze(this);
+      }
       this.decelerate(dt);
       this.integrate(dt, world);
       return;
     }
+    this.wasFrozen = false;
 
     const feared = this.statuses.isFeared() || this.panic > 0.75;
     if (this.archetype.role === 'boss') this.updateBoss(dt, world, distance);
@@ -525,7 +625,7 @@ export class Human extends Combatant {
         this.decelerate(dt, 5);
         this.state = 'flee';
         if (world.rng.next() < dt * 0.8) {
-          world.texts.add(this.x, this.y - this.radius * 2, 'не могу…', '#8b8578', 11);
+          world.texts.add(this.x, this.y - this.radius * 2, t('text.exhausted'), '#8b8578', 11);
         }
         this.advanceAttack(dt, world, distance);
         return;
@@ -556,7 +656,7 @@ export class Human extends Combatant {
       distance < this.archetype.attackRange &&
       this.attackCooldown <= 0
     ) {
-      this.beginAttack();
+      this.beginAttack(world);
     }
     this.advanceAttack(dt, world, distance);
   }
@@ -583,7 +683,7 @@ export class Human extends Combatant {
       this.moveToward(toMonster, dt, 1.15);
       this.facing = damp(this.facing, toMonster, 10, dt);
       if (this.attackCooldown <= 0 && distance <= a.attackRange && (a.role !== 'ranged' || hasLos)) {
-        this.beginAttack();
+        this.beginAttack(world);
       }
       this.advanceAttack(dt, world, distance);
       return;
@@ -639,7 +739,7 @@ export class Human extends Combatant {
       distance <= a.attackRange &&
       (a.role !== 'ranged' || hasLos);
 
-    if (canAttack) this.beginAttack();
+    if (canAttack) this.beginAttack(world);
     this.advanceAttack(dt, world, distance);
 
     this.facing = damp(this.facing, toMonster, 10, dt);
@@ -654,7 +754,7 @@ export class Human extends Combatant {
     if (wounded && this.attackCooldown <= 0) {
       this.attackCooldown = a.attackCooldown;
       const healAmount = 18 * (1 + this.tier * 0.2);
-      wounded.heal(healAmount, world, 'Молитва');
+      wounded.heal(healAmount, world, t('effect.prayer'));
       world.particles.emit({
         count: 12,
         x: wounded.x,
@@ -681,7 +781,7 @@ export class Human extends Combatant {
       distance <= a.attackRange &&
       world.hasLineOfSight(this.x, this.y, monster.x, monster.y)
     ) {
-      this.beginAttack();
+      this.beginAttack(world);
     }
     this.advanceAttack(dt, world, distance);
     this.facing = damp(this.facing, toMonster, 8, dt);
@@ -712,15 +812,174 @@ export class Human extends Combatant {
     }
 
     if (this.state !== 'windup' && this.state !== 'recover' && this.attackCooldown <= 0) {
-      if (distance <= a.attackRange) this.beginAttack();
+      if (distance <= a.attackRange) this.beginAttack(world);
     }
     this.advanceAttack(dt, world, distance);
     this.facing = damp(this.facing, toMonster, 7, dt);
   }
 
+  /**
+   * Boss abilities.
+   *
+   * Each boss cycles its own set of three, so which one the run ends on changes how
+   * the last fight is played rather than just how much health it has.
+   */
   private castSpecial(world: World): void {
-    const monster = world.monster;
     this.specialIndex = (this.specialIndex + 1) % 3;
+
+    switch (this.archetype.id) {
+      case 'warlord':
+        this.castWarlord(world);
+        return;
+      case 'pyromancer':
+        this.castPyromancer(world);
+        return;
+      default:
+        this.castInquisitor(world);
+    }
+  }
+
+  /** Melee pressure: a leap, an expanding shockwave, and a bodyguard call. */
+  private castWarlord(world: World): void {
+    const monster = world.monster;
+    const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
+
+    switch (this.specialIndex) {
+      case 0: {
+        // Telegraphed leap. The landing is what hurts, so it can be walked out of.
+        const tx = monster.x;
+        const ty = monster.y;
+        world.particles.ring(tx, ty, '#e0655f', 120, 0.75, true);
+        world.sound.enemyWindup(this, 0.7);
+        world.scheduleDelayed?.(0.75, (w) => {
+          if (!this.alive) return;
+          this.x = tx;
+          this.y = ty;
+          w.collideWithWorld(this);
+          w.explode(
+            tx,
+            ty,
+            130,
+            [{ type: 'physical', amount: 46 * this.damageScale }],
+            t('effect.warlordLeap'),
+            { color: '#e0655f', knockback: 320, shake: 11 },
+          );
+        });
+        break;
+      }
+      case 1: {
+        // Shockwave: a ring of low projectiles racing outward along the ground.
+        const count = 18;
+        for (let i = 0; i < count; i++) {
+          const a = (i / count) * TAU;
+          world.spawnProjectile({
+            x: this.x + Math.cos(a) * 30,
+            y: this.y + Math.sin(a) * 30,
+            angle: a,
+            speed: 300,
+            packets: [{ type: 'physical', amount: 20 * this.damageScale }],
+            faction: 'human',
+            sourceLabel: t('effect.shockwave'),
+            radius: 9,
+            range: 700,
+            color: '#c8a08a',
+            glow: '#f0d8c0',
+            shape: 'rock',
+            owner: this,
+            knockback: 90,
+            ignoresWalls: true,
+          });
+        }
+        world.camera.shake(9);
+        break;
+      }
+      default: {
+        // Bodyguards, not a swarm: two knights are a real problem on their own.
+        for (let i = 0; i < 2; i++) {
+          const a = angle + Math.PI + (i - 0.5) * 0.9;
+          world.spawnHuman?.('knight', this.x + Math.cos(a) * 80, this.y + Math.sin(a) * 80, this.tier);
+        }
+        world.texts.add(this.x, this.y - 40, t('text.warlordRally'), '#e0655f', 18);
+        break;
+      }
+    }
+  }
+
+  /** Zone control: burning ground, a fan of bolts, and a ring of fire. */
+  private castPyromancer(world: World): void {
+    const monster = world.monster;
+    const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const power = this.damageScale;
+
+    switch (this.specialIndex) {
+      case 0: {
+        // A trail of fire pools walking toward the player, cutting the arena in two.
+        for (let i = 1; i <= 5; i++) {
+          const distance = i * 110;
+          const x = this.x + Math.cos(angle) * distance;
+          const y = this.y + Math.sin(angle) * distance;
+          world.scheduleDelayed?.(i * 0.14, (w) => {
+            w.addGroundHazard({
+              x,
+              y,
+              radius: 74,
+              life: 6,
+              dps: 26 * power,
+              type: 'fire',
+              color: '#ff7b31',
+              sourceLabel: t('effect.firewall'),
+              status: { id: 'burn', duration: 4, stacks: 2, power: 4 * power, sourceLabel: t('effect.firewall') },
+            });
+          });
+        }
+        break;
+      }
+      case 1: {
+        // Fan of bolts: dodgeable sideways, punishing if you back straight up.
+        for (let i = -3; i <= 3; i++) {
+          world.spawnProjectile({
+            x: this.x + Math.cos(angle) * 24,
+            y: this.y + Math.sin(angle) * 24,
+            angle: angle + i * 0.17,
+            speed: 380,
+            packets: [{ type: 'fire', amount: 18 * power }],
+            faction: 'human',
+            sourceLabel: t('effect.emberFan'),
+            radius: 7,
+            range: 800,
+            color: '#ff7b31',
+            glow: '#ffd27a',
+            shape: 'spit',
+            owner: this,
+            statuses: [{ id: 'burn', duration: 4, stacks: 1, power: 3 * power, sourceLabel: t('effect.emberFan') }],
+          });
+        }
+        break;
+      }
+      default: {
+        // Ring of fire around itself — you cannot simply stand on top of it.
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * TAU;
+          world.addGroundHazard({
+            x: this.x + Math.cos(a) * 110,
+            y: this.y + Math.sin(a) * 110,
+            radius: 70,
+            life: 7,
+            dps: 22 * power,
+            type: 'fire',
+            color: '#ff7b31',
+            sourceLabel: t('effect.pyreRing'),
+          });
+        }
+        world.particles.ring(this.x, this.y, '#ff7b31', 150, 0.8);
+        world.texts.add(this.x, this.y - 40, t('text.pyreRises'), '#ffd27a', 18);
+        break;
+      }
+    }
+  }
+
+  private castInquisitor(world: World): void {
+    const monster = world.monster;
 
     switch (this.specialIndex) {
       case 0: {
@@ -737,7 +996,7 @@ export class Human extends Combatant {
             speed: 210,
             packets: [{ type: 'holy', amount: 22 * this.damageScale }],
             faction: 'human',
-            sourceLabel: 'Кара небесная',
+            sourceLabel: t('effect.divineJudgment'),
             radius: 7,
             range: 900,
             color: '#ffe9a8',
@@ -761,7 +1020,7 @@ export class Human extends Combatant {
             ty,
             110,
             [{ type: 'holy', amount: 40 * this.damageScale }],
-            'Освящение',
+            t('effect.consecration'),
             { color: '#ffe9a8', hurtsBuildings: false, shake: 7 },
           );
         });
@@ -778,7 +1037,7 @@ export class Human extends Combatant {
             this.tier,
           );
         }
-        world.texts.add(this.x, this.y - 40, 'СВЕТ ПРИЗЫВАЕТ', '#ffe9a8', 18);
+        world.texts.add(this.x, this.y - 40, t('text.lightCalls'), '#ffe9a8', 18);
         break;
       }
     }
@@ -786,7 +1045,10 @@ export class Human extends Combatant {
 
   // ---- attack pipeline -----------------------------------------------------
 
-  private beginAttack(): void {
+  private beginAttack(world: World): void {
+    // The audio telegraph matters as much as the visual arc: it is what lets you
+    // react to a swing coming from off-screen.
+    world.sound.enemyWindup(this, this.archetype.windup);
     this.state = 'windup';
     this.stateTimer = this.archetype.windup;
     this.windupProgress = 0;
@@ -848,6 +1110,7 @@ export class Human extends Combatant {
         knockback: 30,
       });
 
+      world.sound.enemyShot(this);
       world.particles.emit({
         count: 3,
         x: this.x,
@@ -883,6 +1146,7 @@ export class Human extends Combatant {
     );
 
     for (const status of a.onHitStatuses ?? []) monster.statuses.apply(status);
+    world.sound.enemyMelee(this);
 
     world.particles.emit({
       count: 6,
@@ -1194,6 +1458,40 @@ export class Human extends Combatant {
         ctx.moveTo(-4, this.radius * 0.1);
         ctx.lineTo(4, this.radius * 0.1);
         ctx.stroke();
+        break;
+      }
+
+      case 'warlord': {
+        // A two-handed maul: a long haft with a heavy head.
+        ctx.strokeStyle = '#4a3a2c';
+        ctx.lineWidth = 3.5;
+        ctx.beginPath();
+        ctx.moveTo(-8, 0);
+        ctx.lineTo(this.radius * 1.9, 0);
+        ctx.stroke();
+        ctx.fillStyle = a.accent;
+        ctx.fillRect(this.radius * 1.7, -7, 12, 14);
+        break;
+      }
+
+      case 'pyromancer': {
+        // A burning brand held out front.
+        ctx.strokeStyle = '#3a2a1e';
+        ctx.lineWidth = 3;
+        ctx.beginPath();
+        ctx.moveTo(-6, 0);
+        ctx.lineTo(this.radius * 1.4, 0);
+        ctx.stroke();
+        ctx.globalCompositeOperation = 'lighter';
+        const fire = ctx.createRadialGradient(this.radius * 1.6, 0, 0, this.radius * 1.6, 0, 16);
+        fire.addColorStop(0, '#fff0b0');
+        fire.addColorStop(0.4, '#ff7b31');
+        fire.addColorStop(1, 'rgba(255,120,40,0)');
+        ctx.fillStyle = fire;
+        ctx.beginPath();
+        ctx.arc(this.radius * 1.6, 0, 16, 0, TAU);
+        ctx.fill();
+        ctx.globalCompositeOperation = 'source-over';
         break;
       }
 

@@ -56,6 +56,10 @@ export function autoplay({ ticks = 20000, chaseDistance = 170, dash = true } = {
 
   const events = [];
   const roomTimes = [];
+  /** Which stop kinds the bot chose, for checking the map is actually branching. */
+  const mapChoices = [];
+  /** One purchase per shop visit, keyed by screen and depth. */
+  const visitedScreens = new Set();
   let lastRoom = -1;
   let lastCleared = false;
   let lastState = '';
@@ -105,10 +109,32 @@ export function autoplay({ ticks = 20000, chaseDistance = 170, dash = true } = {
     if (s.state === 'results' || s.state === 'menu') break;
     if (s.state === 'pause') { input.tap('Escape', game); continue; }
 
-    // Skill cards now come from levels, spent whenever the player chooses.
-    if (s.pendingLevels > 0) {
+    // Run map: walk the route. Prefer an elite when healthy, a market when hurt —
+    // enough of a policy to exercise every branch across a few runs.
+    if (s.state === 'map') {
       input.setKeys([]);
-      input.tap('Enter', game);
+      const options = s.options || [];
+      if (options.length === 0) break;
+      const hurt = s.hp < s.maxHp * 0.5;
+      const wanted = hurt
+        ? options.find((o) => o.kind === 'market') ?? options[0]
+        : options.find((o) => o.kind === 'elite') ?? options[0];
+      const ordered = [...options].sort((a, b) => a.lane - b.lane);
+      const slot = ordered.indexOf(wanted) + 1;
+      input.tap('Digit' + Math.min(3, Math.max(1, slot)), game);
+      mapChoices.push(wanted.kind);
+      continue;
+    }
+
+    // Shops and altars: take the first thing on offer, then leave.
+    if (s.state === 'market' || s.state === 'cursed') {
+      input.setKeys([]);
+      if (visitedScreens.has(s.state + ':' + s.room)) {
+        input.tap('Escape', game);
+      } else {
+        visitedScreens.add(s.state + ':' + s.room);
+        input.tap('Digit1', game);
+      }
       continue;
     }
 
@@ -124,8 +150,18 @@ export function autoplay({ ticks = 20000, chaseDistance = 170, dash = true } = {
 
     if (dashCooldown > 0) dashCooldown--;
 
+    // Detour for a relic when one is closer than the fight, so regression runs
+    // actually exercise the temporary-form path.
+    const relic = s.relics?.[0];
+    const relicDistance = relic ? Math.hypot(relic.x - s.x, relic.y - s.y) : Infinity;
+    const enemyDistance = s.nearestEnemy
+      ? Math.hypot(s.nearestEnemy.x - s.x, s.nearestEnemy.y - s.y)
+      : Infinity;
+
     if (s.cleared) {
       steer(s, s.exit.x, s.exit.y);
+    } else if (relic && relicDistance < Math.max(320, enemyDistance)) {
+      steer(s, relic.x, relic.y);
     } else if (s.nearestEnemy) {
       const d = Math.hypot(s.nearestEnemy.x - s.x, s.nearestEnemy.y - s.y);
       // Panic dash away when badly hurt and something is on top of us.
@@ -145,7 +181,7 @@ export function autoplay({ ticks = 20000, chaseDistance = 170, dash = true } = {
   }
 
   input.release();
-  return { final: game.debugSnapshot(), events, roomTimes, errors };
+  return { final: game.debugSnapshot(), events, roomTimes, mapChoices, errors };
 }
 
 /**
@@ -180,6 +216,14 @@ export async function scene(name, { until = 'combat', ticks = 4000, stopAt = 170
   for (let tick = 0; tick < ticks; tick++) {
     const s = game.debugSnapshot();
 
+    if (s.state === 'map' || s.state === 'market' || s.state === 'cursed') {
+      if (until === s.state) break;
+      input.setKeys([]);
+      // Always take the first option; leaving the market/altar needs its own click,
+      // so a purchased-out den falls through to Digit1 doing nothing and we bail.
+      input.tap('Digit1', game);
+      continue;
+    }
     if (s.state === 'cards' || s.state === 'mutation') {
       if (until === 'cards' || until === 'mutation') break;
       input.setKeys([]);
@@ -215,6 +259,48 @@ export async function scene(name, { until = 'combat', ticks = 4000, stopAt = 170
   return { snapshot: game.debugSnapshot(), file: await shot(name) };
 }
 
+/**
+ * Get into a live run from wherever the game currently is.
+ *
+ * Hit points are derived from the canvas rect rather than hardcoded, because the
+ * embedded pane does not always hand out a 1280x720 viewport, and the backing store
+ * may still be 1x1 on the first frames after a reload.
+ */
+export async function startRun() {
+  const game = window.samarkand;
+  const canvas = document.getElementById('stage');
+
+  for (let i = 0; i < 40 && canvas.width < 100; i++) {
+    game.debugFrame(16);
+    await new Promise((resolve) => setTimeout(resolve, 25));
+  }
+
+  const rect = canvas.getBoundingClientRect();
+  const click = (x, y) => {
+    canvas.dispatchEvent(new MouseEvent('mousemove', { clientX: x, clientY: y, bubbles: true }));
+    canvas.dispatchEvent(new MouseEvent('mousedown', { clientX: x, clientY: y, button: 0, bubbles: true }));
+    game.debugFrame(16);
+    window.dispatchEvent(new MouseEvent('mouseup', { button: 0 }));
+  };
+
+  // Overlay screens (lair, chronicle) sit on top of the menu; back out first.
+  for (let i = 0; i < 4; i++) {
+    const state = game.debugSnapshot().state;
+    if (state !== 'lair' && state !== 'lifetime') break;
+    window.dispatchEvent(new KeyboardEvent('keydown', { code: 'Escape', bubbles: true }));
+    game.debugFrame(16);
+    window.dispatchEvent(new KeyboardEvent('keyup', { code: 'Escape', bubbles: true }));
+  }
+
+  const state = game.debugSnapshot().state;
+  if (state === 'results') click(rect.width / 2 - 110, rect.height - 62);
+  else if (state === 'menu') click(rect.width / 2, rect.height * 0.38 + 26);
+
+  for (let i = 0; i < 6; i++) game.debugFrame(16);
+  return { canvas: Math.round(rect.width) + 'x' + Math.round(rect.height), state: game.debugSnapshot().state };
+}
+
 window.autoplay = autoplay;
 window.shot = shot;
 window.scene = scene;
+window.startRun = startRun;

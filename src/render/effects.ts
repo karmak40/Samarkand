@@ -1,5 +1,6 @@
 import { clamp, type Rect, TAU } from '../core/math';
 import { cosmeticRng } from '../core/rng';
+import { blitVisible } from './blit';
 
 export type ParticleShape = 'spark' | 'blob' | 'smoke' | 'shard' | 'ember' | 'ring';
 
@@ -68,6 +69,9 @@ export class ParticleSystem {
     }
   }
 
+  /** Player-set particle density, 0 to 1. */
+  densityScale = 1;
+
   get activeCount(): number {
     return this.count;
   }
@@ -89,7 +93,11 @@ export class ParticleSystem {
       additive = false,
     } = options;
 
-    for (let i = 0; i < count; i++) {
+    // Density is scaled here, once, rather than at every call site. A burst never
+    // drops to nothing: an impact with no particles at all reads as a miss.
+    const wanted = count <= 0 ? 0 : Math.max(1, Math.round(count * this.densityScale));
+
+    for (let i = 0; i < wanted; i++) {
       const p = this.acquire();
       const dir =
         angle === undefined
@@ -301,7 +309,11 @@ export class FloatingTextSystem {
   }
 
   /** Numeric damage that merges with other hits at the same spot. */
+  /** Damage numbers can be turned off; every other floating text stays. */
+  showDamageNumbers = true;
+
   addDamage(x: number, y: number, amount: number, color: string, crit: boolean): void {
+    if (!this.showDamageNumbers) return;
     const key = `${Math.round(x / 34)}:${Math.round(y / 34)}:${color}`;
     const existing = this.mergeWindow.get(key);
 
@@ -502,10 +514,10 @@ export class DecalLayer {
     this.cacheDirty = false;
   }
 
-  draw(ctx: CanvasRenderingContext2D): void {
+  draw(ctx: CanvasRenderingContext2D, view: Rect): void {
     if (!this.cache) return;
     if (this.cacheDirty) this.rebuildCache();
-    ctx.drawImage(this.cache, this.cacheOrigin.x, this.cacheOrigin.y);
+    blitVisible(ctx, this.cache, this.cacheOrigin, view);
   }
 
   clear(): void {

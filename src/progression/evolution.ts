@@ -1,6 +1,8 @@
 import { RNG } from '../core/rng';
+import { t } from '../i18n';
 import { type BehaviorFlag, type StatSheet } from './stats';
 import { type RawModifier } from './skills';
+import { type ContentGate, OPEN_GATE } from './gate';
 
 export type AuraKind = 'none' | 'fire' | 'frost' | 'poison' | 'storm' | 'void';
 
@@ -76,8 +78,8 @@ export interface Mutation {
 export const MUTATIONS: readonly Mutation[] = [
   {
     id: 'abyssal-maw',
-    name: 'Пасть бездны',
-    description: 'Пасть раскрывается почти на всё тело. +30% урона, +6% вампиризма.',
+    get name() { return t('mutation.abyssal-maw.name'); },
+    get description() { return t('mutation.abyssal-maw.description'); },
     tier: 0,
     modifiers: [
       { key: 'damage', mult: 0.3 },
@@ -91,8 +93,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'bone-crown',
-    name: 'Костяной венец',
-    description: 'Рога прорывают череп. +25 брони, +60% отбрасывания.',
+    get name() { return t('mutation.bone-crown.name'); },
+    get description() { return t('mutation.bone-crown.description'); },
     tier: 0,
     modifiers: [
       { key: 'armor', flat: 25 },
@@ -105,8 +107,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'dark-wings',
-    name: 'Крылья тьмы',
-    description: 'Перепончатые крылья. +18% скорости, +1 заряд рывка.',
+    get name() { return t('mutation.dark-wings.name'); },
+    get description() { return t('mutation.dark-wings.description'); },
     tier: 0,
     modifiers: [
       { key: 'moveSpeed', mult: 0.18 },
@@ -119,8 +121,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'many-eyes',
-    name: 'Многоглазие',
-    description: 'Глаза покрывают тело. +12% крита, +20% дальности.',
+    get name() { return t('mutation.many-eyes.name'); },
+    get description() { return t('mutation.many-eyes.description'); },
     tier: 0,
     modifiers: [
       { key: 'critChance', flat: 0.12 },
@@ -133,8 +135,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'spine-ridge',
-    name: 'Хребет шипов',
-    description: 'Костяные шипы вдоль спины. Отражает 30% урона, +15 брони.',
+    get name() { return t('mutation.spine-ridge.name'); },
+    get description() { return t('mutation.spine-ridge.description'); },
     tier: 0,
     modifiers: [
       { key: 'thorns', flat: 0.3 },
@@ -146,8 +148,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'lash-tails',
-    name: 'Хвосты-плети',
-    description: 'Отрастают два хвоста. +1 снаряд, +10% скорости атаки.',
+    get name() { return t('mutation.lash-tails.name'); },
+    get description() { return t('mutation.lash-tails.description'); },
     tier: 0,
     modifiers: [
       { key: 'projectiles', flat: 1 },
@@ -159,8 +161,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'extra-limbs',
-    name: 'Лишние конечности',
-    description: 'Ещё четыре лапы. +12% скорости атаки и передвижения.',
+    get name() { return t('mutation.extra-limbs.name'); },
+    get description() { return t('mutation.extra-limbs.description'); },
     tier: 0,
     modifiers: [
       { key: 'attackSpeed', mult: 0.12 },
@@ -172,8 +174,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'bloated-mass',
-    name: 'Разбухшая туша',
-    description: 'Тело раздувается. +90 здоровья и +20 брони, но -12% скорости.',
+    get name() { return t('mutation.bloated-mass.name'); },
+    get description() { return t('mutation.bloated-mass.description'); },
     tier: 0,
     modifiers: [
       { key: 'maxHp', flat: 90 },
@@ -187,8 +189,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'hound-form',
-    name: 'Гончая форма',
-    description: 'Тело вытягивается и худеет. +22% скорости, +18% атаки, -30 здоровья.',
+    get name() { return t('mutation.hound-form.name'); },
+    get description() { return t('mutation.hound-form.description'); },
     tier: 0,
     modifiers: [
       { key: 'moveSpeed', mult: 0.22 },
@@ -204,8 +206,8 @@ export const MUTATIONS: readonly Mutation[] = [
   // ---- elemental cores (mutually exclusive in practice) --------------------
   {
     id: 'magma-core',
-    name: 'Магмовое ядро',
-    description: 'Внутри тлеет вулкан. +35% урона огнём и поджиг всего вокруг.',
+    get name() { return t('mutation.magma-core.name'); },
+    get description() { return t('mutation.magma-core.description'); },
     tier: 0,
     modifiers: [
       { key: 'convFire', flat: 0.25 },
@@ -221,8 +223,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'rime-shell',
-    name: 'Ледяной панцирь',
-    description: 'Кожа покрывается инеем. +25% урона морозом, +20 брони, ледяная вспышка при рывке.',
+    get name() { return t('mutation.rime-shell.name'); },
+    get description() { return t('mutation.rime-shell.description'); },
     tier: 0,
     modifiers: [
       { key: 'convFrost', flat: 0.25 },
@@ -239,8 +241,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'plague-sac',
-    name: 'Чумной мешок',
-    description: 'Раздутые железы. +30% урона ядом, убитые оставляют облако заразы.',
+    get name() { return t('mutation.plague-sac.name'); },
+    get description() { return t('mutation.plague-sac.description'); },
     tier: 0,
     modifiers: [
       { key: 'convPoison', flat: 0.3 },
@@ -257,8 +259,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'storm-heart',
-    name: 'Грозовое сердце',
-    description: 'В груди бьётся молния. +25% урона молнией, удары бьют по цепи.',
+    get name() { return t('mutation.storm-heart.name'); },
+    get description() { return t('mutation.storm-heart.description'); },
     tier: 0,
     modifiers: [
       { key: 'convLightning', flat: 0.25 },
@@ -275,8 +277,8 @@ export const MUTATIONS: readonly Mutation[] = [
   },
   {
     id: 'void-gut',
-    name: 'Пустотное нутро',
-    description: 'Внутренности исчезают в пустоте. +30% урона скверной, удары проклинают.',
+    get name() { return t('mutation.void-gut.name'); },
+    get description() { return t('mutation.void-gut.description'); },
     tier: 0,
     modifiers: [
       { key: 'convUnholy', flat: 0.3 },
@@ -311,7 +313,10 @@ export function drawMutations(
   taken: ReadonlySet<string>,
   stats: StatSheet,
   count = 3,
+  gate: ContentGate = OPEN_GATE,
 ): Mutation[] {
-  const pool = MUTATIONS.filter((m) => !taken.has(m.id) && (!m.requires || m.requires(stats)));
+  const pool = MUTATIONS.filter(
+    (m) => !taken.has(m.id) && gate.has('mutation', m.id) && (!m.requires || m.requires(stats)),
+  );
   return rng.sample(pool, count);
 }

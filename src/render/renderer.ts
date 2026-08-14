@@ -1,5 +1,6 @@
 import { Camera } from '../core/camera';
 import { clamp, TAU, type Vec2 } from '../core/math';
+import { t } from '../i18n';
 import type { World } from '../world/world';
 import { hexAlpha } from './monster-render';
 import { Terrain } from './terrain';
@@ -22,6 +23,10 @@ export class Renderer {
   private dpr = 1;
 
   private observer: ResizeObserver | null = null;
+
+  /** Baked edge darkening, rebuilt only when the viewport changes shape. */
+  private vignette: HTMLCanvasElement | null = null;
+  private vignetteSize = { w: 0, h: 0, dpr: 0 };
 
   constructor(canvas: HTMLCanvasElement) {
     this.canvas = canvas;
@@ -60,8 +65,24 @@ export class Renderer {
     }
   }
 
+  /**
+   * Re-read the size if the element changed shape.
+   *
+   * ResizeObserver covers the normal case, but it does not fire in every embedding
+   * — a pane that is never displayed can leave the backing store at 1x1 forever
+   * while the element itself reports a real rect. One rect read per frame is far
+   * cheaper than shipping a game that renders into a single pixel.
+   */
+  private syncSize(): void {
+    const rect = this.canvas.getBoundingClientRect();
+    const w = Math.max(1, Math.round(rect.width));
+    const h = Math.max(1, Math.round(rect.height));
+    if (w !== this.width || h !== this.height) this.resize();
+  }
+
   /** Apply the DPR transform and clear. Call once per frame. */
   begin(): void {
+    this.syncSize();
     const ctx = this.ctx;
     ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
     ctx.fillStyle = '#07070a';
@@ -84,8 +105,8 @@ export class Renderer {
     ctx.save();
     camera.applyTransform(ctx);
 
-    this.terrain.draw(ctx);
-    world.decals.draw(ctx);
+    this.terrain.draw(ctx, view);
+    world.decals.draw(ctx, view);
     world.drawHazards(ctx);
 
     if (exit && exitOpen) {
@@ -252,7 +273,7 @@ export class Renderer {
     ctx.restore();
 
     // Distance readout under the chevrons, so it also tells you how far.
-    const label = `${Math.round(distance / 10)} м`;
+    const label = `${Math.round(distance / 10)} ${t('unit.metersAbbrev')}`;
     const lx = monster.x + Math.cos(angle) * (start + 62);
     const ly = monster.y + Math.sin(angle) * (start + 62);
     ctx.save();
@@ -312,8 +333,39 @@ export class Renderer {
     ctx.globalAlpha = 1;
   }
 
+  /**
+   * Darken the edges of the screen.
+   *
+   * Baked once per viewport size rather than filled every frame. The shape only ever
+   * depends on the width and the height, and evaluating a radial gradient across
+   * three quarters of a million pixels sixty times a second is the single most
+   * expensive thing a frame did on an engine without GPU compositing.
+   */
   private drawVignette(): void {
     const ctx = this.ctx;
+
+    const stale =
+      this.vignetteSize.w !== this.width ||
+      this.vignetteSize.h !== this.height ||
+      this.vignetteSize.dpr !== this.dpr;
+    if (!this.vignette || stale) this.bakeVignette();
+    if (!this.vignette) return;
+
+    ctx.drawImage(this.vignette, 0, 0, this.width, this.height);
+  }
+
+  private bakeVignette(): void {
+    const canvas = document.createElement('canvas');
+    // Baked at device resolution, not CSS resolution. The frame is drawn under a DPR
+    // transform, so a CSS-sized bitmap would be upscaled on a retina display and the
+    // cache would have cost sharpness rather than saved time.
+    canvas.width = Math.max(1, Math.round(this.width * this.dpr));
+    canvas.height = Math.max(1, Math.round(this.height * this.dpr));
+
+    const ctx = canvas.getContext('2d');
+    if (!ctx) return;
+
+    ctx.scale(this.dpr, this.dpr);
     const grad = ctx.createRadialGradient(
       this.width / 2,
       this.height / 2,
@@ -326,6 +378,9 @@ export class Renderer {
     grad.addColorStop(1, 'rgba(0,0,0,0.4)');
     ctx.fillStyle = grad;
     ctx.fillRect(0, 0, this.width, this.height);
+
+    this.vignette = canvas;
+    this.vignetteSize = { w: this.width, h: this.height, dpr: this.dpr };
   }
 
   /** Full-screen colour wash, used for damage flashes and transitions. */

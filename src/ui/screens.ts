@@ -1,12 +1,21 @@
-import { DAMAGE_INFO, DAMAGE_TYPES, type DamageType } from '../combat/damage';
+import { DAMAGE_INFO, DAMAGE_TYPES } from '../combat/damage';
 import type { Input } from '../core/input';
 import { clamp, TAU } from '../core/math';
+import { HUMAN_ARCHETYPES } from '../entities/human';
 import type { Monster } from '../entities/monster';
+import { t } from '../i18n';
+import {
+  achievementName,
+  type AchievementDef,
+} from '../progression/achievements';
+import { type Curse, getCurse } from '../progression/curses';
+import { dailySeed, formatCountdown, secondsUntilNextDaily, seedLabel } from '../progression/daily';
 import { type Mutation } from '../progression/evolution';
-import { META_UPGRADES, type MetaProgress } from '../progression/meta';
-import { RARITY, type SkillCard } from '../progression/skills';
-import { formatStat, LOWER_IS_BETTER, STAT_LABELS, type StatKey } from '../progression/stats';
+import { type MetaProgress } from '../progression/meta';
+import { RARITY, tagLabel, type SkillCard } from '../progression/skills';
+import { formatStat, LOWER_IS_BETTER, statLabel, type StatKey } from '../progression/stats';
 import type { RunStats } from '../stats/tracker';
+import { drawCurseList } from './run-screens';
 import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
 
 /** Cards the player can pick from, plus a reroll. */
@@ -113,14 +122,15 @@ export function drawCardSelect(
     let tagX = bounds.x + 18;
     const tagY = bounds.y + bounds.h - 46;
     for (const tag of card.tags) {
-      const w = ui.ctx.measureText(tag).width + 18;
+      const label = tagLabel(tag);
+      const w = ui.ctx.measureText(label).width + 18;
       ui.panel(rect(tagX, tagY, w, 20), {
         fill: 'rgba(255,255,255,0.05)',
         border: 'rgba(148,138,118,0.25)',
         radius: 10,
         shadow: false,
       });
-      ui.text(tag, tagX + w / 2, tagY + 10, {
+      ui.text(label, tagX + w / 2, tagY + 10, {
         size: 11,
         color: PALETTE.muted,
         align: 'center',
@@ -150,9 +160,9 @@ export function drawCardSelect(
     const buttonRect = rect(ui.width / 2 - 90, cardY + cardH + 30, 180, 42);
     const affordable = context.souls >= context.rerollCost;
     if (
-      ui.button(buttonRect, 'Пересдать', {
+      ui.button(buttonRect, t('cardDraft.reroll'), {
         disabled: !affordable,
-        sub: `${context.rerollCost} душ`,
+        sub: t('unit.souls', { n: context.rerollCost }),
         accent: '#9fd7ff',
       })
     ) {
@@ -224,14 +234,14 @@ export function drawMutationSelect(
 ): number {
   ui.scrim(0.88);
 
-  ui.text('ЭВОЛЮЦИЯ', ui.width / 2, 84, {
+  ui.text(t('evolution.title'), ui.width / 2, 84, {
     size: 34,
     color: '#b06cff',
     align: 'center',
     baseline: 'middle',
     letterSpacing: 12,
   });
-  ui.text('Плоть требует новой формы. Выбор необратим.', ui.width / 2, 120, {
+  ui.text(t('evolution.subtitle'), ui.width / 2, 120, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
@@ -307,11 +317,12 @@ export function drawResults(
   tracker: RunStats,
   soulsEarned: number,
   meta: MetaProgress,
+  context: { daily: boolean; earned: readonly AchievementDef[] } = { daily: false, earned: [] },
 ): ResultsAction {
   ui.scrim(0.93);
 
   const victory = tracker.outcome === 'victory';
-  const title = victory ? 'ЗЕМЛИ ОБЕЗЛЮДЕЛИ' : 'ТЬМА РАССЕЯЛАСЬ';
+  const title = victory ? t('results.victoryTitle') : t('results.defeatTitle');
   const accent = victory ? PALETTE.gold : PALETTE.blood;
 
   ui.text(title, ui.width / 2, 56, {
@@ -323,8 +334,8 @@ export function drawResults(
   });
 
   const subtitle = victory
-    ? `Ни одна деревня не устояла. ${tracker.roomsCleared} поселений сожжено.`
-    : `Тебя остановил: ${tracker.killedBy || 'неизвестно'} — на ${tracker.roomsCleared + 1}-й комнате.`;
+    ? t('results.victorySubtitle', { n: tracker.roomsCleared })
+    : t('results.defeatSubtitle', { killer: tracker.killedBy || t('results.unknown'), room: tracker.roomsCleared + 1 });
   ui.text(subtitle, ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
@@ -333,29 +344,51 @@ export function drawResults(
     italic: true,
   });
 
+  // The seed, so a run worth talking about can be handed to someone else.
+  ui.text(
+    context.daily
+      ? t('results.dailySeed', { seed: seedLabel(tracker.seed) })
+      : t('results.seed', { seed: seedLabel(tracker.seed) }),
+    ui.width / 2,
+    108,
+    {
+      size: 12,
+      color: context.daily ? '#8fd6a8' : PALETTE.dim,
+      align: 'center',
+      baseline: 'middle',
+      letterSpacing: 1,
+    },
+  );
+
   const margin = 40;
   const columnGap = 24;
   const columnW = (ui.width - margin * 2 - columnGap * 2) / 3;
   const top = 124;
-  const bodyH = ui.height - top - 96;
+  // Freshly earned trials claim a strip above the buttons; the columns give it up.
+  const stripH = context.earned.length > 0 ? 40 : 0;
+  const bodyH = ui.height - top - 96 - stripH;
 
   drawResultsOverview(ui, tracker, soulsEarned, rect(margin, top, columnW, bodyH));
   drawResultsDamage(ui, tracker, rect(margin + columnW + columnGap, top, columnW, bodyH));
   drawResultsRun(ui, tracker, rect(margin + (columnW + columnGap) * 2, top, columnW, bodyH));
 
+  if (stripH > 0) {
+    drawEarnedTrials(ui, context.earned, rect(margin, top + bodyH + 4, ui.width - margin * 2, stripH - 8));
+  }
+
   // Footer.
   const buttonY = ui.height - 62;
   let action: ResultsAction = 'none';
 
-  if (ui.button(rect(ui.width / 2 - 210, buttonY, 200, 46), 'Снова', { accent: PALETTE.gold })) {
+  if (ui.button(rect(ui.width / 2 - 210, buttonY, 200, 46), t('results.again'), { accent: PALETTE.gold })) {
     action = 'again';
   }
-  if (ui.button(rect(ui.width / 2 + 10, buttonY, 200, 46), 'В логово', { accent: '#9fd7ff' })) {
+  if (ui.button(rect(ui.width / 2 + 10, buttonY, 200, 46), t('results.toLair'), { accent: '#9fd7ff' })) {
     action = 'menu';
   }
 
   ui.text(
-    `Всего душ: ${Math.floor(meta.souls)}`,
+    t('results.totalSouls', { n: Math.floor(meta.souls) }),
     ui.width / 2,
     ui.height - 18,
     { size: 12, color: PALETTE.dim, align: 'center', baseline: 'middle' },
@@ -364,24 +397,69 @@ export function drawResults(
   return action;
 }
 
+/**
+ * Trials earned by the run that just ended.
+ *
+ * One line, listing as many as fit and counting the rest — the report behind it is
+ * the point of the screen, and a wall of gold banners would bury it.
+ */
+function drawEarnedTrials(
+  ui: Ui,
+  earned: readonly AchievementDef[],
+  bounds: ReturnType<typeof rect>,
+): void {
+  ui.panel(bounds, { fill: 'rgba(28,23,12,0.9)', border: PALETTE.borderStrong, radius: 5, shadow: false });
+
+  const shown = earned.slice(0, 3);
+  const rest = earned.length - shown.length;
+  const souls = earned.reduce((sum, def) => sum + def.reward, 0);
+
+  const label = shown.map(achievementName).join(' · ');
+  const suffix = rest > 0 ? t('trials.andMore', { n: rest }) : '';
+
+  ui.text(t('trials.newlyEarned'), bounds.x + 16, bounds.y + bounds.h / 2, {
+    size: 12,
+    color: PALETTE.gold,
+    baseline: 'middle',
+    letterSpacing: 2,
+    bold: true,
+  });
+
+  ui.text(`${label}${suffix}`, ui.width / 2, bounds.y + bounds.h / 2, {
+    size: 14,
+    color: PALETTE.ink,
+    align: 'center',
+    baseline: 'middle',
+    maxWidth: bounds.w - 320,
+  });
+
+  ui.text(t('trials.reward', { n: souls }), bounds.x + bounds.w - 16, bounds.y + bounds.h / 2, {
+    size: 14,
+    color: '#cfeaff',
+    align: 'right',
+    baseline: 'middle',
+    bold: true,
+  });
+}
+
 function drawResultsOverview(ui: Ui, tracker: RunStats, soulsEarned: number, bounds: ReturnType<typeof rect>): void {
   ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
 
-  ui.heading('ИТОГ', x, y, w);
+  ui.heading(t('heading.summary'), x, y, w);
   y += 26;
 
   const rows: Array<[string, string, string?]> = [
-    ['Убито людей', `${tracker.totalKills}`],
-    ['Комнат пройдено', `${tracker.roomsCleared}`],
-    ['Зданий разрушено', `${tracker.buildingsDestroyed}`],
-    ['Время', formatTime(tracker.elapsed)],
-    ['Душ собрано', `${Math.floor(soulsEarned)}`, '#9fd7ff'],
-    ['Убийств в минуту', tracker.killsPerMinute.toFixed(1)],
-    ['Лучшая серия', `${tracker.bestKillStreak}`],
-    ['Комнат без урона', `${tracker.perfectRooms}`],
+    [t('resultStat.killedHumans'), `${tracker.totalKills}`],
+    [t('resultStat.roomsCleared'), `${tracker.roomsCleared}`],
+    [t('resultStat.buildingsDestroyed'), `${tracker.buildingsDestroyed}`],
+    [t('resultStat.time'), formatTime(tracker.elapsed)],
+    [t('resultStat.soulsCollected'), `${Math.floor(soulsEarned)}`, '#9fd7ff'],
+    [t('resultStat.killsPerMinute'), tracker.killsPerMinute.toFixed(1)],
+    [t('resultStat.bestStreak'), `${tracker.bestKillStreak}`],
+    [t('resultStat.perfectRooms'), `${tracker.perfectRooms}`],
   ];
 
   for (const [label, value, color] of rows) {
@@ -390,18 +468,18 @@ function drawResultsOverview(ui: Ui, tracker: RunStats, soulsEarned: number, bou
   }
 
   y += 14;
-  ui.heading('ВЫЖИВАНИЕ', x, y, w);
+  ui.heading(t('heading.survival'), x, y, w);
   y += 26;
 
   const survival: Array<[string, string]> = [
-    ['Получено урона', formatNumber(tracker.totalDamageTaken)],
-    ['Раз получил удар', `${tracker.timesHit}`],
-    ['Уклонений', `${tracker.dodgesPerformed}`],
-    ['Вылечено', formatNumber(tracker.healingReceived)],
-    ['Из них вампиризмом', formatNumber(tracker.lifestealHealing)],
-    ['Минимум здоровья', `${(tracker.lowestHealthFraction * 100).toFixed(0)}%`],
-    ['На волоске', `${tracker.closeCalls}`],
-    ['Рывков', `${tracker.dashesUsed}`],
+    [t('resultStat.damageTaken'), formatNumber(tracker.totalDamageTaken)],
+    [t('resultStat.timesHit'), `${tracker.timesHit}`],
+    [t('resultStat.dodges'), `${tracker.dodgesPerformed}`],
+    [t('resultStat.healed'), formatNumber(tracker.healingReceived)],
+    [t('resultStat.lifestealHealed'), formatNumber(tracker.lifestealHealing)],
+    [t('resultStat.lowestHealth'), `${(tracker.lowestHealthFraction * 100).toFixed(0)}%`],
+    [t('resultStat.closeCalls'), `${tracker.closeCalls}`],
+    [t('resultStat.dashesUsed'), `${tracker.dashesUsed}`],
   ];
 
   for (const [label, value] of survival) {
@@ -410,7 +488,7 @@ function drawResultsOverview(ui: Ui, tracker: RunStats, soulsEarned: number, bou
   }
 
   y += 10;
-  ui.heading('ОПАСНОСТИ', x, y, w);
+  ui.heading(t('heading.threats'), x, y, w);
   y += 24;
 
   for (const threat of tracker.topThreats.slice(0, 4)) {
@@ -425,18 +503,18 @@ function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof 
   const w = bounds.w - 40;
   let y = bounds.y + 28;
 
-  ui.heading('УРОН', x, y, w);
+  ui.heading(t('heading.damage'), x, y, w);
   y += 26;
 
   const damageRows: Array<[string, string]> = [
-    ['Всего нанесено', formatNumber(tracker.totalDamageDealt)],
-    ['Средний DPS', formatNumber(tracker.averageDps)],
-    ['Пиковый DPS', formatNumber(tracker.peakDps)],
-    ['Крупнейший удар', formatNumber(tracker.largestHit)],
-    ['Источник', tracker.largestHitSource],
-    ['Крит', `${(tracker.critRate * 100).toFixed(0)}%`],
-    ['Точность', `${(tracker.accuracy * 100).toFixed(0)}%`],
-    ['Перебор урона', formatNumber(tracker.totalOverkill)],
+    [t('resultStat.totalDealt'), formatNumber(tracker.totalDamageDealt)],
+    [t('resultStat.avgDps'), formatNumber(tracker.averageDps)],
+    [t('resultStat.peakDps'), formatNumber(tracker.peakDps)],
+    [t('resultStat.biggestHit'), formatNumber(tracker.largestHit)],
+    [t('resultStat.source'), tracker.largestHitSource],
+    [t('resultStat.crit'), `${(tracker.critRate * 100).toFixed(0)}%`],
+    [t('resultStat.accuracy'), `${(tracker.accuracy * 100).toFixed(0)}%`],
+    [t('resultStat.overkill'), formatNumber(tracker.totalOverkill)],
   ];
 
   for (const [label, value] of damageRows) {
@@ -445,7 +523,7 @@ function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof 
   }
 
   y += 14;
-  ui.heading('ПО ТИПАМ', x, y, w);
+  ui.heading(t('heading.byType'), x, y, w);
   y += 22;
 
   const segments = DAMAGE_TYPES.filter((t) => tracker.damageDealtByType[t] > 0).map((t) => ({
@@ -460,7 +538,7 @@ function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof 
   for (const segment of segments.sort((a, b) => b.value - a.value)) {
     const share = tracker.totalDamageDealt > 0 ? segment.value / tracker.totalDamageDealt : 0;
     ui.swatch(x + 5, y, segment.color, 4);
-    ui.text(DAMAGE_INFO[segment.type as DamageType].name, x + 16, y, {
+    ui.text(DAMAGE_INFO[segment.type].name, x + 16, y, {
       size: 13,
       color: PALETTE.muted,
       baseline: 'middle',
@@ -476,12 +554,12 @@ function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof 
   }
 
   y += 12;
-  ui.heading('DPS ПО ВРЕМЕНИ', x, y, w);
+  ui.heading(t('heading.dpsOverTime'), x, y, w);
   y += 18;
   ui.lineChart(rect(x, y, w, 76), tracker.dpsSeries.map((s) => s.damage));
   y += 92;
 
-  ui.heading('ИСТОЧНИКИ', x, y, w);
+  ui.heading(t('heading.sources'), x, y, w);
   y += 22;
   for (const source of tracker.topDamageSources.slice(0, 5)) {
     ui.statRow(source.label, formatNumber(source.damage), x, y, w, { size: 13 });
@@ -495,7 +573,7 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
   const w = bounds.w - 40;
   let y = bounds.y + 28;
 
-  ui.heading('ЖЕРТВЫ', x, y, w);
+  ui.heading(t('heading.victims'), x, y, w);
   y += 24;
 
   const kills = tracker.killList.slice(0, 8);
@@ -511,7 +589,7 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
   }
 
   y += 14;
-  ui.heading('НАВЫКИ', x, y, w);
+  ui.heading(t('heading.skills'), x, y, w);
   y += 22;
 
   const skillCounts = new Map<string, { name: string; rarity: string; count: number }>();
@@ -532,10 +610,10 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
 
   if (tracker.mutationsTaken.length > 0) {
     y += 12;
-    ui.heading('ФОРМА', x, y, w);
+    ui.heading(t('heading.form'), x, y, w);
     y += 22;
     for (const mutation of tracker.mutationsTaken) {
-      ui.statRow(mutation.name, `комн. ${mutation.room + 1}`, x, y, w, {
+      ui.statRow(mutation.name, t('buildSheet.roomShort', { n: mutation.room + 1 }), x, y, w, {
         size: 13,
         color: '#c9a0ff',
       });
@@ -544,7 +622,7 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
   }
 
   y += 12;
-  ui.heading('КОМНАТЫ', x, y, w);
+  ui.heading(t('heading.rooms'), x, y, w);
   y += 22;
 
   const fastest = tracker.fastestRoom;
@@ -558,7 +636,16 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
 
 // ---------------------------------------------------------------------------
 
-export type MenuAction = 'none' | 'start' | 'stats' | 'back' | 'reset';
+export type MenuAction =
+  | 'none'
+  | 'start'
+  | 'daily'
+  | 'stats'
+  | 'lair'
+  | 'trials'
+  | 'settings'
+  | 'back'
+  | 'reset';
 
 /** Title screen and soul shop. */
 export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuAction {
@@ -576,7 +663,7 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuActi
     baseline: 'middle',
     letterSpacing: 18,
   });
-  ui.text('они построили города. ты пришёл раньше.', ui.width / 2, ui.height * 0.2 + 44, {
+  ui.text(t('menu.tagline'), ui.width / 2, ui.height * 0.2 + 44, {
     size: 15,
     color: PALETTE.muted,
     align: 'center',
@@ -589,95 +676,71 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuActi
 
   const buttonW = 260;
   const bx = ui.width / 2 - buttonW / 2;
-  let by = ui.height * 0.38;
+  let by = ui.height * 0.36;
 
-  if (ui.button(rect(bx, by, buttonW, 52), 'ОХОТА', { accent: PALETTE.blood, size: 18 })) {
+  // The body is named on the hunt button itself, so the choice is visible from the
+  // title screen even though it is made in the lair.
+  if (
+    ui.button(rect(bx, by, buttonW, 52), t('menu.hunt'), {
+      accent: PALETTE.blood,
+      size: 18,
+      sub: t('menu.huntAs', { name: meta.species.name }),
+    })
+  ) {
     action = 'start';
   }
-  by += 64;
+  by += 60;
 
-  if (ui.button(rect(bx, by, buttonW, 44), 'Летопись', { accent: '#9fd7ff', size: 15 })) {
+  if (ui.button(rect(bx, by, buttonW, 42), t('menu.daily'), { accent: '#8fd6a8', size: 15, sub: dailySubtitle(meta) })) {
+    action = 'daily';
+  }
+  by += 54;
+
+  if (
+    ui.button(rect(bx, by, buttonW, 42), t('menu.lair'), {
+      accent: PALETTE.gold,
+      size: 15,
+      sub: t('lair.progress', { owned: meta.unlockedCount, total: meta.unlockableCount }),
+    })
+  ) {
+    action = 'lair';
+  }
+  by += 52;
+
+  // The last two are side by side: they are places to look at what you have done,
+  // not things to do, and giving each a full-width slot would bury the hunt button.
+  const halfW = (buttonW - 10) / 2;
+  if (ui.button(rect(bx, by, halfW, 40), t('menu.chronicle'), { accent: '#9fd7ff', size: 13 })) {
     action = 'stats';
   }
+  if (
+    ui.button(rect(bx + halfW + 10, by, halfW, 40), t('menu.trials'), {
+      accent: PALETTE.gold,
+      size: 13,
+      sub: `${meta.achievementCount} / ${meta.achievementTotal}`,
+    })
+  ) {
+    action = 'trials';
+  }
+  by += 48;
 
-  // Soul shop.
-  const shopTop = ui.height * 0.38;
-  const shopW = Math.min(420, ui.width * 0.3);
-  const shopX = ui.width - shopW - 40;
-
-  ui.panel(rect(shopX, shopTop, shopW, ui.height - shopTop - 40), {
-    fill: 'rgba(12,11,15,0.9)',
-  });
-
-  ui.text('ЛОГОВО', shopX + 20, shopTop + 26, {
-    size: 14,
-    color: PALETTE.gold,
-    letterSpacing: 4,
-    bold: true,
-    baseline: 'middle',
-  });
-  ui.text(`${Math.floor(meta.souls)} душ`, shopX + shopW - 20, shopTop + 26, {
-    size: 16,
-    color: '#cfeaff',
-    align: 'right',
-    baseline: 'middle',
-    bold: true,
-  });
-
-  let uy = shopTop + 52;
-  const rowH = Math.max(18, Math.min(42, (ui.height - shopTop - 110) / META_UPGRADES.length));
-
-  for (const upgrade of META_UPGRADES) {
-    const level = meta.levelOf(upgrade.id);
-    const cost = meta.costOf(upgrade.id);
-    const maxed = cost === null;
-    const affordable = !maxed && meta.souls >= cost;
-    const rowRect = rect(shopX + 14, uy, shopW - 28, rowH - 4);
-    const zone = ui.hitZone(rowRect);
-
-    if (zone.hovered && !maxed) {
-      ctx.fillStyle = 'rgba(255,255,255,0.05)';
-      ctx.fillRect(rowRect.x, rowRect.y, rowRect.w, rowRect.h);
-    }
-
-    ui.text(upgrade.name, rowRect.x + 8, rowRect.y + rowH / 2 - 8, {
-      size: 14,
-      color: maxed ? PALETTE.gold : PALETTE.ink,
-      baseline: 'middle',
-      bold: true,
-    });
-    ui.text(upgrade.description, rowRect.x + 8, rowRect.y + rowH / 2 + 8, {
-      size: 11,
-      color: PALETTE.dim,
-      baseline: 'middle',
-    });
-
-    // Level pips.
-    const pipX = rowRect.x + rowRect.w - 92;
-    for (let i = 0; i < upgrade.maxLevel; i++) {
-      const filled = i < level;
-      ctx.fillStyle = filled ? PALETTE.gold : 'rgba(120,112,96,0.25)';
-      ctx.fillRect(pipX + i * 5, rowRect.y + rowH / 2 - 8, 3, 8);
-    }
-
-    ui.text(
-      maxed ? 'МАКС' : `${cost}`,
-      rowRect.x + rowRect.w - 8,
-      rowRect.y + rowH / 2 + 6,
-      {
-        size: 13,
-        color: maxed ? PALETTE.gold : affordable ? '#9fd7ff' : PALETTE.dim,
-        align: 'right',
-        baseline: 'middle',
-        bold: true,
-      },
-    );
-
-    if (zone.clicked && affordable) meta.purchase(upgrade.id);
-    uy += rowH;
+  if (ui.button(rect(bx, by, buttonW, 34), t('menu.settings'), { accent: PALETTE.muted, size: 13 })) {
+    action = 'settings';
   }
 
-  ui.text('WASD движение · ПРОБЕЛ рывок · TAB статистика · ESC пауза', ui.width / 2, ui.height - 22, {
+  // Banked souls, shown where the shop panel used to be — the shop is its own
+  // screen now, since content unlocks need far more room than stat rows did.
+  ui.text(t('unit.souls', { n: Math.floor(meta.souls) }), ui.width / 2, by + 56, {
+    size: 16,
+    color: '#cfeaff',
+    align: 'center',
+    baseline: 'middle',
+    bold: true,
+  });
+
+  drawAudioControl(ui, meta);
+
+  ui.text(t('menu.controlsFooter'), ui.width / 2, ui.height - 22, {
     size: 12,
     color: PALETTE.dim,
     align: 'center',
@@ -685,6 +748,83 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuActi
   });
 
   return action;
+}
+
+/**
+ * One line under the daily button.
+ *
+ * Before you have played it, the seed and the time left — the two things that make
+ * it a shared event. Afterwards, the score to beat, since the run can be replayed.
+ */
+function dailySubtitle(meta: MetaProgress): string {
+  const today = meta.todaysDaily();
+  if (today.runs === 0) {
+    return t('daily.subFresh', {
+      seed: seedLabel(dailySeed()),
+      time: formatCountdown(secondsUntilNextDaily()),
+    });
+  }
+  if (today.victory) return t('daily.subVictory', { kills: today.bestKills });
+  return t('daily.subPlayed', { rooms: today.bestRooms, kills: today.bestKills });
+}
+
+/**
+ * Volume control.
+ *
+ * Mutates `meta` in place and lets the game push the value into the audio engine
+ * each frame — that keeps the widget stateless and means the setting is already
+ * saved by the time the player starts a run.
+ */
+function drawAudioControl(ui: Ui, meta: MetaProgress): void {
+  const x = 40;
+  const y = ui.height - 62;
+  const barW = 150;
+
+  const muteRect = rect(x, y - 11, 60, 24);
+  if (ui.button(muteRect, meta.muted ? t('audio.unmute') : t('audio.mute'), { size: 11, accent: '#9fd7ff' })) {
+    meta.muted = !meta.muted;
+    meta.save();
+  }
+
+  const barRect = rect(x + 74, y - 5, barW, 10);
+  const zone = ui.hitZone(barRect);
+  ui.bar(barRect, meta.muted ? 0 : meta.volume, {
+    color: zone.hovered ? '#cfeaff' : '#7fb2ff',
+    background: 'rgba(0,0,0,0.55)',
+    radius: 3,
+  });
+
+  // Click anywhere on the bar to jump to that level, drag to scrub.
+  if (zone.hovered && (zone.clicked || ui.isMouseDown)) {
+    meta.volume = clamp((ui.mouseX - barRect.x) / barRect.w, 0, 1);
+    meta.muted = false;
+    if (zone.clicked) meta.save();
+  }
+
+  ui.text(`${Math.round(meta.volume * 100)}%`, x + 74 + barW + 10, y, {
+    size: 11,
+    color: PALETTE.dim,
+    baseline: 'middle',
+  });
+}
+
+/**
+ * Language switch.
+ *
+ * Each label is always shown in its own language (never translated), so a player
+ * who can't read the current locale can still find their way to one they can.
+ */
+/**
+ * Drifting embers behind the title and the overlay screens.
+ *
+ * Exported so screens like the lair can reuse the backdrop without drawing the menu
+ * itself — a menu drawn underneath keeps registering click zones that steal clicks
+ * aimed at the screen on top.
+ */
+export function drawMenuBackdrop(ui: Ui, time: number): void {
+  ui.ctx.fillStyle = '#07070a';
+  ui.ctx.fillRect(0, 0, ui.width, ui.height);
+  drawMenuAtmosphere(ui, time);
 }
 
 function drawMenuAtmosphere(ui: Ui, time: number): void {
@@ -718,7 +858,7 @@ function drawMenuAtmosphere(ui: Ui, time: number): void {
 export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   ui.scrim(0.94);
 
-  ui.text('ЛЕТОПИСЬ', ui.width / 2, 56, {
+  ui.text(t('menu.chronicle').toUpperCase(), ui.width / 2, 56, {
     size: 30,
     color: PALETTE.gold,
     align: 'center',
@@ -737,19 +877,19 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   const x = margin + 24;
   const w = columnW - 48;
 
-  ui.heading('ВСЕГО', x, y, w);
+  ui.heading(t('heading.total'), x, y, w);
   y += 26;
 
   const totals: Array<[string, string]> = [
-    ['Забегов', `${l.runs}`],
-    ['Побед', `${l.victories}`],
-    ['Смертей', `${l.deaths}`],
-    ['Убито людей', `${l.totalKills}`],
-    ['Разрушено зданий', `${l.totalBuildings}`],
-    ['Собрано душ', formatNumber(l.totalSouls)],
-    ['Нанесено урона', formatNumber(l.totalDamageDealt)],
-    ['Получено урона', formatNumber(l.totalDamageTaken)],
-    ['Время в игре', formatTime(l.totalPlaytime)],
+    [t('lifetime.runs'), `${l.runs}`],
+    [t('lifetime.victories'), `${l.victories}`],
+    [t('lifetime.deaths'), `${l.deaths}`],
+    [t('resultStat.killedHumans'), `${l.totalKills}`],
+    [t('lifetime.buildingsDestroyed'), `${l.totalBuildings}`],
+    [t('lifetime.soulsCollected'), formatNumber(l.totalSouls)],
+    [t('lifetime.damageDealt'), formatNumber(l.totalDamageDealt)],
+    [t('resultStat.damageTaken'), formatNumber(l.totalDamageTaken)],
+    [t('lifetime.playtime'), formatTime(l.totalPlaytime)],
   ];
   for (const [label, value] of totals) {
     ui.statRow(label, value, x, y, w, {});
@@ -757,16 +897,16 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   }
 
   y += 16;
-  ui.heading('РЕКОРДЫ', x, y, w);
+  ui.heading(t('heading.records'), x, y, w);
   y += 26;
 
   const records: Array<[string, string]> = [
-    ['Глубже всего', `${l.deepestRoom} комнат`],
-    ['Больше всего убийств', `${l.bestKills}`],
-    ['Лучший DPS', formatNumber(l.bestDps)],
-    ['Крупнейший удар', formatNumber(l.largestHit)],
-    ['Больше всего душ', formatNumber(l.bestSoulsInRun)],
-    ['Вложено душ', formatNumber(meta.soulsInvested())],
+    [t('lifetime.deepestRoom'), t('unit.rooms', { n: l.deepestRoom })],
+    [t('lifetime.mostKills'), `${l.bestKills}`],
+    [t('lifetime.bestDps'), formatNumber(l.bestDps)],
+    [t('resultStat.biggestHit'), formatNumber(l.largestHit)],
+    [t('lifetime.mostSouls'), formatNumber(l.bestSoulsInRun)],
+    [t('lifetime.soulsInvested'), formatNumber(meta.soulsInvested())],
   ];
   for (const [label, value] of records) {
     ui.statRow(label, value, x, y, w, { color: PALETTE.gold });
@@ -780,7 +920,7 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   const rxi = rx + 24;
   const rw = columnW - 48;
 
-  ui.heading('СТИХИИ', rxi, ry, rw);
+  ui.heading(t('heading.elements'), rxi, ry, rw);
   ry += 24;
 
   const totalElemental = DAMAGE_TYPES.reduce((sum, t) => sum + l.damageByType[t], 0);
@@ -811,7 +951,7 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   }
 
   ry += 14;
-  ui.heading('ЖЕРТВЫ', rxi, ry, rw);
+  ui.heading(t('heading.victims'), rxi, ry, rw);
   ry += 24;
 
   const kills = Object.entries(l.killsByEnemy).sort((a, b) => b[1] - a[1]).slice(0, 8);
@@ -821,7 +961,7 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   }
 
   ry += 14;
-  ui.heading('ЛЮБИМЫЕ НАВЫКИ', rxi, ry, rw);
+  ui.heading(t('heading.favoriteSkills'), rxi, ry, rw);
   ry += 24;
 
   const skills = Object.entries(l.skillPicks).sort((a, b) => b[1] - a[1]).slice(0, 6);
@@ -833,7 +973,7 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   const nemesis = meta.nemesis();
   if (nemesis) {
     ry += 14;
-    ui.text(`Заклятый враг: ${nemesis.name} (${nemesis.count})`, rxi, ry, {
+    ui.text(t('lifetime.nemesis', { name: nemesis.name, count: nemesis.count }), rxi, ry, {
       size: 13,
       color: PALETTE.bad,
       baseline: 'middle',
@@ -842,11 +982,11 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   }
 
   let action: MenuAction = 'none';
-  if (ui.button(rect(ui.width / 2 - 200, ui.height - 74, 180, 44), 'Назад', { accent: '#9fd7ff' })) {
+  if (ui.button(rect(ui.width / 2 - 200, ui.height - 74, 180, 44), t('lifetime.back'), { accent: '#9fd7ff' })) {
     action = 'back';
   }
   if (
-    ui.button(rect(ui.width / 2 + 20, ui.height - 74, 180, 44), 'Стереть всё', {
+    ui.button(rect(ui.width / 2 + 20, ui.height - 74, 180, 44), t('lifetime.resetAll'), {
       accent: PALETTE.blood,
     })
   ) {
@@ -856,21 +996,8 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   return action;
 }
 
-const ENEMY_NAMES: Record<string, string> = {
-  peasant: 'Крестьянин',
-  militia: 'Ополченец',
-  archer: 'Лучник',
-  spearman: 'Копейщик',
-  crossbowman: 'Арбалетчик',
-  torchbearer: 'Факельщик',
-  priest: 'Жрец',
-  knight: 'Рыцарь',
-  ballista: 'Баллиста',
-  inquisitor: 'Инквизитор',
-};
-
 function enemyName(id: string): string {
-  return ENEMY_NAMES[id] ?? id;
+  return HUMAN_ARCHETYPES[id as keyof typeof HUMAN_ARCHETYPES]?.name ?? id;
 }
 
 // ---------------------------------------------------------------------------
@@ -884,7 +1011,7 @@ export function drawBuildSheet(
 ): void {
   ui.scrim(0.86);
 
-  ui.text('ТВОЯ ФОРМА', ui.width / 2, 46, {
+  ui.text(t('buildSheet.title'), ui.width / 2, 46, {
     size: 24,
     color: PALETTE.ink,
     align: 'center',
@@ -903,7 +1030,7 @@ export function drawBuildSheet(
   const w = columnW - 48;
   let y = top + 30;
 
-  ui.heading('ХАРАКТЕРИСТИКИ', x, y, w);
+  ui.heading(t('heading.stats'), x, y, w);
   y += 26;
 
   const shown: StatKey[] = [
@@ -935,19 +1062,19 @@ export function drawBuildSheet(
     const base = monster.stats.getBase(key);
     const better = LOWER_IS_BETTER.has(key) ? value < base : value > base;
 
-    ui.statRow(STAT_LABELS[key] ?? key, formatStat(key, value), colX, y + row * 21, colW, {
+    ui.statRow(statLabel(key), formatStat(key, value), colX, y + row * 21, colW, {
       size: 12,
       color: value === base ? PALETTE.ink : better ? PALETTE.good : PALETTE.bad,
     });
   });
   y += half * 21 + 18;
 
-  ui.heading('СТИХИИ', x, y, w);
+  ui.heading(t('heading.elements'), x, y, w);
   y += 24;
 
   const conversions = monster.stats.conversions();
   if (conversions.length === 0) {
-    ui.text('чистая физика', x, y, { size: 13, color: PALETTE.dim, italic: true, baseline: 'middle' });
+    ui.text(t('buildSheet.purePhysical'), x, y, { size: 13, color: PALETTE.dim, italic: true, baseline: 'middle' });
     y += 20;
   } else {
     for (const conversion of conversions) {
@@ -965,10 +1092,10 @@ export function drawBuildSheet(
   }
 
   y += 12;
-  ui.heading('ФОРМА', x, y, w);
+  ui.heading(t('heading.form'), x, y, w);
   y += 22;
   if (tracker.mutationsTaken.length === 0) {
-    ui.text('исходное тело', x, y, {
+    ui.text(t('buildSheet.baseForm'), x, y, {
       size: 13,
       color: PALETTE.dim,
       italic: true,
@@ -979,7 +1106,7 @@ export function drawBuildSheet(
     for (const mutation of tracker.mutationsTaken) {
       ui.swatch(x + 5, y, '#b06cff', 4);
       ui.text(mutation.name, x + 16, y, { size: 13, color: '#e0ccff', baseline: 'middle' });
-      ui.text(`комн. ${mutation.room + 1}`, x + w, y, {
+      ui.text(t('buildSheet.roomShort', { n: mutation.room + 1 }), x + w, y, {
         size: 12,
         color: PALETTE.dim,
         align: 'right',
@@ -989,12 +1116,18 @@ export function drawBuildSheet(
     }
   }
 
+  // Curses sit right under the form: they are as permanent as a mutation and the
+  // player needs to weigh them together when reading their build.
   y += 12;
-  ui.heading('ОСОБЕННОСТИ', x, y, w);
+  const carried = [...monster.curses].map(getCurse).filter((c): c is Curse => c !== undefined);
+  y = drawCurseList(ui, carried, x, y, w);
+
+  y += 12;
+  ui.heading(t('heading.traits'), x, y, w);
   y += 22;
   const behaviors = monster.stats.behaviorList();
   if (behaviors.length === 0) {
-    ui.text('пока никаких', x, y, { size: 13, color: PALETTE.dim, italic: true, baseline: 'middle' });
+    ui.text(t('buildSheet.noTraits'), x, y, { size: 13, color: PALETTE.dim, italic: true, baseline: 'middle' });
   } else {
     ui.paragraph(behaviors.map(behaviorLabel).join(' · '), x, y, w, {
       size: 12,
@@ -1010,11 +1143,11 @@ export function drawBuildSheet(
   const rw = columnW - 48;
   let ry = top + 30;
 
-  ui.heading('НАВЫКИ', rxi, ry, rw);
+  ui.heading(t('heading.skills'), rxi, ry, rw);
   ry += 26;
 
   if (skills.length === 0) {
-    ui.text('ещё ничего не взято', rxi, ry, {
+    ui.text(t('buildSheet.noSkills'), rxi, ry, {
       size: 13,
       color: PALETTE.dim,
       italic: true,
@@ -1044,18 +1177,18 @@ export function drawBuildSheet(
   }
 
   ry += 16;
-  ui.heading('ЭТОТ ЗАБЕГ', rxi, ry, rw);
+  ui.heading(t('heading.thisRun'), rxi, ry, rw);
   ry += 26;
 
   const live: Array<[string, string]> = [
-    ['Убито', `${tracker.totalKills}`],
-    ['Урон', formatNumber(tracker.totalDamageDealt)],
+    [t('resultStat.killedShort'), `${tracker.totalKills}`],
+    [t('resultStat.damageShort'), formatNumber(tracker.totalDamageDealt)],
     ['DPS', formatNumber(tracker.averageDps)],
-    ['Крит', `${(tracker.critRate * 100).toFixed(0)}%`],
-    ['Точность', `${(tracker.accuracy * 100).toFixed(0)}%`],
-    ['Получено', formatNumber(tracker.totalDamageTaken)],
-    ['Душ', `${Math.floor(monster.souls)}`],
-    ['Зданий', `${tracker.buildingsDestroyed}`],
+    [t('resultStat.crit'), `${(tracker.critRate * 100).toFixed(0)}%`],
+    [t('resultStat.accuracy'), `${(tracker.accuracy * 100).toFixed(0)}%`],
+    [t('resultStat.receivedShort'), formatNumber(tracker.totalDamageTaken)],
+    [t('resultStat.soulsShort'), `${Math.floor(monster.souls)}`],
+    [t('resultStat.buildingsShort'), `${tracker.buildingsDestroyed}`],
   ];
   for (const [label, value] of live) {
     ui.statRow(label, value, rxi, ry, rw, { size: 13 });
@@ -1063,7 +1196,7 @@ export function drawBuildSheet(
   }
 
   ry += 12;
-  ui.heading('УРОН ПО ТИПАМ', rxi, ry, rw);
+  ui.heading(t('heading.damageByType'), rxi, ry, rw);
   ry += 20;
   const segments = DAMAGE_TYPES.filter((t) => tracker.damageDealtByType[t] > 0).map((t) => ({
     value: tracker.damageDealtByType[t],
@@ -1071,7 +1204,7 @@ export function drawBuildSheet(
   }));
   ui.stackedBar(rect(rxi, ry, rw, 10), segments);
 
-  ui.text('TAB — закрыть', ui.width / 2, ui.height - 34, {
+  ui.text(t('buildSheet.close'), ui.width / 2, ui.height - 34, {
     size: 12,
     color: PALETTE.dim,
     align: 'center',
@@ -1079,41 +1212,18 @@ export function drawBuildSheet(
   });
 }
 
-const BEHAVIOR_LABELS: Record<string, string> = {
-  ricochet: 'рикошет',
-  homing: 'наведение',
-  explodeOnKill: 'взрыв плоти',
-  burningGround: 'выжженная земля',
-  poisonCloud: 'чумное облако',
-  chainLightning: 'цепная гроза',
-  frostNova: 'ледяная вспышка',
-  soulHarvest: 'жатва душ',
-  orbitingSpawn: 'выводок',
-  rageAtLowHp: 'берсерк',
-  executeWeak: 'добивание',
-  bleedOnCrit: 'кровопускание',
-  curseOnHit: 'проклятие',
-  fearOnKill: 'устрашающий рёв',
-  deathBlossom: 'смертный цвет',
-  devourCorpses: 'пожиратель',
-  razeBuildings: 'разрушитель',
-  terrorAura: 'аура ужаса',
-  secondWind: 'второе дыхание',
-  glassCannon: 'хрупкая ярость',
-};
-
 function behaviorLabel(flag: string): string {
-  return BEHAVIOR_LABELS[flag] ?? flag;
+  return t(`behavior.${flag}`);
 }
 
 // ---------------------------------------------------------------------------
 
-export type PauseAction = 'none' | 'resume' | 'menu';
+export type PauseAction = 'none' | 'resume' | 'menu' | 'settings';
 
 export function drawPause(ui: Ui): PauseAction {
   ui.scrim(0.78);
 
-  ui.text('ПАУЗА', ui.width / 2, ui.height / 2 - 90, {
+  ui.text(t('pause.title'), ui.width / 2, ui.height / 2 - 90, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
@@ -1122,18 +1232,30 @@ export function drawPause(ui: Ui): PauseAction {
   });
 
   let action: PauseAction = 'none';
-  if (ui.button(rect(ui.width / 2 - 120, ui.height / 2 - 30, 240, 48), 'Продолжить')) {
+  if (ui.button(rect(ui.width / 2 - 120, ui.height / 2 - 30, 240, 48), t('pause.resume'))) {
     action = 'resume';
   }
+  // Settings sit above 'abandon' on purpose. The reason to open this menu mid-run is
+  // usually to turn the camera shake down, and that button must not be next to the
+  // one that throws the run away.
   if (
-    ui.button(rect(ui.width / 2 - 120, ui.height / 2 + 30, 240, 44), 'Бросить забег', {
+    ui.button(rect(ui.width / 2 - 120, ui.height / 2 + 26, 240, 34), t('menu.settings'), {
+      accent: PALETTE.gold,
+      size: 14,
+    })
+  ) {
+    action = 'settings';
+  }
+  if (
+    ui.button(rect(ui.width / 2 - 120, ui.height / 2 + 68, 240, 40), t('pause.abandon'), {
       accent: PALETTE.blood,
+      size: 14,
     })
   ) {
     action = 'menu';
   }
 
-  ui.text('ESC — продолжить', ui.width / 2, ui.height / 2 + 100, {
+  ui.text(t('pause.hint'), ui.width / 2, ui.height / 2 + 126, {
     size: 12,
     color: PALETTE.dim,
     align: 'center',
@@ -1148,7 +1270,7 @@ export function drawRoomIntro(ui: Ui, name: string, index: number, progress: num
   // Fade in over the first third, hold, fade out over the last third.
   const alpha = progress < 0.3 ? progress / 0.3 : progress > 0.7 ? (1 - progress) / 0.3 : 1;
 
-  ui.text(`КОМНАТА ${index + 1}`, ui.width / 2, ui.height / 2 - 26, {
+  ui.text(t('roomIntro.label', { n: index + 1 }), ui.width / 2, ui.height / 2 - 26, {
     size: 13,
     color: PALETTE.muted,
     align: 'center',

@@ -1,5 +1,6 @@
 import { clamp, type Rect, TAU } from '../core/math';
 import { cosmeticRng, RNG } from '../core/rng';
+import { t } from '../i18n';
 import type { World } from '../world/world';
 import { Entity } from './entity';
 
@@ -44,7 +45,7 @@ export interface BuildingProfile {
 export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   hut: {
     kind: 'hut',
-    name: 'Лачуга',
+    get name() { return t('building.hut.name'); },
     hp: 120,
     souls: 3,
     occupancy: [0, 2],
@@ -56,7 +57,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   house: {
     kind: 'house',
-    name: 'Дом',
+    get name() { return t('building.house.name'); },
     hp: 220,
     souls: 6,
     occupancy: [1, 3],
@@ -68,7 +69,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   longhouse: {
     kind: 'longhouse',
-    name: 'Общинный дом',
+    get name() { return t('building.longhouse.name'); },
     hp: 400,
     souls: 12,
     occupancy: [2, 5],
@@ -80,7 +81,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   granary: {
     kind: 'granary',
-    name: 'Амбар',
+    get name() { return t('building.granary.name'); },
     hp: 180,
     souls: 5,
     occupancy: [0, 1],
@@ -92,7 +93,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   chapel: {
     kind: 'chapel',
-    name: 'Часовня',
+    get name() { return t('building.chapel.name'); },
     hp: 520,
     souls: 20,
     occupancy: [2, 4],
@@ -104,7 +105,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   watchtower: {
     kind: 'watchtower',
-    name: 'Дозорная башня',
+    get name() { return t('building.watchtower.name'); },
     hp: 340,
     souls: 14,
     occupancy: [1, 2],
@@ -116,7 +117,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   well: {
     kind: 'well',
-    name: 'Колодец',
+    get name() { return t('building.well.name'); },
     hp: 160,
     souls: 2,
     occupancy: [0, 0],
@@ -128,7 +129,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   wall: {
     kind: 'wall',
-    name: 'Стена',
+    get name() { return t('building.wall.name'); },
     hp: 600,
     souls: 1,
     occupancy: [0, 0],
@@ -140,7 +141,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   palisade: {
     kind: 'palisade',
-    name: 'Частокол',
+    get name() { return t('building.palisade.name'); },
     hp: 260,
     souls: 1,
     occupancy: [0, 0],
@@ -152,7 +153,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   cart: {
     kind: 'cart',
-    name: 'Телега',
+    get name() { return t('building.cart.name'); },
     hp: 90,
     souls: 2,
     occupancy: [0, 0],
@@ -164,7 +165,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   },
   stack: {
     kind: 'stack',
-    name: 'Стог',
+    get name() { return t('building.stack.name'); },
     hp: 60,
     souls: 1,
     occupancy: [0, 0],
@@ -225,6 +226,7 @@ export class Building extends Entity {
 
     this.hp -= amount;
     this.damageFlash = 1;
+    world.sound.buildingHit(this);
 
     world.particles.emit({
       count: 4,
@@ -251,6 +253,7 @@ export class Building extends Entity {
     world.markSolidsDirty();
 
     world.camera.shake(6);
+    world.sound.buildingCollapse(this);
     world.decals.scorch(this.x, this.y, Math.max(this.rect.w, this.rect.h) * 0.6);
 
     world.particles.emit({

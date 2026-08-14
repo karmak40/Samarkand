@@ -1,4 +1,5 @@
 import { TAU } from '../core/math';
+import { t } from '../i18n';
 import { type BoonDef } from '../progression/boons';
 import type { World } from '../world/world';
 import { Entity } from './entity';
@@ -128,13 +129,15 @@ export class Pickup extends Entity {
 
     switch (this.kind) {
       case 'soul': {
+        world.sound.soul(this);
         const gained = this.value * world.monster.stats.get('soulGain');
         world.monster.gainSouls(gained, world);
         break;
       }
       case 'blood': {
+        world.sound.blood(this);
         const healed = this.value * world.monster.stats.get('healingReceived');
-        world.monster.heal(healed, world, 'Кровь');
+        world.monster.heal(healed, world, t('effect.blood'));
         break;
       }
       case 'ember': {

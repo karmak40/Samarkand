@@ -1,5 +1,7 @@
+import type { SoundBank } from '../audio/sfx';
 import { clamp, type Rect, rectContains, TAU } from '../core/math';
 import type { Input } from '../core/input';
+import { t } from '../i18n';
 
 export const FONT = 'Georgia, "Times New Roman", serif';
 
@@ -58,6 +60,14 @@ export class Ui {
   /** Set while any widget is hovered, so the cursor can change. */
   hoveringInteractive = false;
 
+  /** Assigned by the game; widgets click and hover through it. */
+  sound: SoundBank | null = null;
+
+  /** Widget ids hovered last frame, so the hover chirp fires only on entry. */
+  private hoveredLastFrame = new Set<string>();
+  private hoveredThisFrame = new Set<string>();
+  private zoneCounter = 0;
+
   constructor(ctx: CanvasRenderingContext2D) {
     this.ctx = ctx;
   }
@@ -67,6 +77,31 @@ export class Ui {
     this.width = width;
     this.height = height;
     this.hoveringInteractive = false;
+
+    // Swap the hover sets so this frame can compare against the previous one.
+    const previous = this.hoveredLastFrame;
+    this.hoveredLastFrame = this.hoveredThisFrame;
+    this.hoveredThisFrame = previous;
+    this.hoveredThisFrame.clear();
+    this.zoneCounter = 0;
+  }
+
+  /**
+   * Register interaction with a widget and play its sounds.
+   *
+   * Hover is edge-triggered against the previous frame — widgets are drawn in a
+   * stable order, so their index is a good enough identity without threading keys
+   * through every call site.
+   */
+  private registerInteraction(rect: Rect, hovered: boolean): boolean {
+    const id = `${this.zoneCounter++}:${Math.round(rect.x)},${Math.round(rect.y)}`;
+    if (hovered) {
+      this.hoveredThisFrame.add(id);
+      if (!this.hoveredLastFrame.has(id)) this.sound?.uiHover();
+    }
+    const clicked = hovered && this.input.mouseClicked;
+    if (clicked) this.sound?.uiClick();
+    return clicked;
   }
 
   get mouseX(): number {
@@ -75,6 +110,11 @@ export class Ui {
 
   get mouseY(): number {
     return this.input.mouse.y;
+  }
+
+  /** Held state, for widgets that scrub rather than click (the volume bar). */
+  get isMouseDown(): boolean {
+    return this.input.mouseDown;
   }
 
   // ---- primitives ----------------------------------------------------------
@@ -292,7 +332,7 @@ export class Ui {
     const hovered = !disabled && this.isHovered(rect);
     if (hovered) this.hoveringInteractive = true;
 
-    const clicked = hovered && this.input.mouseClicked;
+    const clicked = this.registerInteraction(rect, hovered);
 
     this.panel(rect, {
       fill: disabled
@@ -334,7 +374,7 @@ export class Ui {
   hitZone(rect: Rect): { hovered: boolean; clicked: boolean } {
     const hovered = this.isHovered(rect);
     if (hovered) this.hoveringInteractive = true;
-    return { hovered, clicked: hovered && this.input.mouseClicked };
+    return { hovered, clicked: this.registerInteraction(rect, hovered) };
   }
 
   // ---- decoration ----------------------------------------------------------
@@ -347,7 +387,7 @@ export class Ui {
   }
 
   /** Section heading with a rule to its right. */
-  heading(label: string, x: number, y: number, width: number, color = PALETTE.gold): void {
+  heading(label: string, x: number, y: number, width: number, color: string = PALETTE.gold): void {
     const textWidth = this.text(label, x, y, {
       size: 13,
       color,
@@ -432,7 +472,7 @@ export class Ui {
     this.panel(rect, { fill: 'rgba(10,9,12,0.7)', radius: 4, shadow: false });
 
     if (values.length < 2) {
-      this.text('недостаточно данных', rect.x + rect.w / 2, rect.y + rect.h / 2, {
+      this.text(t('chart.noData'), rect.x + rect.w / 2, rect.y + rect.h / 2, {
         size: 12,
         color: PALETTE.dim,
         align: 'center',
@@ -475,7 +515,7 @@ export class Ui {
     ctx.stroke();
     ctx.restore();
 
-    this.text(`пик ${Math.round(max)}`, rect.x + rect.w - 8, rect.y + 12, {
+    this.text(t('chart.peak', { n: Math.round(max) }), rect.x + rect.w - 8, rect.y + 12, {
       size: 11,
       color: PALETTE.dim,
       align: 'right',

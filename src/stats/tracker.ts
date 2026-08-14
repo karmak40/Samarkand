@@ -112,6 +112,7 @@ export class RunStats {
   // --- progression ----------------------------------------------------------
   readonly skillsTaken: Array<{ id: string; name: string; rarity: string; room: number }> = [];
   readonly mutationsTaken: Array<{ id: string; name: string; room: number }> = [];
+  readonly cursesTaken: Array<{ id: string; name: string; room: number }> = [];
 
   // --- graph ----------------------------------------------------------------
   readonly dpsSeries: DpsSample[] = [];
@@ -271,6 +272,11 @@ export class RunStats {
 
   recordMutation(id: string, name: string): void {
     this.mutationsTaken.push({ id, name, room: this.currentRoomIndex });
+  }
+
+  /** Bargains struck at an altar. Permanent, so a run is judged by them too. */
+  recordCurse(id: string, name: string): void {
+    this.cursesTaken.push({ id, name, room: this.currentRoomIndex });
   }
 
   // ---- derived -------------------------------------------------------------

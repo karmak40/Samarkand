@@ -7,6 +7,7 @@ import {
   rawTotal,
 } from '../combat/damage';
 import { StatusContainer } from '../combat/status';
+import { t } from '../i18n';
 import type { World } from '../world/world';
 
 export type Faction = 'monster' | 'human' | 'neutral';
@@ -92,7 +93,7 @@ export abstract class Combatant extends Entity {
     return this.maxHp > 0 ? Math.max(0, this.hp / this.maxHp) : 0;
   }
 
-  heal(amount: number, world: World, label = 'Лечение'): number {
+  heal(amount: number, world: World, label = t('effect.heal')): number {
     if (!this.alive || amount <= 0) return 0;
     const before = this.hp;
     this.hp = Math.min(this.maxHp, this.hp + amount);

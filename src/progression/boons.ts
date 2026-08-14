@@ -1,4 +1,6 @@
 import { RNG } from '../core/rng';
+import { type ContentGate, OPEN_GATE } from './gate';
+import { t } from '../i18n';
 import { type MonsterBody } from './evolution';
 import { type RawModifier } from './skills';
 import { type BehaviorFlag } from './stats';
@@ -31,8 +33,8 @@ export interface BoonDef {
 export const BOONS: readonly BoonDef[] = [
   {
     id: 'pyre',
-    name: 'Пламенный облик',
-    description: 'Тело охватывает огонь. Урон обращается в пламя, земля под ногами тлеет.',
+    get name() { return t('boon.pyre.name'); },
+    get description() { return t('boon.pyre.description'); },
     duration: 20,
     color: '#ff7b31',
     modifiers: [
@@ -50,8 +52,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'colossus',
-    name: 'Исполин',
-    description: 'Ты раздуваешься втрое. Больше здоровья и урона, но тяжелее шаг.',
+    get name() { return t('boon.colossus.name'); },
+    get description() { return t('boon.colossus.description'); },
     duration: 18,
     color: '#d8a13a',
     modifiers: [
@@ -71,8 +73,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'wraith',
-    name: 'Бесплотность',
-    description: 'Тело истончается до тени: быстрее, почти неуловим, но хрупок.',
+    get name() { return t('boon.wraith.name'); },
+    get description() { return t('boon.wraith.description'); },
     duration: 15,
     color: '#9fb4c7',
     modifiers: [
@@ -93,8 +95,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'stormcrown',
-    name: 'Грозовой венец',
-    description: 'В теле бьётся молния: удары перескакивают на соседей.',
+    get name() { return t('boon.stormcrown.name'); },
+    get description() { return t('boon.stormcrown.description'); },
     duration: 18,
     color: '#ffe45c',
     modifiers: [
@@ -113,8 +115,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'ossuary',
-    name: 'Костяной доспех',
-    description: 'Из спины вырастает костяной панцирь. Броня и шипы.',
+    get name() { return t('boon.ossuary.name'); },
+    get description() { return t('boon.ossuary.description'); },
     duration: 20,
     color: '#e2dccb',
     modifiers: [
@@ -132,8 +134,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'myriad',
-    name: 'Тысячеокий',
-    description: 'Глаза раскрываются по всему телу. Ты видишь дальше и бьёшь точнее.',
+    get name() { return t('boon.myriad.name'); },
+    get description() { return t('boon.myriad.description'); },
     duration: 18,
     color: '#b06cff',
     modifiers: [
@@ -151,8 +153,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'winged',
-    name: 'Крылатый ужас',
-    description: 'Перепончатые крылья разворачиваются за спиной. Скорость и лишние рывки.',
+    get name() { return t('boon.winged.name'); },
+    get description() { return t('boon.winged.description'); },
     duration: 18,
     color: '#8f7ad8',
     modifiers: [
@@ -169,8 +171,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'miasma',
-    name: 'Чумное дыхание',
-    description: 'Из пор сочится зараза. Убитые оставляют облако яда.',
+    get name() { return t('boon.miasma.name'); },
+    get description() { return t('boon.miasma.description'); },
     duration: 20,
     color: '#8ed44f',
     modifiers: [
@@ -189,8 +191,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'brood',
-    name: 'Рой',
-    description: 'Тело распадается на множество лап. Атака и бег ускоряются.',
+    get name() { return t('boon.brood.name'); },
+    get description() { return t('boon.brood.description'); },
     duration: 16,
     color: '#c46b9a',
     modifiers: [
@@ -209,8 +211,8 @@ export const BOONS: readonly BoonDef[] = [
   },
   {
     id: 'glacier',
-    name: 'Ледяное сердце',
-    description: 'Кожа стекленеет от мороза. Всё вокруг замедляется.',
+    get name() { return t('boon.glacier.name'); },
+    get description() { return t('boon.glacier.description'); },
     duration: 18,
     color: '#6fd0ff',
     modifiers: [
@@ -242,8 +244,16 @@ export function getBoon(id: string): BoonDef | undefined {
  * @param active ids already running — a duplicate would just refresh a timer, which
  *               is a dull thing to find lying on the ground.
  */
-export function rollBoon(rng: RNG, active: ReadonlySet<string>): BoonDef {
-  const pool = BOONS.filter((b) => !active.has(b.id));
-  const source = pool.length > 0 ? pool : BOONS;
-  return rng.pickWeighted(source, (b) => b.weight);
+export function rollBoon(
+  rng: RNG,
+  active: ReadonlySet<string>,
+  gate: ContentGate = OPEN_GATE,
+): BoonDef {
+  const owned = BOONS.filter((b) => gate.has('boon', b.id));
+  const source = owned.length > 0 ? owned : BOONS;
+  // Prefer a form the monster is not already wearing; a duplicate would only top up
+  // a timer, which is a dull thing to find lying on the ground.
+  const fresh = source.filter((b) => !active.has(b.id));
+  const pool = fresh.length > 0 ? fresh : source;
+  return rng.pickWeighted(pool, (b) => b.weight);
 }
