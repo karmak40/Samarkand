@@ -1,6 +1,7 @@
 import { Ambience } from './audio/ambience';
 import { AudioEngine } from './audio/engine';
 import { SoundBank } from './audio/sfx';
+import { type AdResult, type AdService, SimulatedAdService } from './core/ads';
 import { Camera } from './core/camera';
 import { Input } from './core/input';
 import { clamp, TAU } from './core/math';
@@ -43,6 +44,7 @@ import {
 } from './ui/run-screens';
 import { drawAchievements } from './ui/achievements';
 import { drawLair } from './ui/lair';
+import { drawReviveOffer, newReviveView, type ReviveView } from './ui/revive';
 import { drawSettings, newSettingsView, type SettingsView } from './ui/settings';
 import { drawTouchControls } from './ui/touch-hud';
 import { PALETTE, Ui } from './ui/widgets';
@@ -73,6 +75,7 @@ type GameState =
   | 'market'
   | 'cursed'
   | 'pause'
+  | 'revive'
   | 'results';
 
 /**
@@ -94,6 +97,21 @@ export class Game {
   private readonly ambience = new Ambience(this.audio);
   /** Recent damage taken, decaying — one of the inputs to the ambience mix. */
   private heat = 0;
+
+  /**
+   * Rewarded-video revive.
+   *
+   * `ads` is injected rather than constructed here: which SDK it wraps, if any, is
+   * decided once at boot in `main.ts` by which portal the build is going to, and
+   * `Game` has no business knowing that. `reviveAdUsed` caps the offer at once per
+   * run — a comeback offered after every death would cost the roguelite its stakes,
+   * so it exists only for the one death that would otherwise end the run outright.
+   */
+  private readonly ads: AdService;
+  private reviveAdUsed = false;
+  private readonly reviveView: ReviveView = newReviveView();
+  /** Seconds spent in the revive offer, for the "ad playing" pulse. */
+  private reviveElapsed = 0;
 
   private state: GameState = 'menu';
   /** Toggled with Tab during play. */
@@ -169,7 +187,8 @@ export class Game {
   /** Smoothed cost of a frame in milliseconds, for the optional readout. */
   private frameCostMs = 0;
 
-  constructor(canvas: HTMLCanvasElement) {
+  constructor(canvas: HTMLCanvasElement, ads: AdService = new SimulatedAdService()) {
+    this.ads = ads;
     this.renderer = new Renderer(canvas);
     this.input = new Input(canvas);
     this.ui = new Ui(this.renderer.ctx);
@@ -257,6 +276,7 @@ export class Game {
    * settlements, the relics and the order cards come up in.
    */
   private beginRun(seed = (Math.random() * 0xffffffff) >>> 0, daily = false): void {
+    this.ads.notifyGameplayStart();
     this.isDailyRun = daily;
     this.earnedTrials = [];
     this.runRng = new RNG(seed);
@@ -294,6 +314,8 @@ export class Game {
     this.cardsReturnState = null;
     this.hurtFlash = 0;
     this.mapTime = 0;
+    this.reviveAdUsed = false;
+    this.reviveView.phase = 'offer';
 
     // The run opens on the map: the very first stop is already a choice of one.
     this.state = 'map';
@@ -676,11 +698,34 @@ export class Game {
   }
 
   private finishRun(): void {
+    this.ads.notifyGameplayStop();
     const earned = Math.floor(this.monster.soulsThisRun);
     this.soulsAtRunStart = earned;
     this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun });
     this.resultsView.scroll = 0;
     this.state = 'results';
+  }
+
+  /**
+   * Called once the ad promise settles — anywhere from a second to however long a
+   * real network's video runs.
+   *
+   * Guarded on the state still being 'revive': the frame-error fallback in
+   * `recoverFromFrameError` can have bounced the player back to the menu, or they may
+   * already be mid-way into a new run, by the time this fires. Reviving a monster
+   * that no longer belongs to the run in progress would be a bug no player action
+   * caused.
+   */
+  private resolveRevive(result: AdResult): void {
+    if (this.state !== 'revive') return;
+
+    if (result === 'completed') {
+      this.reviveAdUsed = true;
+      this.monster.revive(this.world, 0.5, t('effect.adRevive'), () => this.sound.secondWind());
+      this.state = 'playing';
+    } else {
+      this.finishRun();
+    }
   }
 
   // ---- frame ---------------------------------------------------------------
@@ -795,6 +840,11 @@ export class Game {
         // Modal states still animate the camera so the frozen world doesn't jitter.
         this.camera.update(delta);
         return;
+
+      case 'revive':
+        this.camera.update(delta);
+        this.reviveElapsed += delta;
+        return;
     }
   }
 
@@ -899,6 +949,12 @@ export class Game {
     this.lastHp = this.monster.hp;
 
     if (!this.monster.alive) {
+      if (!this.reviveAdUsed && this.ads.isRewardedAdAvailable()) {
+        this.reviveView.phase = 'offer';
+        this.reviveElapsed = 0;
+        this.state = 'revive';
+        return;
+      }
       this.finishRun();
       return;
     }
@@ -1129,6 +1185,23 @@ export class Game {
           this.tracker.killedBy = t('source.retreat');
           this.finishRun();
         }
+        break;
+      }
+
+      case 'revive': {
+        const action = drawReviveOffer(this.ui, this.reviveView, this.reviveElapsed);
+        if (action === 'watch') {
+          this.reviveView.phase = 'watching';
+          this.reviveElapsed = 0;
+          // A real network's promise is more likely to reject on failure than resolve
+          // with a sentinel — caught the same way, so a rejected ad ends the run
+          // instead of leaving the offer screen stuck waiting forever.
+          this.ads
+            .showRewardedAd()
+            .then((result) => this.resolveRevive(result))
+            .catch(() => this.resolveRevive('unavailable'));
+        }
+        if (action === 'decline') this.finishRun();
         break;
       }
 

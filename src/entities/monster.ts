@@ -489,24 +489,37 @@ export class Monster extends Combatant {
     // Second wind converts a lethal blow into a comeback, once per room.
     if (!this.alive && this.secondWindReady && this.stats.has('secondWind')) {
       this.secondWindReady = false;
-      this.alive = true;
-      this.hp = this.maxHp * 0.25;
-      this.invulnerable = 1.4;
-      this.deathTime = -1;
-      world.camera.shake(14);
-      world.particles.ring(this.x, this.y, '#ffe28a', 180, 0.9);
-      world.texts.add(this.x, this.y - 40, t('effect.secondWind').toUpperCase(), '#ffe28a', 22, 1);
-      world.sound.secondWind();
-      // Push everyone off so the revive isn't immediately undone.
-      for (const human of world.humansInRadius(this.x, this.y, 200)) {
-        const angle = Math.atan2(human.y - this.y, human.x - this.x);
-        human.vx += Math.cos(angle) * 420;
-        human.vy += Math.sin(angle) * 420;
-        human.statuses.apply({ id: 'fear', duration: 2.5, sourceLabel: t('effect.secondWind') });
-      }
+      this.revive(world, 0.25, t('effect.secondWind'), () => world.sound.secondWind());
     }
 
     return result;
+  }
+
+  /**
+   * Bring the monster back from a killing blow.
+   *
+   * Shared by the in-run second-wind proc and the meta-level ad revive offered from
+   * `Game` — both need the same choreography, not just the same effect on `hp`. Health
+   * restored to a *fraction* of max rather than a flat amount, so a revive stays
+   * proportionate to whatever curses or upgrades have changed the ceiling this run.
+   * The crowd is knocked back and frightened off regardless of who granted the
+   * revive, or it would be undone on the very next tick by whoever landed the kill.
+   */
+  revive(world: World, healthFraction: number, label: string, playSound: () => void): void {
+    this.alive = true;
+    this.hp = this.maxHp * healthFraction;
+    this.invulnerable = 1.4;
+    this.deathTime = -1;
+    world.camera.shake(14);
+    world.particles.ring(this.x, this.y, '#ffe28a', 180, 0.9);
+    world.texts.add(this.x, this.y - 40, label.toUpperCase(), '#ffe28a', 22, 1);
+    playSound();
+    for (const human of world.humansInRadius(this.x, this.y, 200)) {
+      const angle = Math.atan2(human.y - this.y, human.x - this.x);
+      human.vx += Math.cos(angle) * 420;
+      human.vy += Math.sin(angle) * 420;
+      human.statuses.apply({ id: 'fear', duration: 2.5, sourceLabel: label });
+    }
   }
 
   protected override onDeath(world: World, ctx: DeathContext): void {

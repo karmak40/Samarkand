@@ -38,8 +38,14 @@ describe('first visit (nothing saved)', () => {
     expect(getLocale()).toBe('uk');
   });
 
-  it('falls back to English for a language the game does not have', async () => {
+  it('picks French for a French system', async () => {
     stubNavigator(['fr-FR']);
+    const { getLocale } = await import('./locale');
+    expect(getLocale()).toBe('fr');
+  });
+
+  it('falls back to English for a language the game does not have', async () => {
+    stubNavigator(['es-ES']);
     const { getLocale } = await import('./locale');
     expect(getLocale()).toBe('en');
   });
@@ -51,9 +57,9 @@ describe('first visit (nothing saved)', () => {
   });
 
   it('looks past an unsupported first preference to a supported one further down the list', async () => {
-    // A system set to French with German as the fallback language should land on
+    // A system set to Spanish with German as the fallback language should land on
     // German, not skip straight past it to English.
-    stubNavigator(['fr-FR', 'de-DE']);
+    stubNavigator(['es-ES', 'de-DE']);
     const { getLocale } = await import('./locale');
     expect(getLocale()).toBe('de');
   });

@@ -59,6 +59,18 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
     },
     bossSuffix: { inquisitor: 'Інквізиції', warlord: 'Воєводи', pyromancer: 'Вогнетримачки' },
   },
+  fr: {
+    prefixes: ['Silencieux', 'Gris', 'Vieux', 'Lointain', 'Humide', 'Tordu', 'Loup', 'Cendré', 'Sourd', 'Dernier'],
+    roots: {
+      hamlet: ['Hameau', 'Écart', 'Enclos', 'Défriche'],
+      village: ['Nécropole', 'Bourg', 'Peuplement', 'Oppidum'],
+      fortified: ['Palanque', 'Avant-poste', 'Redoute', 'Rempart'],
+      shrine: ['Ermitage', 'Chapelle', 'Cloître', 'Sanctuaire'],
+      elite: ['Garnison', 'Guet', 'Campement', 'Corps de garde'],
+      boss: ['Cathédrale', 'Bastion', 'Forteresse'],
+    },
+    bossSuffix: { inquisitor: "de l'Inquisition", warlord: 'du Seigneur de guerre', pyromancer: 'de la Pyromancienne' },
+  },
 };
 
 export function roomNamePrefixes(): string[] {

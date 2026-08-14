@@ -143,6 +143,14 @@ export const EN: Record<string, string> = {
 
   'source.retreat': 'retreat',
 
+  // ---- ad revive ---------------------------------------------------------------
+  'revive.title': 'LAST CHANCE',
+  'revive.subtitle': 'Watch an ad and rise again at half health. Once per hunt.',
+  'revive.watch': 'Watch ad',
+  'revive.decline': 'Accept death',
+  'revive.watching': 'Ad playing…',
+  'effect.adRevive': 'REVIVED',
+
   // ---- enemies -----------------------------------------------------------------
   'enemy.peasant.name': 'Peasant',
   'enemy.militia.name': 'Militiaman',

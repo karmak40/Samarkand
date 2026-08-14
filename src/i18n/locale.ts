@@ -1,6 +1,6 @@
-export type Locale = 'en' | 'de' | 'ru' | 'uk';
+export type Locale = 'en' | 'de' | 'ru' | 'uk' | 'fr';
 
-export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk'];
+export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk', 'fr'];
 
 const STORAGE_KEY = 'samarkand.locale';
 
@@ -25,6 +25,7 @@ function detectLocale(): Locale {
     if (lang === 'de') return 'de';
     if (lang === 'ru') return 'ru';
     if (lang === 'uk') return 'uk';
+    if (lang === 'fr') return 'fr';
   }
   return 'en';
 }
@@ -32,7 +33,7 @@ function detectLocale(): Locale {
 function loadLocale(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'de' || saved === 'ru' || saved === 'uk') return saved;
+    if (saved === 'en' || saved === 'de' || saved === 'ru' || saved === 'uk' || saved === 'fr') return saved;
   } catch {
     // Private browsing or a disabled store — fall back to detection.
   }

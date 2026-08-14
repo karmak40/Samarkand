@@ -308,7 +308,7 @@ function choiceRow<T>(ui: Ui, x: number, y: number, w: number, row: ChoiceRow<T>
 /**
  * Language, as a dropdown rather than a permanent list.
  *
- * The trigger alone costs one row; the full list — three languages today, more later
+ * The trigger alone costs one row; the full list — five languages today, more later
  * — only exists while it is actually being chosen, in place of the fixed height a
  * standing list would spend on every visit to this screen regardless of whether
  * anyone came here to touch it.

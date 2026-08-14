@@ -143,6 +143,14 @@ export const DE: Record<string, string> = {
 
   'source.retreat': 'Rückzug',
 
+  // ---- ad revive ---------------------------------------------------------------
+  'revive.title': 'LETZTE CHANCE',
+  'revive.subtitle': 'Sieh dir eine Werbung an und steh mit halber Gesundheit wieder auf. Nur einmal pro Jagd.',
+  'revive.watch': 'Werbung ansehen',
+  'revive.decline': 'Tod annehmen',
+  'revive.watching': 'Werbung läuft…',
+  'effect.adRevive': 'WIEDERBELEBT',
+
   // ---- enemies -----------------------------------------------------------------
   'enemy.peasant.name': 'Bauer',
   'enemy.militia.name': 'Milizionär',
