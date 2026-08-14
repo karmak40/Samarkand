@@ -68,19 +68,21 @@ export function drawSettings(
   const settings = meta.settings;
   ui.scrim(0.94);
 
-  ui.text(t('settings.title'), ui.width / 2, 50, {
+  ui.fittedText(t('settings.title'), ui.width / 2, 50, {
     size: 30,
     color: PALETTE.gold,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('settings.subtitle'), ui.width / 2, 82, {
+  ui.fittedText(t('settings.subtitle'), ui.width / 2, 82, {
     size: 13,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
   const panelW = Math.min(560, ui.width - 60);

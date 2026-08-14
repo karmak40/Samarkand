@@ -30,6 +30,8 @@ import {
   drawMutationSelect,
   drawPause,
   drawResults,
+  newResultsView,
+  type ResultsView,
   drawRoomIntro,
 } from './ui/screens';
 import {
@@ -148,6 +150,7 @@ export class Game {
   };
   private readonly trialsView = { scroll: 0 };
   private readonly settingsView: SettingsView = newSettingsView();
+  private readonly resultsView: ResultsView = newResultsView();
   /** Where 'back' returns to: the title screen, or the paused run it was opened from. */
   private settingsReturnState: GameState = 'menu';
 
@@ -676,6 +679,7 @@ export class Game {
     const earned = Math.floor(this.monster.soulsThisRun);
     this.soulsAtRunStart = earned;
     this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun });
+    this.resultsView.scroll = 0;
     this.state = 'results';
   }
 
@@ -1129,10 +1133,10 @@ export class Game {
       }
 
       case 'results': {
-        const action = drawResults(this.ui, this.tracker, this.soulsAtRunStart, this.meta, {
+        const action = drawResults(this.ui, this.input, this.tracker, this.soulsAtRunStart, this.meta, {
           daily: this.isDailyRun,
           earned: this.earnedTrials,
-        });
+        }, this.resultsView);
         // "Again" after a daily replays the same day's seed — that is the whole
         // point of a daily: the run stays fixed, only you change.
         if (action === 'again') {

@@ -34,19 +34,21 @@ export function drawAchievements(
 ): TrialsAction {
   ui.scrim(0.94);
 
-  ui.text(t('trials.title'), ui.width / 2, 50, {
+  ui.fittedText(t('trials.title'), ui.width / 2, 50, {
     size: 30,
     color: PALETTE.gold,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('trials.subtitle'), ui.width / 2, 82, {
+  ui.fittedText(t('trials.subtitle'), ui.width / 2, 82, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
   ui.text(

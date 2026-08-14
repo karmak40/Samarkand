@@ -1,5 +1,5 @@
 import type { Input } from '../core/input';
-import { TAU } from '../core/math';
+import { clamp, TAU } from '../core/math';
 import { t } from '../i18n';
 import { type Curse, curseDescription, curseName } from '../progression/curses';
 import { RARITY, type SkillCard } from '../progression/skills';
@@ -51,19 +51,21 @@ export function drawRunMap(
 ): number {
   ui.scrim(0.9);
 
-  ui.text(t('map.title'), ui.width / 2, 54, {
+  ui.fittedText(t('map.title'), ui.width / 2, 54, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('map.subtitle'), ui.width / 2, 88, {
+  ui.fittedText(t('map.subtitle'), ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
   const margin = 70;
@@ -358,19 +360,21 @@ export function drawMarket(
   ui.scrim(0.9);
   const result: MarketResult = { bought: -1, left: false };
 
-  ui.text(t('market.title'), ui.width / 2, 66, {
+  ui.fittedText(t('market.title'), ui.width / 2, 66, {
     size: 28,
     color: '#9fd7ff',
     align: 'center',
     baseline: 'middle',
     letterSpacing: 8,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('market.subtitle'), ui.width / 2, 100, {
+  ui.fittedText(t('market.subtitle'), ui.width / 2, 100, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
   ui.text(t('market.souls', { n: Math.floor(souls) }), ui.width / 2, 128, {
     size: 15,
@@ -380,85 +384,166 @@ export function drawMarket(
     bold: true,
   });
 
-  const cardW = Math.max(150, Math.min(250, (ui.width - 140) / Math.max(1, offers.length) - 22));
-  const cardH = Math.max(190, Math.min(280, ui.height - 340));
-  const gap = 22;
-  const totalW = offers.length * cardW + (offers.length - 1) * gap;
-  const startX = (ui.width - totalW) / 2;
-  const y = ui.height / 2 - cardH / 2 + 30;
+  // Same overflow as the card draft below this width, same fix: stack instead of
+  // forcing a floor width that would run three offers off both edges.
+  const stacked = ui.width < 620;
+  let offersBottom: number;
 
-  offers.forEach((offer, i) => {
-    const x = startX + i * (cardW + gap);
-    const affordable = !offer.sold && souls >= offer.price;
-    const bounds = rect(x, y, cardW, cardH);
-    const zone = offer.sold ? { hovered: false, clicked: false } : ui.hitZone(bounds);
+  if (!stacked) {
+    const cardW = Math.max(150, Math.min(250, (ui.width - 140) / Math.max(1, offers.length) - 22));
+    const cardH = Math.max(190, Math.min(280, ui.height - 340));
+    const gap = 22;
+    const totalW = offers.length * cardW + (offers.length - 1) * gap;
+    const startX = (ui.width - totalW) / 2;
+    const y = ui.height / 2 - cardH / 2 + 30;
+    offersBottom = y + cardH;
 
-    ui.panel(bounds, {
-      fill: offer.sold
-        ? 'rgba(12,11,15,0.6)'
-        : zone.hovered && affordable
-          ? 'rgba(26,32,40,0.97)'
-          : 'rgba(16,15,19,0.95)',
-      border: offer.sold
-        ? 'rgba(90,86,78,0.3)'
-        : affordable
-          ? zone.hovered
-            ? '#a8dcff'
-            : '#5ea8d8'
-          : 'rgba(110,104,92,0.4)',
-      radius: 8,
-    });
+    offers.forEach((offer, i) => {
+      const x = startX + i * (cardW + gap);
+      const affordable = !offer.sold && souls >= offer.price;
+      const bounds = rect(x, y, cardW, cardH);
+      const zone = offer.sold ? { hovered: false, clicked: false } : ui.hitZone(bounds);
 
-    const dim = offer.sold || !affordable;
-
-    ui.text(t(`offer.${offer.kind}.name`), bounds.x + bounds.w / 2, bounds.y + 40, {
-      size: 19,
-      color: dim ? PALETTE.dim : PALETTE.ink,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
-
-    ui.paragraph(
-      t(`offer.${offer.kind}.desc`, { n: offer.amount }),
-      bounds.x + 18,
-      bounds.y + 78,
-      bounds.w - 36,
-      { size: 13, color: dim ? PALETTE.dim : PALETTE.muted, lineHeight: 19 },
-    );
-
-    if (offer.sold) {
-      ui.text(t('market.sold'), bounds.x + bounds.w / 2, bounds.y + bounds.h - 44, {
-        size: 15,
-        color: PALETTE.dim,
-        align: 'center',
-        baseline: 'middle',
-        letterSpacing: 3,
+      ui.panel(bounds, {
+        fill: offer.sold
+          ? 'rgba(12,11,15,0.6)'
+          : zone.hovered && affordable
+            ? 'rgba(26,32,40,0.97)'
+            : 'rgba(16,15,19,0.95)',
+        border: offer.sold
+          ? 'rgba(90,86,78,0.3)'
+          : affordable
+            ? zone.hovered
+              ? '#a8dcff'
+              : '#5ea8d8'
+            : 'rgba(110,104,92,0.4)',
+        radius: 8,
       });
-    } else {
-      ui.text(`${offer.price}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 50, {
-        size: 22,
-        color: affordable ? '#cfeaff' : PALETTE.bad,
+
+      const dim = offer.sold || !affordable;
+
+      ui.text(t(`offer.${offer.kind}.name`), bounds.x + bounds.w / 2, bounds.y + 40, {
+        size: 19,
+        color: dim ? PALETTE.dim : PALETTE.ink,
         align: 'center',
         baseline: 'middle',
         bold: true,
       });
-      ui.text(
-        affordable ? t('hud.soulsLabel') : t('market.tooPoor'),
-        bounds.x + bounds.w / 2,
-        bounds.y + bounds.h - 28,
-        { size: 11, color: PALETTE.dim, align: 'center', baseline: 'middle' },
-      );
-      ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 12, {
-        size: 11,
-        color: PALETTE.dim,
-        align: 'center',
-        baseline: 'middle',
-      });
-    }
 
-    if (zone.clicked && affordable) result.bought = i;
-  });
+      ui.paragraph(
+        t(`offer.${offer.kind}.desc`, { n: offer.amount }),
+        bounds.x + 18,
+        bounds.y + 78,
+        bounds.w - 36,
+        { size: 13, color: dim ? PALETTE.dim : PALETTE.muted, lineHeight: 19 },
+      );
+
+      if (offer.sold) {
+        ui.text(t('market.sold'), bounds.x + bounds.w / 2, bounds.y + bounds.h - 44, {
+          size: 15,
+          color: PALETTE.dim,
+          align: 'center',
+          baseline: 'middle',
+          letterSpacing: 3,
+        });
+      } else {
+        ui.text(`${offer.price}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 50, {
+          size: 22,
+          color: affordable ? '#cfeaff' : PALETTE.bad,
+          align: 'center',
+          baseline: 'middle',
+          bold: true,
+        });
+        ui.text(
+          affordable ? t('hud.soulsLabel') : t('market.tooPoor'),
+          bounds.x + bounds.w / 2,
+          bounds.y + bounds.h - 28,
+          { size: 11, color: PALETTE.dim, align: 'center', baseline: 'middle' },
+        );
+        ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 12, {
+          size: 11,
+          color: PALETTE.dim,
+          align: 'center',
+          baseline: 'middle',
+        });
+      }
+
+      if (zone.clicked && affordable) result.bought = i;
+    });
+  } else {
+    const margin = 20;
+    const w = ui.width - margin * 2;
+    const gap = 10;
+    const n = Math.max(1, offers.length);
+    const top = 148;
+    const rowH = clamp((ui.height - 90 - top - gap * (n - 1)) / n, 78, 120);
+    offersBottom = top + n * rowH + (n - 1) * gap;
+
+    offers.forEach((offer, i) => {
+      const y2 = top + i * (rowH + gap);
+      const affordable = !offer.sold && souls >= offer.price;
+      const bounds = rect(margin, y2, w, rowH);
+      const zone = offer.sold ? { hovered: false, clicked: false } : ui.hitZone(bounds);
+      const dim = offer.sold || !affordable;
+
+      ui.panel(bounds, {
+        fill: offer.sold
+          ? 'rgba(12,11,15,0.6)'
+          : zone.hovered && affordable
+            ? 'rgba(26,32,40,0.97)'
+            : 'rgba(16,15,19,0.95)',
+        border: offer.sold
+          ? 'rgba(90,86,78,0.3)'
+          : affordable
+            ? zone.hovered
+              ? '#a8dcff'
+              : '#5ea8d8'
+            : 'rgba(110,104,92,0.4)',
+        radius: 8,
+      });
+
+      const textW = bounds.w - 96;
+      ui.fittedText(t(`offer.${offer.kind}.name`), bounds.x + 16, bounds.y + 20, {
+        size: 16,
+        color: dim ? PALETTE.dim : PALETTE.ink,
+        baseline: 'middle',
+        bold: true,
+        maxWidth: textW,
+      });
+      ui.paragraph(t(`offer.${offer.kind}.desc`, { n: offer.amount }), bounds.x + 16, bounds.y + 40, textW, {
+        size: 12,
+        color: dim ? PALETTE.dim : PALETTE.muted,
+        lineHeight: 15,
+      });
+
+      const priceX = bounds.x + bounds.w - 16;
+      if (offer.sold) {
+        ui.text(t('market.sold'), priceX, bounds.y + bounds.h / 2, {
+          size: 12,
+          color: PALETTE.dim,
+          align: 'right',
+          baseline: 'middle',
+          letterSpacing: 2,
+        });
+      } else {
+        ui.text(`${offer.price}`, priceX, bounds.y + bounds.h / 2 - 9, {
+          size: 17,
+          color: affordable ? '#cfeaff' : PALETTE.bad,
+          align: 'right',
+          baseline: 'middle',
+          bold: true,
+        });
+        ui.text(`${i + 1}`, priceX, bounds.y + bounds.h / 2 + 11, {
+          size: 10,
+          color: PALETTE.dim,
+          align: 'right',
+          baseline: 'middle',
+        });
+      }
+
+      if (zone.clicked && affordable) result.bought = i;
+    });
+  }
 
   const slots = ['slot1', 'slot2', 'slot3'] as const;
   offers.forEach((offer, i) => {
@@ -468,7 +553,7 @@ export function drawMarket(
   });
 
   if (
-    ui.button(rect(ui.width / 2 - 100, y + cardH + 34, 200, 44), t('market.leave'), {
+    ui.button(rect(ui.width / 2 - 100, offersBottom + 34, 200, 44), t('market.leave'), {
       accent: PALETTE.gold,
     }) ||
     input.consumePress('pause')
@@ -507,89 +592,169 @@ export function drawCursedAltar(
   ui.scrim(0.92);
   const result: CursedResult = { taken: -1, left: false };
 
-  ui.text(t('cursed.title'), ui.width / 2, 62, {
+  ui.fittedText(t('cursed.title'), ui.width / 2, 62, {
     size: 28,
     color: '#b06cff',
     align: 'center',
     baseline: 'middle',
     letterSpacing: 9,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('cursed.subtitle'), ui.width / 2, 96, {
+  ui.fittedText(t('cursed.subtitle'), ui.width / 2, 96, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
-  const cardW = Math.max(200, Math.min(340, (ui.width - 160) / Math.max(1, offers.length) - 24));
-  const cardH = Math.max(240, Math.min(360, ui.height - 300));
-  const gap = 30;
-  const totalW = offers.length * cardW + (offers.length - 1) * gap;
-  const startX = (ui.width - totalW) / 2;
-  const y = ui.height / 2 - cardH / 2 + 24;
+  // Two stacked halves per card already ask for real width; below this a floor
+  // width would run the row off both edges rather than just feeling snug.
+  const stacked = ui.width < 640;
+  let cardsBottom: number;
 
-  offers.forEach((offer, i) => {
-    const x = startX + i * (cardW + gap);
-    const bounds = rect(x, y, cardW, cardH);
-    const zone = ui.hitZone(bounds);
-    const rarity = RARITY[offer.card.rarity];
+  if (!stacked) {
+    const cardW = Math.max(200, Math.min(340, (ui.width - 160) / Math.max(1, offers.length) - 24));
+    const cardH = Math.max(240, Math.min(360, ui.height - 300));
+    const gap = 30;
+    const totalW = offers.length * cardW + (offers.length - 1) * gap;
+    const startX = (ui.width - totalW) / 2;
+    const y = ui.height / 2 - cardH / 2 + 24;
+    cardsBottom = y + cardH;
 
-    ui.panel(bounds, {
-      fill: zone.hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
-      border: zone.hovered ? '#d4a8ff' : '#6b3fa0',
-      radius: 8,
+    offers.forEach((offer, i) => {
+      const x = startX + i * (cardW + gap);
+      const bounds = rect(x, y, cardW, cardH);
+      const zone = ui.hitZone(bounds);
+      const rarity = RARITY[offer.card.rarity];
+
+      ui.panel(bounds, {
+        fill: zone.hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
+        border: zone.hovered ? '#d4a8ff' : '#6b3fa0',
+        radius: 8,
+      });
+
+      // Reward half.
+      ui.heading(t('cursed.rewardLabel'), bounds.x + 20, bounds.y + 28, bounds.w - 40, rarity.color);
+      ui.text(offer.card.name, bounds.x + bounds.w / 2, bounds.y + 60, {
+        size: 20,
+        color: rarity.glow,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+      ui.paragraph(offer.card.description, bounds.x + 20, bounds.y + 88, bounds.w - 40, {
+        size: 13,
+        color: PALETTE.muted,
+        lineHeight: 19,
+      });
+
+      // Divider.
+      const midY = bounds.y + bounds.h * 0.56;
+      ui.ctx.strokeStyle = 'rgba(148,138,118,0.25)';
+      ui.ctx.lineWidth = 1;
+      ui.ctx.beginPath();
+      ui.ctx.moveTo(bounds.x + 20, midY);
+      ui.ctx.lineTo(bounds.x + bounds.w - 20, midY);
+      ui.ctx.stroke();
+
+      // Price half.
+      ui.heading(t('cursed.priceLabel'), bounds.x + 20, midY + 20, bounds.w - 40, PALETTE.bad);
+      ui.text(curseName(offer.curse), bounds.x + bounds.w / 2, midY + 50, {
+        size: 18,
+        color: PALETTE.bad,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+      ui.paragraph(curseDescription(offer.curse), bounds.x + 20, midY + 76, bounds.w - 40, {
+        size: 13,
+        color: PALETTE.muted,
+        lineHeight: 18,
+      });
+
+      ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 14, {
+        size: 12,
+        color: zone.hovered ? '#d4a8ff' : PALETTE.dim,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      if (zone.clicked) result.taken = i;
     });
+  } else {
+    const margin = 20;
+    const w = ui.width - margin * 2;
+    const gap = 12;
+    const n = Math.max(1, offers.length);
+    const top = 130;
+    const rowH = clamp((ui.height - 90 - top - gap * (n - 1)) / n, 130, 220);
+    cardsBottom = top + n * rowH + (n - 1) * gap;
 
-    // Reward half.
-    ui.heading(t('cursed.rewardLabel'), bounds.x + 20, bounds.y + 28, bounds.w - 40, rarity.color);
-    ui.text(offer.card.name, bounds.x + bounds.w / 2, bounds.y + 60, {
-      size: 20,
-      color: rarity.glow,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
-    ui.paragraph(offer.card.description, bounds.x + 20, bounds.y + 88, bounds.w - 40, {
-      size: 13,
-      color: PALETTE.muted,
-      lineHeight: 19,
-    });
+    offers.forEach((offer, i) => {
+      const y2 = top + i * (rowH + gap);
+      const bounds = rect(margin, y2, w, rowH);
+      const zone = ui.hitZone(bounds);
+      const rarity = RARITY[offer.card.rarity];
 
-    // Divider.
-    const midY = bounds.y + bounds.h * 0.56;
-    ui.ctx.strokeStyle = 'rgba(148,138,118,0.25)';
-    ui.ctx.lineWidth = 1;
-    ui.ctx.beginPath();
-    ui.ctx.moveTo(bounds.x + 20, midY);
-    ui.ctx.lineTo(bounds.x + bounds.w - 20, midY);
-    ui.ctx.stroke();
+      ui.panel(bounds, {
+        fill: zone.hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
+        border: zone.hovered ? '#d4a8ff' : '#6b3fa0',
+        radius: 8,
+      });
 
-    // Price half.
-    ui.heading(t('cursed.priceLabel'), bounds.x + 20, midY + 20, bounds.w - 40, PALETTE.bad);
-    ui.text(curseName(offer.curse), bounds.x + bounds.w / 2, midY + 50, {
-      size: 18,
-      color: PALETTE.bad,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
-    ui.paragraph(curseDescription(offer.curse), bounds.x + 20, midY + 76, bounds.w - 40, {
-      size: 13,
-      color: PALETTE.muted,
-      lineHeight: 18,
-    });
+      const colW = (bounds.w - 40) / 2;
+      const leftX = bounds.x + 16;
+      const rightX = bounds.x + bounds.w / 2 + 8;
 
-    ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 14, {
-      size: 12,
-      color: zone.hovered ? '#d4a8ff' : PALETTE.dim,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
+      ui.heading(t('cursed.rewardLabel'), leftX, bounds.y + 20, colW, rarity.color);
+      ui.fittedText(offer.card.name, leftX, bounds.y + 40, {
+        size: 15,
+        color: rarity.glow,
+        baseline: 'middle',
+        bold: true,
+        maxWidth: colW,
+      });
+      ui.paragraph(offer.card.description, leftX, bounds.y + 58, colW, {
+        size: 11.5,
+        color: PALETTE.muted,
+        lineHeight: 15,
+      });
 
-    if (zone.clicked) result.taken = i;
-  });
+      ui.ctx.strokeStyle = 'rgba(148,138,118,0.25)';
+      ui.ctx.lineWidth = 1;
+      ui.ctx.beginPath();
+      ui.ctx.moveTo(bounds.x + bounds.w / 2, bounds.y + 12);
+      ui.ctx.lineTo(bounds.x + bounds.w / 2, bounds.y + bounds.h - 12);
+      ui.ctx.stroke();
+
+      ui.heading(t('cursed.priceLabel'), rightX, bounds.y + 20, colW, PALETTE.bad);
+      ui.fittedText(curseName(offer.curse), rightX, bounds.y + 40, {
+        size: 15,
+        color: PALETTE.bad,
+        baseline: 'middle',
+        bold: true,
+        maxWidth: colW,
+      });
+      ui.paragraph(curseDescription(offer.curse), rightX, bounds.y + 58, colW, {
+        size: 11.5,
+        color: PALETTE.muted,
+        lineHeight: 15,
+      });
+
+      ui.text(`${i + 1}`, bounds.x + bounds.w - 14, bounds.y + bounds.h - 14, {
+        size: 11,
+        color: zone.hovered ? '#d4a8ff' : PALETTE.dim,
+        align: 'right',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      if (zone.clicked) result.taken = i;
+    });
+  }
 
   const slots = ['slot1', 'slot2', 'slot3'] as const;
   offers.forEach((_, i) => {
@@ -598,7 +763,7 @@ export function drawCursedAltar(
   });
 
   if (
-    ui.button(rect(ui.width / 2 - 120, y + cardH + 28, 240, 44), t('cursed.leave'), {
+    ui.button(rect(ui.width / 2 - 120, cardsBottom + 28, 240, 44), t('cursed.leave'), {
       accent: PALETTE.muted,
     }) ||
     input.consumePress('pause')

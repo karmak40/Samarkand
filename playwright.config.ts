@@ -40,13 +40,18 @@ export default defineConfig({
   // hand-step frames and read the simulation, so it hits the dev server.
   webServer: [
     {
-      command: 'npx vite build && npx vite preview --port 4173 --strictPort',
+      // Host pinned to the same IPv4 address the url above checks: left to Vite's
+      // default ('localhost'), Node's DNS resolution decides which stack it binds —
+      // IPv4 on the machines this was developed on, but IPv6-first on GitHub Actions'
+      // ubuntu-latest runners, which leaves this check connecting to a port nothing
+      // is listening on and timing out identically across every browser.
+      command: 'npx vite build && npx vite preview --port 4173 --strictPort --host 127.0.0.1',
       url: 'http://127.0.0.1:4173',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
     },
     {
-      command: 'npx vite dev --port 5174 --strictPort',
+      command: 'npx vite dev --port 5174 --strictPort --host 127.0.0.1',
       url: 'http://127.0.0.1:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,

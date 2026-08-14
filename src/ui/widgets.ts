@@ -160,6 +160,65 @@ export class Ui {
     return width;
   }
 
+  /**
+   * Shrink a title's size (and letter-spacing, in step) until it fits a width.
+   *
+   * Nearly every screen opens on a large, widely-tracked, centred heading, and that
+   * is exactly the combination that overflows first on a narrow phone: letter-spacing
+   * adds a fixed number of pixels per character no matter how small the font gets, so
+   * a long word in a talkative locale can blow past the edge of the screen even at a
+   * size that would otherwise fit. Scaling both by the same factor keeps the
+   * letterforms and the gaps between them in proportion, rather than one consuming
+   * the whole budget while the other stays full-size.
+   *
+   * Returns the size and letter-spacing to draw with; doesn't draw anything itself,
+   * since the caller still owns colour, position and outline.
+   */
+  fitTitle(
+    text: string,
+    options: {
+      size: number;
+      letterSpacing?: number;
+      maxWidth: number;
+      bold?: boolean;
+      italic?: boolean;
+      /** Never shrink past this fraction of the requested size. */
+      minScale?: number;
+    },
+  ): { size: number; letterSpacing: number } {
+    const { size, letterSpacing = 0, maxWidth, bold = false, italic = false, minScale = 0.5 } = options;
+    if (text.length === 0 || maxWidth <= 0) return { size, letterSpacing };
+
+    const ctx = this.ctx;
+    ctx.save();
+    ctx.font = `${italic ? 'italic ' : ''}${bold ? 'bold ' : ''}${size}px ${FONT}`;
+    const naturalWidth = ctx.measureText(text).width + letterSpacing * Math.max(0, text.length - 1);
+    ctx.restore();
+
+    if (naturalWidth <= maxWidth) return { size, letterSpacing };
+
+    const scale = Math.max(minScale, maxWidth / naturalWidth);
+    return { size: size * scale, letterSpacing: letterSpacing * scale };
+  }
+
+  /**
+   * `text()` plus `fitTitle()` in one call, for the common case of a heading that
+   * should shrink to fit rather than being measured and redrawn by hand at every
+   * call site. `options.maxWidth` here drives the shrink test; the same field is
+   * still forwarded to `fillText`/`strokeText` as a last-resort squeeze if the
+   * shrunk size somehow still overflows (e.g. `minScale` held it back).
+   */
+  fittedText(
+    value: string,
+    x: number,
+    y: number,
+    options: TextOptions & { maxWidth: number; minScale?: number },
+  ): number {
+    const { size = 15, letterSpacing = 0, bold, italic, maxWidth, minScale } = options;
+    const fit = this.fitTitle(value, { size, letterSpacing, maxWidth, bold, italic, minScale });
+    return this.text(value, x, y, { ...options, size: fit.size, letterSpacing: fit.letterSpacing });
+  }
+
   private drawTracked(
     value: string,
     x: number,

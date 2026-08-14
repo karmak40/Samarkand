@@ -40,115 +40,130 @@ export function drawCardSelect(
 
   const result: CardChoiceResult = { picked: -1, rerolled: false };
 
-  ui.text(context.title, ui.width / 2, 78, {
+  ui.fittedText(context.title, ui.width / 2, 78, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 8,
+    maxWidth: ui.width - 48,
   });
-  ui.text(context.subtitle, ui.width / 2, 112, {
+  ui.fittedText(context.subtitle, ui.width / 2, 112, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
-  // Floors keep the layout sane on very small windows instead of producing
-  // negative-sized panels.
-  const cardW = Math.max(120, Math.min(280, (ui.width - 120) / Math.max(1, cards.length) - 24));
-  const cardH = Math.max(200, Math.min(380, ui.height - 300));
-  const gap = 26;
-  const totalW = cards.length * cardW + (cards.length - 1) * gap;
-  const startX = (ui.width - totalW) / 2;
-  const cardY = ui.height / 2 - cardH / 2 + 20;
+  // Below this, three cards can't hold a floor width wide enough to read a
+  // description in without the row running off both edges of the screen — they
+  // stack into one column instead, each full width.
+  const stacked = ui.width < 640;
+  let cardsBottom: number;
 
-  cards.forEach((card, i) => {
-    const x = startX + i * (cardW + gap);
-    const zone = ui.hitZone(rect(x, cardY, cardW, cardH));
-    const hovered = zone.hovered;
-    const style = RARITY[card.rarity];
+  if (!stacked) {
+    // Floors keep the layout sane on very small windows instead of producing
+    // negative-sized panels.
+    const cardW = Math.max(120, Math.min(280, (ui.width - 120) / Math.max(1, cards.length) - 24));
+    const cardH = Math.max(200, Math.min(380, ui.height - 300));
+    const gap = 26;
+    const totalW = cards.length * cardW + (cards.length - 1) * gap;
+    const startX = (ui.width - totalW) / 2;
+    const cardY = ui.height / 2 - cardH / 2 + 20;
+    cardsBottom = cardY + cardH;
 
-    // Hovered card lifts slightly — cheap, readable affordance.
-    const lift = hovered ? 8 : 0;
-    const bounds = rect(x, cardY - lift, cardW, cardH);
+    cards.forEach((card, i) => {
+      const x = startX + i * (cardW + gap);
+      const zone = ui.hitZone(rect(x, cardY, cardW, cardH));
+      const hovered = zone.hovered;
+      const style = RARITY[card.rarity];
 
-    ui.panel(bounds, {
-      fill: hovered ? 'rgba(30,26,32,0.97)' : 'rgba(16,15,19,0.95)',
-      border: hovered ? style.glow : style.color,
-      radius: 8,
-    });
+      // Hovered card lifts slightly — cheap, readable affordance.
+      const lift = hovered ? 8 : 0;
+      const bounds = rect(x, cardY - lift, cardW, cardH);
 
-    // Rarity glow along the top edge.
-    const ctx = ui.ctx;
-    ctx.save();
-    ui.roundRect(bounds, 8);
-    ctx.clip();
-    const grad = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + 90);
-    grad.addColorStop(0, hexToRgba(style.color, hovered ? 0.4 : 0.22));
-    grad.addColorStop(1, 'rgba(0,0,0,0)');
-    ctx.fillStyle = grad;
-    ctx.fillRect(bounds.x, bounds.y, bounds.w, 90);
-    ctx.restore();
-
-    drawCardSigil(ui, card, bounds.x + bounds.w / 2, bounds.y + 74, style.glow, hovered);
-
-    ui.text(style.name.toUpperCase(), bounds.x + bounds.w / 2, bounds.y + 24, {
-      size: 11,
-      color: style.color,
-      align: 'center',
-      baseline: 'middle',
-      letterSpacing: 3,
-      bold: true,
-    });
-
-    ui.text(card.name, bounds.x + bounds.w / 2, bounds.y + 140, {
-      size: 21,
-      color: PALETTE.ink,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
-
-    ui.paragraph(card.description, bounds.x + 20, bounds.y + 178, bounds.w - 40, {
-      size: 14,
-      color: PALETTE.muted,
-      align: 'left',
-      lineHeight: 20,
-    });
-
-    // Tags along the bottom.
-    let tagX = bounds.x + 18;
-    const tagY = bounds.y + bounds.h - 46;
-    for (const tag of card.tags) {
-      const label = tagLabel(tag);
-      const w = ui.ctx.measureText(label).width + 18;
-      ui.panel(rect(tagX, tagY, w, 20), {
-        fill: 'rgba(255,255,255,0.05)',
-        border: 'rgba(148,138,118,0.25)',
-        radius: 10,
-        shadow: false,
+      ui.panel(bounds, {
+        fill: hovered ? 'rgba(30,26,32,0.97)' : 'rgba(16,15,19,0.95)',
+        border: hovered ? style.glow : style.color,
+        radius: 8,
       });
-      ui.text(label, tagX + w / 2, tagY + 10, {
+
+      // Rarity glow along the top edge.
+      const ctx = ui.ctx;
+      ctx.save();
+      ui.roundRect(bounds, 8);
+      ctx.clip();
+      const grad = ctx.createLinearGradient(0, bounds.y, 0, bounds.y + 90);
+      grad.addColorStop(0, hexToRgba(style.color, hovered ? 0.4 : 0.22));
+      grad.addColorStop(1, 'rgba(0,0,0,0)');
+      ctx.fillStyle = grad;
+      ctx.fillRect(bounds.x, bounds.y, bounds.w, 90);
+      ctx.restore();
+
+      drawCardSigil(ui, card, bounds.x + bounds.w / 2, bounds.y + 74, style.glow, hovered);
+
+      ui.text(style.name.toUpperCase(), bounds.x + bounds.w / 2, bounds.y + 24, {
         size: 11,
-        color: PALETTE.muted,
+        color: style.color,
         align: 'center',
         baseline: 'middle',
+        letterSpacing: 3,
+        bold: true,
       });
-      tagX += w + 6;
-    }
 
-    ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 18, {
-      size: 13,
-      color: hovered ? style.glow : PALETTE.dim,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
+      ui.text(card.name, bounds.x + bounds.w / 2, bounds.y + 140, {
+        size: 21,
+        color: PALETTE.ink,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      ui.paragraph(card.description, bounds.x + 20, bounds.y + 178, bounds.w - 40, {
+        size: 14,
+        color: PALETTE.muted,
+        align: 'left',
+        lineHeight: 20,
+      });
+
+      // Tags along the bottom.
+      let tagX = bounds.x + 18;
+      const tagY = bounds.y + bounds.h - 46;
+      for (const tag of card.tags) {
+        const label = tagLabel(tag);
+        const w = ui.ctx.measureText(label).width + 18;
+        ui.panel(rect(tagX, tagY, w, 20), {
+          fill: 'rgba(255,255,255,0.05)',
+          border: 'rgba(148,138,118,0.25)',
+          radius: 10,
+          shadow: false,
+        });
+        ui.text(label, tagX + w / 2, tagY + 10, {
+          size: 11,
+          color: PALETTE.muted,
+          align: 'center',
+          baseline: 'middle',
+        });
+        tagX += w + 6;
+      }
+
+      ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 18, {
+        size: 13,
+        color: hovered ? style.glow : PALETTE.dim,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      if (zone.clicked) result.picked = i;
     });
-
-    if (zone.clicked) result.picked = i;
-  });
+  } else {
+    cardsBottom = drawStackedCards(ui, cards, 140, ui.height - (context.canReroll ? 110 : 50), (i, clicked) => {
+      if (clicked) result.picked = i;
+    });
+  }
 
   // Keyboard shortcuts.
   if (input.wasPressed('slot1') && cards.length > 0) result.picked = 0;
@@ -157,7 +172,7 @@ export function drawCardSelect(
 
   // Reroll.
   if (context.canReroll) {
-    const buttonRect = rect(ui.width / 2 - 90, cardY + cardH + 30, 180, 42);
+    const buttonRect = rect(ui.width / 2 - 90, cardsBottom + 22, 180, 42);
     const affordable = context.souls >= context.rerollCost;
     if (
       ui.button(buttonRect, t('cardDraft.reroll'), {
@@ -171,6 +186,83 @@ export function drawCardSelect(
   }
 
   return result;
+}
+
+/**
+ * Cards stacked full-width, for windows too narrow to hold three side by side.
+ *
+ * Same information as the wide layout — sigil, rarity, name, description, index —
+ * in a row instead of a card, sized to fit whatever vertical room is actually
+ * available rather than a fixed height that would either overflow a short window or
+ * waste a tall one.
+ *
+ * Returns the y just past the last row, so the caller can place what comes next
+ * (the reroll button) without duplicating this layout's numbers.
+ */
+function drawStackedCards(
+  ui: Ui,
+  cards: readonly SkillCard[],
+  top: number,
+  bottom: number,
+  onCard: (index: number, clicked: boolean) => void,
+): number {
+  const margin = 20;
+  const w = ui.width - margin * 2;
+  const gap = 10;
+  const n = Math.max(1, cards.length);
+  const rowH = clamp((bottom - top - gap * (n - 1)) / n, 76, 128);
+
+  cards.forEach((card, i) => {
+    const y = top + i * (rowH + gap);
+    const bounds = rect(margin, y, w, rowH);
+    const zone = ui.hitZone(bounds);
+    const hovered = zone.hovered;
+    const style = RARITY[card.rarity];
+
+    ui.panel(bounds, {
+      fill: hovered ? 'rgba(30,26,32,0.97)' : 'rgba(16,15,19,0.95)',
+      border: hovered ? style.glow : style.color,
+      radius: 8,
+    });
+
+    const sigilX = bounds.x + 32;
+    drawCardSigil(ui, card, sigilX, bounds.y + bounds.h / 2, style.glow, hovered);
+
+    const textX = bounds.x + 62;
+    ui.fittedText(card.name, textX, bounds.y + 20, {
+      size: 16,
+      color: PALETTE.ink,
+      baseline: 'middle',
+      bold: true,
+      maxWidth: bounds.w - (textX - bounds.x) - 70,
+    });
+    ui.text(style.name.toUpperCase(), bounds.x + bounds.w - 14, bounds.y + 20, {
+      size: 10,
+      color: style.color,
+      align: 'right',
+      baseline: 'middle',
+      letterSpacing: 2,
+      bold: true,
+    });
+
+    ui.paragraph(card.description, textX, bounds.y + 40, bounds.w - (textX - bounds.x) - 16, {
+      size: 12,
+      color: PALETTE.muted,
+      lineHeight: 15,
+    });
+
+    ui.text(`${i + 1}`, bounds.x + bounds.w - 14, bounds.y + bounds.h - 14, {
+      size: 11,
+      color: hovered ? style.glow : PALETTE.dim,
+      align: 'right',
+      baseline: 'middle',
+      bold: true,
+    });
+
+    onCard(i, zone.clicked);
+  });
+
+  return top + n * rowH + (n - 1) * gap;
 }
 
 /** A generated glyph for each card, so cards are distinguishable at a glance. */
@@ -234,66 +326,116 @@ export function drawMutationSelect(
 ): number {
   ui.scrim(0.88);
 
-  ui.text(t('evolution.title'), ui.width / 2, 84, {
+  ui.fittedText(t('evolution.title'), ui.width / 2, 84, {
     size: 34,
     color: '#b06cff',
     align: 'center',
     baseline: 'middle',
     letterSpacing: 12,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('evolution.subtitle'), ui.width / 2, 120, {
+  ui.fittedText(t('evolution.subtitle'), ui.width / 2, 120, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
-
-  const cardW = Math.max(140, Math.min(300, (ui.width - 140) / Math.max(1, mutations.length) - 24));
-  const cardH = Math.max(180, Math.min(300, ui.height - 320));
-  const gap = 28;
-  const totalW = mutations.length * cardW + (mutations.length - 1) * gap;
-  const startX = (ui.width - totalW) / 2;
-  const y = ui.height / 2 - cardH / 2 + 20;
 
   let picked = -1;
 
-  mutations.forEach((mutation, i) => {
-    const x = startX + i * (cardW + gap);
-    const zone = ui.hitZone(rect(x, y, cardW, cardH));
-    const hovered = zone.hovered;
-    const bounds = rect(x, y - (hovered ? 8 : 0), cardW, cardH);
+  // Same overflow as the card draft, same fix: below this width three cards can't
+  // stay wide enough to read, so they stack into one column instead.
+  if (ui.width < 640) {
+    const margin = 20;
+    const w = ui.width - margin * 2;
+    const gap = 10;
+    const n = Math.max(1, mutations.length);
+    const top = 150;
+    const rowH = clamp((ui.height - 50 - top - gap * (n - 1)) / n, 84, 150);
 
-    ui.panel(bounds, {
-      fill: hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
-      border: hovered ? '#d4a8ff' : '#6b3fa0',
-      radius: 8,
+    mutations.forEach((mutation, i) => {
+      const y = top + i * (rowH + gap);
+      const bounds = rect(margin, y, w, rowH);
+      const zone = ui.hitZone(bounds);
+      const hovered = zone.hovered;
+
+      ui.panel(bounds, {
+        fill: hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
+        border: hovered ? '#d4a8ff' : '#6b3fa0',
+        radius: 8,
+      });
+
+      ui.fittedText(mutation.name, bounds.x + 18, bounds.y + 22, {
+        size: 17,
+        color: '#e0ccff',
+        baseline: 'middle',
+        bold: true,
+        maxWidth: bounds.w - 50,
+      });
+
+      ui.paragraph(mutation.description, bounds.x + 18, bounds.y + 44, bounds.w - 36, {
+        size: 12.5,
+        color: PALETTE.muted,
+        lineHeight: 16,
+      });
+
+      ui.text(`${i + 1}`, bounds.x + bounds.w - 14, bounds.y + 20, {
+        size: 12,
+        color: hovered ? '#d4a8ff' : PALETTE.dim,
+        align: 'right',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      if (zone.clicked) picked = i;
     });
+  } else {
+    const cardW = Math.max(140, Math.min(300, (ui.width - 140) / Math.max(1, mutations.length) - 24));
+    const cardH = Math.max(180, Math.min(300, ui.height - 320));
+    const gap = 28;
+    const totalW = mutations.length * cardW + (mutations.length - 1) * gap;
+    const startX = (ui.width - totalW) / 2;
+    const y = ui.height / 2 - cardH / 2 + 20;
 
-    ui.text(mutation.name, bounds.x + bounds.w / 2, bounds.y + 46, {
-      size: 22,
-      color: '#e0ccff',
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
+    mutations.forEach((mutation, i) => {
+      const x = startX + i * (cardW + gap);
+      const zone = ui.hitZone(rect(x, y, cardW, cardH));
+      const hovered = zone.hovered;
+      const bounds = rect(x, y - (hovered ? 8 : 0), cardW, cardH);
+
+      ui.panel(bounds, {
+        fill: hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
+        border: hovered ? '#d4a8ff' : '#6b3fa0',
+        radius: 8,
+      });
+
+      ui.text(mutation.name, bounds.x + bounds.w / 2, bounds.y + 46, {
+        size: 22,
+        color: '#e0ccff',
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      ui.paragraph(mutation.description, bounds.x + 22, bounds.y + 92, bounds.w - 44, {
+        size: 14,
+        color: PALETTE.muted,
+        lineHeight: 21,
+      });
+
+      ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 22, {
+        size: 13,
+        color: hovered ? '#d4a8ff' : PALETTE.dim,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+
+      if (zone.clicked) picked = i;
     });
-
-    ui.paragraph(mutation.description, bounds.x + 22, bounds.y + 92, bounds.w - 44, {
-      size: 14,
-      color: PALETTE.muted,
-      lineHeight: 21,
-    });
-
-    ui.text(`${i + 1}`, bounds.x + bounds.w / 2, bounds.y + bounds.h - 22, {
-      size: 13,
-      color: hovered ? '#d4a8ff' : PALETTE.dim,
-      align: 'center',
-      baseline: 'middle',
-      bold: true,
-    });
-
-    if (zone.clicked) picked = i;
-  });
+  }
 
   if (input.wasPressed('slot1') && mutations.length > 0) picked = 0;
   if (input.wasPressed('slot2') && mutations.length > 1) picked = 1;
@@ -306,18 +448,34 @@ export function drawMutationSelect(
 
 export type ResultsAction = 'none' | 'again' | 'menu';
 
+/** Persisted between frames so scrolling the narrow report survives a redraw. */
+export interface ResultsView {
+  scroll: number;
+}
+
+export function newResultsView(): ResultsView {
+  return { scroll: 0 };
+}
+
+/** Below this, three columns no longer have enough width each to read comfortably. */
+const RESULTS_STACK_WIDTH = 720;
+
 /**
  * End-of-run report.
  *
- * Three columns: the headline numbers, how you dealt damage, and what the run
- * consisted of. Everything the tracker recorded surfaces somewhere here.
+ * Three columns on a wide window: the headline numbers, how you dealt damage, and
+ * what the run consisted of. Below `RESULTS_STACK_WIDTH` there isn't room for three,
+ * so they stack into one scrollable column instead — same content, read top to
+ * bottom. Everything the tracker recorded surfaces somewhere here either way.
  */
 export function drawResults(
   ui: Ui,
+  input: Input,
   tracker: RunStats,
   soulsEarned: number,
   meta: MetaProgress,
   context: { daily: boolean; earned: readonly AchievementDef[] } = { daily: false, earned: [] },
+  view: ResultsView = newResultsView(),
 ): ResultsAction {
   ui.scrim(0.93);
 
@@ -325,27 +483,29 @@ export function drawResults(
   const title = victory ? t('results.victoryTitle') : t('results.defeatTitle');
   const accent = victory ? PALETTE.gold : PALETTE.blood;
 
-  ui.text(title, ui.width / 2, 56, {
+  ui.fittedText(title, ui.width / 2, 56, {
     size: 32,
     color: accent,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 9,
+    maxWidth: ui.width - 48,
   });
 
   const subtitle = victory
     ? t('results.victorySubtitle', { n: tracker.roomsCleared })
     : t('results.defeatSubtitle', { killer: tracker.killedBy || t('results.unknown'), room: tracker.roomsCleared + 1 });
-  ui.text(subtitle, ui.width / 2, 88, {
+  ui.fittedText(subtitle, ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
   // The seed, so a run worth talking about can be handed to someone else.
-  ui.text(
+  ui.fittedText(
     context.daily
       ? t('results.dailySeed', { seed: seedLabel(tracker.seed) })
       : t('results.seed', { seed: seedLabel(tracker.seed) }),
@@ -357,27 +517,32 @@ export function drawResults(
       align: 'center',
       baseline: 'middle',
       letterSpacing: 1,
+      maxWidth: ui.width - 48,
     },
   );
 
-  const margin = 40;
-  const columnGap = 24;
-  const columnW = (ui.width - margin * 2 - columnGap * 2) / 3;
   const top = 124;
-  // Freshly earned trials claim a strip above the buttons; the columns give it up.
-  const stripH = context.earned.length > 0 ? 40 : 0;
-  const bodyH = ui.height - top - 96 - stripH;
+  const buttonY = ui.height - 62;
 
-  drawResultsOverview(ui, tracker, soulsEarned, rect(margin, top, columnW, bodyH));
-  drawResultsDamage(ui, tracker, rect(margin + columnW + columnGap, top, columnW, bodyH));
-  drawResultsRun(ui, tracker, rect(margin + (columnW + columnGap) * 2, top, columnW, bodyH));
+  if (ui.width >= RESULTS_STACK_WIDTH) {
+    const margin = 40;
+    const columnGap = 24;
+    const columnW = (ui.width - margin * 2 - columnGap * 2) / 3;
+    // Freshly earned trials claim a strip above the buttons; the columns give it up.
+    const stripH = context.earned.length > 0 ? 40 : 0;
+    const bodyH = ui.height - top - 96 - stripH;
 
-  if (stripH > 0) {
-    drawEarnedTrials(ui, context.earned, rect(margin, top + bodyH + 4, ui.width - margin * 2, stripH - 8));
+    drawResultsOverview(ui, tracker, soulsEarned, rect(margin, top, columnW, bodyH));
+    drawResultsDamage(ui, tracker, rect(margin + columnW + columnGap, top, columnW, bodyH));
+    drawResultsRun(ui, tracker, rect(margin + (columnW + columnGap) * 2, top, columnW, bodyH));
+
+    if (stripH > 0) {
+      drawEarnedTrials(ui, context.earned, rect(margin, top + bodyH + 4, ui.width - margin * 2, stripH - 8));
+    }
+  } else {
+    drawResultsStacked(ui, input, tracker, soulsEarned, context, view, top, buttonY - 24);
   }
 
-  // Footer.
-  const buttonY = ui.height - 62;
   let action: ResultsAction = 'none';
 
   if (ui.button(rect(ui.width / 2 - 210, buttonY, 200, 46), t('results.again'), { accent: PALETTE.gold })) {
@@ -395,6 +560,74 @@ export function drawResults(
   );
 
   return action;
+}
+
+/**
+ * The narrow layout: one scrollable column instead of three side by side.
+ *
+ * The three section functions already know how to draw at any width; what they
+ * don't know is how tall they turned out, since that depends on how many kill types,
+ * skills and rooms this particular run produced. They now return it, which is what
+ * makes stacking them possible without either guessing a height or measuring twice.
+ */
+function drawResultsStacked(
+  ui: Ui,
+  input: Input,
+  tracker: RunStats,
+  soulsEarned: number,
+  context: { daily: boolean; earned: readonly AchievementDef[] },
+  view: ResultsView,
+  viewTop: number,
+  viewBottomIn: number,
+): void {
+  const margin = 20;
+  const x = margin;
+  const w = ui.width - margin * 2;
+  const ctx = ui.ctx;
+
+  // Freshly earned trials get a fixed strip just above the scroll area rather than
+  // scrolling with it — it is the one thing on this screen worth seeing without
+  // having to go looking for it.
+  const stripH = context.earned.length > 0 ? 40 : 0;
+  const viewBottom = viewBottomIn - stripH;
+  const viewH = Math.max(60, viewBottom - viewTop);
+  const gap = 16;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, viewTop, ui.width, viewH);
+  ctx.clip();
+
+  let cursorY = viewTop - view.scroll;
+  const h1 = drawResultsOverview(ui, tracker, soulsEarned, rect(x, cursorY, w, 0), { panel: false });
+  cursorY += h1 + gap;
+  const h2 = drawResultsDamage(ui, tracker, rect(x, cursorY, w, 0), { panel: false });
+  cursorY += h2 + gap;
+  const h3 = drawResultsRun(ui, tracker, rect(x, cursorY, w, 0), { panel: false });
+  cursorY += h3;
+
+  ctx.restore();
+
+  const totalHeight = h1 + gap + h2 + gap + h3;
+  const maxScroll = Math.max(0, totalHeight - viewH);
+
+  // Sign only, like the lair's grid: a mouse wheel and a converted touch-drag report
+  // wildly different magnitudes for "one step", so only the direction is trustworthy.
+  if (input.wheel !== 0) view.scroll += (input.wheel > 0 ? 1 : -1) * 72;
+  view.scroll = clamp(view.scroll, 0, maxScroll);
+
+  if (maxScroll > 0) {
+    const thumbH = Math.max(24, (viewH * viewH) / totalHeight);
+    const thumbY = viewTop + (viewH - thumbH) * (view.scroll / maxScroll);
+    ctx.fillStyle = 'rgba(148,138,118,0.18)';
+    ctx.fillRect(ui.width - 9, viewTop, 4, viewH);
+    ctx.fillStyle = 'rgba(216,161,58,0.6)';
+    ctx.fillRect(ui.width - 9, thumbY, 4, thumbH);
+  }
+
+  if (stripH > 0) {
+    drawEarnedTrials(ui, context.earned, rect(margin, viewBottomIn - stripH + 6, w, stripH - 6));
+  }
 }
 
 /**
@@ -416,34 +649,52 @@ function drawEarnedTrials(
 
   const label = shown.map(achievementName).join(' · ');
   const suffix = rest > 0 ? t('trials.andMore', { n: rest }) : '';
+  const midY = bounds.y + bounds.h / 2;
 
-  ui.text(t('trials.newlyEarned'), bounds.x + 16, bounds.y + bounds.h / 2, {
+  // The side labels are measured rather than assumed, so the middle text gets
+  // whatever is actually left over instead of a margin sized for a wide desktop
+  // panel — on a narrow one that fixed margin used to eat the entire strip.
+  const leftW = ui.text(t('trials.newlyEarned'), bounds.x + 16, midY, {
     size: 12,
     color: PALETTE.gold,
     baseline: 'middle',
     letterSpacing: 2,
     bold: true,
   });
-
-  ui.text(`${label}${suffix}`, ui.width / 2, bounds.y + bounds.h / 2, {
-    size: 14,
-    color: PALETTE.ink,
-    align: 'center',
-    baseline: 'middle',
-    maxWidth: bounds.w - 320,
-  });
-
-  ui.text(t('trials.reward', { n: souls }), bounds.x + bounds.w - 16, bounds.y + bounds.h / 2, {
+  const rightW = ui.text(t('trials.reward', { n: souls }), bounds.x + bounds.w - 16, midY, {
     size: 14,
     color: '#cfeaff',
     align: 'right',
     baseline: 'middle',
     bold: true,
   });
+
+  ui.fittedText(`${label}${suffix}`, bounds.x + bounds.w / 2, midY, {
+    size: 14,
+    color: PALETTE.ink,
+    align: 'center',
+    baseline: 'middle',
+    maxWidth: Math.max(40, bounds.w - leftW - rightW - 64),
+    minScale: 0.7,
+  });
 }
 
-function drawResultsOverview(ui: Ui, tracker: RunStats, soulsEarned: number, bounds: ReturnType<typeof rect>): void {
-  ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+/**
+ * One results column.
+ *
+ * Returns the height it actually drew, in pixels from `bounds.y` — the desktop
+ * three-column layout ignores it (columns share one fixed height there), but the
+ * narrow stacked layout needs it to know where the next section starts, since none
+ * of these row counts are known outside the function that draws them.
+ */
+function drawResultsOverview(
+  ui: Ui,
+  tracker: RunStats,
+  soulsEarned: number,
+  bounds: ReturnType<typeof rect>,
+  options: { panel?: boolean } = {},
+): number {
+  if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -495,10 +746,17 @@ function drawResultsOverview(ui: Ui, tracker: RunStats, soulsEarned: number, bou
     ui.statRow(threat.label, formatNumber(threat.damage), x, y, w, { color: PALETTE.bad, size: 13 });
     y += 20;
   }
+
+  return y - bounds.y;
 }
 
-function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rect>): void {
-  ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+function drawResultsDamage(
+  ui: Ui,
+  tracker: RunStats,
+  bounds: ReturnType<typeof rect>,
+  options: { panel?: boolean } = {},
+): number {
+  if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -565,10 +823,17 @@ function drawResultsDamage(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof 
     ui.statRow(source.label, formatNumber(source.damage), x, y, w, { size: 13 });
     y += 19;
   }
+
+  return y - bounds.y;
 }
 
-function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rect>): void {
-  ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+function drawResultsRun(
+  ui: Ui,
+  tracker: RunStats,
+  bounds: ReturnType<typeof rect>,
+  options: { panel?: boolean } = {},
+): number {
+  if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -632,6 +897,8 @@ function drawResultsRun(ui: Ui, tracker: RunStats, bounds: ReturnType<typeof rec
     ui.statRow(label, formatTime(room.duration), x, y, w, { size: 12, color });
     y += 18;
   }
+
+  return y - bounds.y;
 }
 
 // ---------------------------------------------------------------------------
@@ -656,20 +923,22 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuActi
   ctx.fillRect(0, 0, ui.width, ui.height);
   drawMenuAtmosphere(ui, time);
 
-  ui.text('SAMARKAND', ui.width / 2, ui.height * 0.2, {
+  ui.fittedText('SAMARKAND', ui.width / 2, ui.height * 0.2, {
     size: 56,
     color: PALETTE.blood,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 18,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('menu.tagline'), ui.width / 2, ui.height * 0.2 + 44, {
+  ui.fittedText(t('menu.tagline'), ui.width / 2, ui.height * 0.2 + 44, {
     size: 15,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
     letterSpacing: 1,
+    maxWidth: ui.width - 48,
   });
 
   let action: MenuAction = 'none';
@@ -858,12 +1127,13 @@ function drawMenuAtmosphere(ui: Ui, time: number): void {
 export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
   ui.scrim(0.94);
 
-  ui.text(t('menu.chronicle').toUpperCase(), ui.width / 2, 56, {
+  ui.fittedText(t('menu.chronicle').toUpperCase(), ui.width / 2, 56, {
     size: 30,
     color: PALETTE.gold,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
 
   const l = meta.lifetime;
@@ -1011,12 +1281,13 @@ export function drawBuildSheet(
 ): void {
   ui.scrim(0.86);
 
-  ui.text(t('buildSheet.title'), ui.width / 2, 46, {
+  ui.fittedText(t('buildSheet.title'), ui.width / 2, 46, {
     size: 24,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 8,
+    maxWidth: ui.width - 48,
   });
 
   const margin = 60;
@@ -1223,12 +1494,13 @@ export type PauseAction = 'none' | 'resume' | 'menu' | 'settings';
 export function drawPause(ui: Ui): PauseAction {
   ui.scrim(0.78);
 
-  ui.text(t('pause.title'), ui.width / 2, ui.height / 2 - 90, {
+  ui.fittedText(t('pause.title'), ui.width / 2, ui.height / 2 - 90, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
 
   let action: PauseAction = 'none';
@@ -1279,7 +1551,7 @@ export function drawRoomIntro(ui: Ui, name: string, index: number, progress: num
     alpha: clamp(alpha, 0, 1),
     outline: true,
   });
-  ui.text(name.toUpperCase(), ui.width / 2, ui.height / 2 + 6, {
+  ui.fittedText(name.toUpperCase(), ui.width / 2, ui.height / 2 + 6, {
     size: 34,
     color: PALETTE.ink,
     align: 'center',
@@ -1287,6 +1559,7 @@ export function drawRoomIntro(ui: Ui, name: string, index: number, progress: num
     letterSpacing: 8,
     alpha: clamp(alpha, 0, 1),
     outline: true,
+    maxWidth: ui.width - 48,
   });
 }
 

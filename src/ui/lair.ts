@@ -88,35 +88,49 @@ export function drawLair(
 ): LairAction {
   ui.scrim(0.94);
 
-  ui.text(t('lair.title'), ui.width / 2, 50, {
+  ui.fittedText(t('lair.title'), ui.width / 2, 50, {
     size: 30,
     color: PALETTE.gold,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
+    maxWidth: ui.width - 48,
   });
-  ui.text(t('lair.subtitle'), ui.width / 2, 82, {
+  ui.fittedText(t('lair.subtitle'), ui.width / 2, 82, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
+    maxWidth: ui.width - 48,
   });
 
   // --- souls and overall progress -------------------------------------------
-  ui.text(t('unit.souls', { n: Math.floor(meta.souls) }), ui.width / 2 - 150, 112, {
-    size: 17,
-    color: '#cfeaff',
-    align: 'right',
-    baseline: 'middle',
-    bold: true,
-  });
-  ui.text(
-    t('lair.progress', { owned: meta.unlockedCount, total: meta.unlockableCount }),
-    ui.width / 2 + 150,
-    112,
-    { size: 14, color: PALETTE.muted, align: 'left', baseline: 'middle' },
-  );
+  // The two-sided layout needs about 300px either side of centre to clear both
+  // strings at their natural width; below that, one combined centred line reads
+  // better than two clipped halves.
+  if (ui.width < 480) {
+    ui.fittedText(
+      `${t('unit.souls', { n: Math.floor(meta.souls) })} · ${t('lair.progress', { owned: meta.unlockedCount, total: meta.unlockableCount })}`,
+      ui.width / 2,
+      112,
+      { size: 14, color: '#cfeaff', align: 'center', baseline: 'middle', bold: true, maxWidth: ui.width - 48 },
+    );
+  } else {
+    ui.text(t('unit.souls', { n: Math.floor(meta.souls) }), ui.width / 2 - 150, 112, {
+      size: 17,
+      color: '#cfeaff',
+      align: 'right',
+      baseline: 'middle',
+      bold: true,
+    });
+    ui.text(
+      t('lair.progress', { owned: meta.unlockedCount, total: meta.unlockableCount }),
+      ui.width / 2 + 150,
+      112,
+      { size: 14, color: PALETTE.muted, align: 'left', baseline: 'middle' },
+    );
+  }
 
   // --- category tabs --------------------------------------------------------
   // Four tabs do not fit a narrow window at a fixed width; shrink rather than clip.
@@ -152,7 +166,10 @@ export function drawLair(
   // --- item grid ------------------------------------------------------------
   const bodies = state.category === 'species';
   const items = bodies ? [] : unlocksInCategory(state.category);
-  const columns = bodies && ui.width < 700 ? 1 : 2;
+  // Two columns need roughly 620px to hold two 220px-minimum cells plus the gap and
+  // margins without forcing that floor past the viewport — below it the grid used to
+  // hold the column count anyway and spill both columns off the sides.
+  const columns = ui.width < 620 ? 1 : 2;
   const cellW = Math.max(220, Math.min(430, (ui.width - 160) / columns - 16));
   const cellH = bodies ? 140 : 82;
   const gap = 14;

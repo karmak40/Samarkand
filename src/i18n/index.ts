@@ -1,15 +1,16 @@
 import { EN } from './dict.en';
 import { DE } from './dict.de';
 import { RU } from './dict.ru';
+import { UK } from './dict.uk';
 import { getLocale, type Locale } from './locale';
 
 export { getLocale, setLocale, LOCALES, type Locale } from './locale';
 export { roomNamePrefixes, roomNameRoots, roomNameBossSuffix } from './roomNames';
 
-const DICTS: Record<Locale, Record<string, string>> = { en: EN, de: DE, ru: RU };
+const DICTS: Record<Locale, Record<string, string>> = { en: EN, de: DE, ru: RU, uk: UK };
 
 /** Human-readable name for each selectable language, always shown in its own language. */
-export const LOCALE_LABELS: Record<Locale, string> = { en: 'EN', de: 'DE', ru: 'RU' };
+export const LOCALE_LABELS: Record<Locale, string> = { en: 'EN', de: 'DE', ru: 'RU', uk: 'UA' };
 
 /**
  * Each language named in itself, never translated.
@@ -21,6 +22,7 @@ export const LOCALE_NAMES: Record<Locale, string> = {
   en: 'English',
   de: 'Deutsch',
   ru: 'Русский',
+  uk: 'Українська',
 };
 
 /** Translate a flat dot-path key, optionally interpolating `{name}`-style placeholders. */

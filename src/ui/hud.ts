@@ -26,24 +26,204 @@ export interface HudState {
 }
 
 /**
+ * Below this width, the four independent top corners start to overlap: the health
+ * cluster's fixed 300px runs to about x=324, the resource column starts around
+ * x=width-136, and the room name centred between them needs real room of its own —
+ * squeezed enough that even a shrunk title starts to look cramped rather than merely
+ * compact. A phone in portrait is comfortably under this, a tablet comfortably over.
+ */
+const COMPACT_WIDTH = 680;
+
+/**
  * In-game overlay.
  *
  * Layout principle: the four corners carry state you glance at (health, progress,
- * resources, build), and the centre stays clear so nothing hides the fight.
+ * resources, build), and the centre stays clear so nothing hides the fight. Below
+ * `COMPACT_WIDTH` there is no room for four independent corners, so the top cluster
+ * collapses into a single centred stack instead — same information, read top to
+ * bottom rather than glanced at in four places.
  */
 export function drawHud(ui: Ui, state: HudState): void {
   const { monster } = state;
 
   drawHurtVignette(ui, state.hurtFlash);
-  drawHealthCluster(ui, state);
-  drawExperience(ui, state);
-  drawProgress(ui, state);
-  drawResources(ui, state);
+
+  if (ui.width < COMPACT_WIDTH) {
+    drawCompactCluster(ui, state);
+  } else {
+    drawHealthCluster(ui, state);
+    drawExperience(ui, state);
+    drawProgress(ui, state);
+    drawResources(ui, state);
+  }
+
   drawDash(ui, monster);
   drawBoons(ui, state);
   drawBuild(ui, state);
   if (state.bossName) drawBossBar(ui, state);
   drawHints(ui, state);
+}
+
+/**
+ * Health, experience, room progress and the run's headline numbers, stacked as one
+ * centred column instead of four corners.
+ *
+ * The four numbers on the right (kills, time, damage, DPS) are condensed to one line
+ * rather than dropped — they are the reason the results screen at the end of a run is
+ * worth reading, so the mid-run version should not go dark just because the screen is
+ * narrow.
+ */
+function drawCompactCluster(ui: Ui, state: HudState): void {
+  const { monster, tracker } = state;
+  const margin = 14;
+  const w = ui.width - margin * 2;
+  let y = 12;
+
+  // Health.
+  const hpRect = rect(margin, y, w, 18);
+  ui.bar(hpRect, monster.healthFraction, {
+    color: monster.healthFraction < 0.3 ? PALETTE.bloodBright : PALETTE.blood,
+  });
+  ui.text(`${Math.ceil(monster.hp)} / ${Math.round(monster.maxHp)}`, ui.width / 2, y + 9, {
+    size: 12,
+    color: PALETTE.ink,
+    align: 'center',
+    baseline: 'middle',
+    bold: true,
+    outline: true,
+  });
+  if (monster.shield > 0) {
+    const fraction = clamp(monster.shield / monster.maxHp, 0, 1);
+    ui.ctx.save();
+    ui.roundRect(hpRect, 3);
+    ui.ctx.clip();
+    ui.ctx.fillStyle = 'rgba(140,190,255,0.55)';
+    ui.ctx.fillRect(margin, y, w * fraction, 18);
+    ui.ctx.restore();
+  }
+  y += 22;
+
+  // Status effects — small, and skipped entirely rather than wrapped to a second
+  // row if there isn't room; the health bar above already carries the urgency.
+  if (monster.statuses.size > 0) {
+    let sx = margin;
+    for (const status of monster.statuses.list()) {
+      if (sx + 18 > ui.width - margin) break;
+      const def = STATUS_DEFS[status.id];
+      ui.ctx.fillStyle = 'rgba(0,0,0,0.6)';
+      ui.ctx.fillRect(sx, y, 18, 18);
+      ui.ctx.strokeStyle = def.color;
+      ui.ctx.lineWidth = 1.2;
+      ui.ctx.strokeRect(sx + 0.5, y + 0.5, 17, 17);
+      ui.text(def.name.slice(0, 1), sx + 9, y + 9, {
+        size: 11,
+        color: def.color,
+        align: 'center',
+        baseline: 'middle',
+        bold: true,
+      });
+      if (status.stacks > 1) {
+        ui.text(`${status.stacks}`, sx + 17, y + 17, {
+          size: 9,
+          color: PALETTE.ink,
+          align: 'right',
+          baseline: 'bottom',
+          outline: true,
+        });
+      }
+      sx += 22;
+    }
+    y += 24;
+  }
+
+  // Experience.
+  ui.bar(rect(margin, y, w, 6), monster.xpFraction, {
+    color: '#7fb2ff',
+    background: 'rgba(0,0,0,0.55)',
+    radius: 2,
+  });
+  y += 16;
+
+  // Level (left) and souls (right) share the row the desktop layout gives each its
+  // own corner for.
+  ui.text(t('hud.levelAbbrev', { n: monster.level }), margin, y, {
+    size: 11,
+    color: PALETTE.muted,
+    baseline: 'middle',
+    bold: true,
+  });
+  ui.swatch(ui.width / 2 + 4, y, '#9fd7ff', 4);
+  ui.text(`${Math.floor(monster.souls)}`, ui.width - margin, y, {
+    size: 13,
+    color: '#cfeaff',
+    align: 'right',
+    baseline: 'middle',
+    bold: true,
+  });
+  y += 18;
+
+  // Room name and progress.
+  ui.fittedText(state.roomName.toUpperCase(), ui.width / 2, y, {
+    size: 14,
+    color: PALETTE.ink,
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 2,
+    outline: true,
+    maxWidth: w,
+  });
+  y += 16;
+  ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), ui.width / 2, y, {
+    size: 10,
+    color: PALETTE.muted,
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 1,
+  });
+  y += 14;
+
+  const defenderW = Math.min(200, w);
+  ui.bar(rect(ui.width / 2 - defenderW / 2, y, defenderW, 5),
+    state.humansTotal > 0 ? state.humansAlive / state.humansTotal : 0,
+    { color: '#8b2a30', radius: 2 },
+  );
+  y += 16;
+
+  const label = state.cleared ? t('hud.cleared') : t('hud.remaining', { n: state.humansAlive });
+  ui.text(label, ui.width / 2, y, {
+    size: 11,
+    color: state.cleared ? PALETTE.gold : PALETTE.muted,
+    align: 'center',
+    baseline: 'middle',
+    bold: state.cleared,
+  });
+  y += 18;
+
+  // The run's headline numbers, condensed to one line rather than a four-row column.
+  const line = [
+    `${t('hud.killedShort')} ${tracker.totalKills}`,
+    formatTime(tracker.elapsed),
+    formatNumber(tracker.totalDamageDealt),
+    `${formatNumber(tracker.averageDps)} dps`,
+  ].join('   ·   ');
+  ui.fittedText(line, ui.width / 2, y, {
+    size: 10,
+    color: PALETTE.dim,
+    align: 'center',
+    baseline: 'middle',
+    maxWidth: w,
+  });
+
+  if (monster.isFrenzied) {
+    ui.text(t('hud.frenzy'), ui.width / 2, y + 16, {
+      size: 11,
+      color: '#ffb347',
+      align: 'center',
+      bold: true,
+      letterSpacing: 1,
+      baseline: 'middle',
+    });
+  }
 }
 
 // ---------------------------------------------------------------------------
@@ -180,13 +360,20 @@ function drawExperience(ui: Ui, state: HudState): void {
 function drawProgress(ui: Ui, state: HudState): void {
   const cx = ui.width / 2;
 
-  ui.text(state.roomName.toUpperCase(), cx, 26, {
+  // The health cluster ends around x=324 and the resource column starts around
+  // x=width-136; a long arena name (a boss suffix appended to a settlement name, in a
+  // wordier locale) can still reach past either at the narrow end of this layout's
+  // range, so it shrinks to whatever room is actually free between them rather than
+  // assuming a generous window.
+  const centerRoom = Math.max(80, ui.width - 136 - 340);
+  ui.fittedText(state.roomName.toUpperCase(), cx, 26, {
     size: 15,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 3,
     outline: true,
+    maxWidth: centerRoom,
   });
 
   ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), cx, 46, {
@@ -293,9 +480,12 @@ function drawBoons(ui: Ui, state: HudState): void {
   const boons = state.monster.activeBoons;
   if (boons.length === 0) return;
 
-  const chipW = 150;
-  const chipH = 34;
   const gap = 8;
+  // Shrinks once boons.length would otherwise run the row past the screen edge —
+  // rare on a desktop window, routine on a phone where two temporary forms already
+  // fill the width.
+  const chipW = Math.max(84, Math.min(150, (ui.width - 32 - (boons.length - 1) * gap) / boons.length));
+  const chipH = 34;
   const totalW = boons.length * chipW + (boons.length - 1) * gap;
   const startX = (ui.width - totalW) / 2;
   const y = ui.height - 86;
@@ -313,13 +503,14 @@ function drawBoons(ui: Ui, state: HudState): void {
       shadow: false,
     });
 
-    ui.text(boon.def.name, x + chipW / 2, y + 12, {
+    ui.fittedText(boon.def.name, x + chipW / 2, y + 12, {
       size: 12,
       color: boon.def.color,
       align: 'center',
       baseline: 'middle',
       bold: true,
       alpha: flash,
+      maxWidth: chipW - 28,
     });
 
     ui.bar(rect(x + 8, y + 22, chipW - 16, 5), fraction, {
@@ -458,13 +649,14 @@ function drawBossBar(ui: Ui, state: HudState): void {
   const x = (ui.width - w) / 2;
   const y = ui.height - 74;
 
-  ui.text(state.bossName!.toUpperCase(), ui.width / 2, y - 12, {
+  ui.fittedText(state.bossName!.toUpperCase(), ui.width / 2, y - 12, {
     size: 15,
     color: PALETTE.gold,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 4,
     outline: true,
+    maxWidth: ui.width - 32,
   });
 
   ui.bar(rect(x, y, w, 14), state.bossHealth, {
@@ -479,7 +671,8 @@ function drawHints(ui: Ui, state: HudState): void {
 
   const alpha = state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > 11 ? (14 - state.elapsed) / 3 : 1;
 
-  ui.text(t('hint.autoAttackTitle'), ui.width / 2, ui.height - 120, {
+  const maxWidth = ui.width - 32;
+  ui.fittedText(t('hint.autoAttackTitle'), ui.width / 2, ui.height - 120, {
     size: 16,
     color: PALETTE.gold,
     align: 'center',
@@ -487,13 +680,15 @@ function drawHints(ui: Ui, state: HudState): void {
     letterSpacing: 3,
     alpha: clamp(alpha, 0, 1),
     outline: true,
+    maxWidth,
   });
-  ui.text(t('hint.autoAttackSub'), ui.width / 2, ui.height - 98, {
+  ui.fittedText(t('hint.autoAttackSub'), ui.width / 2, ui.height - 98, {
     size: 12,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     alpha: clamp(alpha, 0, 1),
+    maxWidth,
   });
 }
 
