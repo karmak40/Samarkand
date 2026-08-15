@@ -126,10 +126,28 @@ export const DE: Record<string, string> = {
   'hint.buildSheet': 'TAB — Statistik',
   'hint.autoAttackTitle': 'DU GREIFST AUTOMATISCH AN — AUCH IM LAUFEN',
   'hint.autoAttackSub': 'WASD — Bewegung · Stillstehen trifft genauer',
+  'hint.autoAttackSubTouch': 'Ziehen zum Bewegen · Stillstehen trifft genauer',
 
   'touch.dash': 'SPRINT',
   'touch.pause': 'II',
   'touch.stats': '≡',
+  'touch.ability': 'GABE',
+
+  // ---- gifts of the abyss ------------------------------------------------------
+  'gift.title': 'GABE DES ABGRUNDS',
+  'gift.subtitle': 'Das Siegel bietet eine Macht, die du selbst richtest. Nicht lange.',
+  'gift.cooldown': 'Abklingzeit',
+  'gift.duration': 'Hält',
+  'gift.leave': 'Weitergehen',
+  'hint.ability': 'LMT / E — Gabe auf den Zeiger',
+  'text.giftFading': '{name} verblasst',
+
+  'ability.abyss-strike.name': 'Schlag des Abgrunds',
+  'ability.abyss-strike.desc': 'Ein Kreis aus Dunkelheit auf der gewählten Stelle. Einen Herzschlag später birst er in deinem Element und wirft alles beiseite.',
+  'ability.rift.name': 'Riss',
+  'ability.rift.desc': 'Der Boden reißt auf, wo du hinzeigst: eine Zone deines Elements, die fünf Sekunden lang alles darin zerfrisst.',
+  'ability.pounce.name': 'Satz',
+  'ability.pounce.desc': 'Du bist einfach dort, an der gewählten Stelle — und was darauf stand, ist es nicht mehr.',
 
   'pause.title': 'PAUSE',
   'pause.resume': 'Fortsetzen',

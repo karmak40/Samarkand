@@ -121,6 +121,8 @@ export class Input {
   private touchSeen = false;
   private touchEnabled = false;
   private touchMode: TouchMode = 'ui';
+  /** Whether the gift button is part of the layout right now. */
+  private touchHasAbility = false;
   private layout: TouchLayout = touchLayout(0, 0);
 
   /** The touch steering the monster, if any, with where it landed and where it is now. */
@@ -216,7 +218,7 @@ export class Input {
       this.touchSeen = true;
 
       const bounds = this.target.getBoundingClientRect();
-      this.layout = touchLayout(bounds.width, bounds.height);
+      this.layout = touchLayout(bounds.width, bounds.height, this.touchHasAbility);
 
       for (const touch of Array.from(e.changedTouches)) {
         const at = localOf(touch, bounds);
@@ -355,7 +357,8 @@ export class Input {
    * live is a player setting, and whether a touch is steering or clicking depends on
    * which screen is open. This class has no business knowing about either.
    */
-  setTouchContext(enabled: boolean, mode: TouchMode): void {
+  setTouchContext(enabled: boolean, mode: TouchMode, hasAbility = false): void {
+    this.touchHasAbility = hasAbility;
     if (mode !== this.touchMode || (this.touchEnabled && !enabled)) {
       // A finger mid-drag when a menu opens must not keep steering behind it — and,
       // worse, must not still be steering when the menu closes, which would leave the

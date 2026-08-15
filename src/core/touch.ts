@@ -30,7 +30,7 @@ export const TAP_SLOP = 12;
 /** Vertical drag that equals one wheel notch on a scrollable screen. */
 export const SCROLL_STEP = 42;
 
-export type TouchButtonId = 'dash' | 'pause' | 'stats';
+export type TouchButtonId = 'dash' | 'pause' | 'stats' | 'ability';
 
 /**
  * What a touch currently means.
@@ -65,7 +65,7 @@ export interface TouchLayout {
  * already rests, and the two rarely-used buttons sit high enough that neither thumb
  * brushes them while steering.
  */
-export function touchLayout(width: number, height: number): TouchLayout {
+export function touchLayout(width: number, height: number, hasAbility = false): TouchLayout {
   const dashR = 36;
   const smallR = 20;
   const margin = 14;
@@ -100,13 +100,26 @@ export function touchLayout(width: number, height: number): TouchLayout {
     statsY += shift;
   }
 
-  return {
-    buttons: [
-      dash,
-      { id: 'pause', x, y: pauseY, r: smallR },
-      { id: 'stats', x, y: statsY, r: smallR },
-    ],
-  };
+  const buttons: TouchButton[] = [
+    dash,
+    { id: 'pause', x, y: pauseY, r: smallR },
+    { id: 'stats', x, y: statsY, r: smallR },
+  ];
+
+  // Only while a gift is actually held. An always-present button would sit there
+  // doing nothing for most of a run — and, worse, would keep swallowing the touches
+  // that land on it, which in the arena means swallowing steering.
+  if (hasAbility) {
+    const abilityR = 28;
+    buttons.push({
+      id: 'ability',
+      x: clamp(dash.x - dashR - 12 - abilityR, abilityR + margin, width - abilityR - margin),
+      y: clamp(dash.y + 6, abilityR + margin, height - abilityR - margin),
+      r: abilityR,
+    });
+  }
+
+  return { buttons };
 }
 
 /** Which button a point lands on, if any. */

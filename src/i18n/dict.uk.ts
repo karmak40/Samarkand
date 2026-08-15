@@ -126,10 +126,28 @@ export const UK: Record<string, string> = {
   'hint.buildSheet': 'TAB — статистика',
   'hint.autoAttackTitle': "ТИ Б'ЄШ САМ — НАВІТЬ НА БІГУ",
   'hint.autoAttackSub': "WASD — рух · зупинишся — б'єш точніше",
+  'hint.autoAttackSubTouch': "Веди пальцем — рухаєшся · зупинишся — б'єш точніше",
 
   'touch.dash': 'РИВОК',
   'touch.pause': 'II',
   'touch.stats': '≡',
+  'touch.ability': 'ДАР',
+
+  // ---- gifts of the abyss ------------------------------------------------------
+  'gift.title': 'ДАР БЕЗОДНІ',
+  'gift.subtitle': 'Уламок пропонує силу, якою ти керуєш сам. Ненадовго.',
+  'gift.cooldown': 'Відкат',
+  'gift.duration': 'Триває',
+  'gift.leave': 'Піти',
+  'hint.ability': 'ЛКМ / E — дар за курсором',
+  'text.giftFading': '{name} згасає',
+
+  'ability.abyss-strike.name': 'Удар безодні',
+  'ability.abyss-strike.desc': 'Коло темряви в обраній точці. За мить — вибух твоєю стихією, що відкидає всіх навколо.',
+  'ability.rift.name': 'Розлам',
+  'ability.rift.desc': 'В обраній точці рветься земля: зона твоєї стихії, що роз’їдає все всередині п’ять секунд.',
+  'ability.pounce.name': 'Стрибок',
+  'ability.pounce.desc': 'Ти вмить опиняєшся в обраній точці, зминаючи всіх при приземленні.',
 
   'pause.title': 'ПАУЗА',
   'pause.resume': 'Продовжити',

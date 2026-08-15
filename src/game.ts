@@ -10,6 +10,7 @@ import { Building } from './entities/building';
 import { Human } from './entities/human';
 import { Monster } from './entities/monster';
 import { t } from './i18n';
+import { ABILITIES, type AbilityDef } from './progression/abilities';
 import { type AchievementDef } from './progression/achievements';
 import { getBoon } from './progression/boons';
 import { dailySeed } from './progression/daily';
@@ -28,6 +29,7 @@ import {
   drawCardSelect,
   drawLifetime,
   drawMainMenu,
+  drawGiftSelect,
   drawMutationSelect,
   drawPause,
   drawResults,
@@ -71,6 +73,7 @@ type GameState =
   | 'map'
   | 'playing'
   | 'cards'
+  | 'gift'
   | 'mutation'
   | 'market'
   | 'cursed'
@@ -150,6 +153,10 @@ export class Game {
   private soulsAtRunStart = 0;
   /** Whether this run is on the shared daily seed. */
   private isDailyRun = false;
+  /** Where the last human died — the sigil's drop point. */
+  private lastKillAt: { x: number; y: number } | null = null;
+  /** Gifts on offer while the choice screen is up. */
+  private pendingGifts: readonly AbilityDef[] = [];
   /** Trials the finished run just earned, shown on the results screen. */
   private earnedTrials: readonly AchievementDef[] = [];
 
@@ -404,8 +411,24 @@ export class Game {
     };
 
     world.onHumanKilled = (human, ctx) => {
+      // Remembered so the sigil can drop where the settlement actually fell, rather
+      // than at the player's feet where it would be a handout instead of a choice.
+      this.lastKillAt = { x: human.x, y: human.y };
       this.applyOnKillEffects(human, ctx.sourceLabel);
     };
+
+    world.onGiftOffered = () => this.openGiftChoice();
+  }
+
+  /**
+   * Offer the three gifts.
+   *
+   * All three, every time: there are only three, and hiding one behind a roll would
+   * turn a decision about how you want to fight into a lottery.
+   */
+  private openGiftChoice(): void {
+    this.pendingGifts = ABILITIES;
+    this.state = 'gift';
   }
 
   private applyOnKillEffects(human: Human, sourceLabel: string): void {
@@ -757,6 +780,7 @@ export class Game {
       this.input.setTouchContext(
         this.meta.settings.touchControls !== 'off',
         this.state === 'playing' ? 'play' : 'ui',
+        this.monster?.ability != null,
       );
       this.ui.frame(this.input, this.renderer.width, this.renderer.height);
 
@@ -834,6 +858,7 @@ export class Game {
         return;
 
       case 'cards':
+      case 'gift':
       case 'mutation':
       case 'pause':
       case 'results':
@@ -856,6 +881,8 @@ export class Game {
       this.state = 'pause';
       return;
     }
+
+    this.tryCastAbility();
 
     this.accumulator += delta;
     let steps = 0;
@@ -885,6 +912,47 @@ export class Game {
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - delta * 2.2);
     if (this.roomIntroTimer > 0) this.roomIntroTimer -= delta;
     this.updateAudio(delta);
+  }
+
+  /**
+   * The one thing in the game you aim yourself.
+   *
+   * Click, or the ability key: both cast at the point under the cursor. The build
+   * sheet is checked because it covers the arena — a click meant for reading a stat
+   * must not throw the monster across the settlement.
+   */
+  private tryCastAbility(): void {
+    if (this.showBuildSheet || !this.monster.abilityReady) return;
+    const asked = this.input.consumePress('ability') || this.input.mouseClicked;
+    if (!asked) return;
+
+    const target = this.aimPoint();
+    if (!target) return;
+    if (this.monster.castAbility(this.world, target.x, target.y)) this.input.mouseClicked = false;
+  }
+
+  /**
+   * Where the gift is aimed.
+   *
+   * The cursor, or — on glass, where there is no cursor to follow — whatever is
+   * closest. A phone cannot point at a spot and steer with the same thumb, and an
+   * on-screen aiming mode for one button would cost more than the button is worth.
+   */
+  private aimPoint(): { x: number; y: number } | null {
+    const reach = this.monster.ability?.def.range ?? 0;
+
+    if (this.input.touchDetected) {
+      // Line of sight is not required: the gift lands on a point, and a wall between
+      // you and the target is the target's problem, not the cast's.
+      const nearest = this.world.nearestHuman(this.monster.x, this.monster.y, reach, false);
+      if (nearest) return { x: nearest.x, y: nearest.y };
+      // Nothing left alive: throw it straight ahead rather than swallowing the press.
+      return {
+        x: this.monster.x + Math.cos(this.monster.aim) * reach * 0.6,
+        y: this.monster.y + Math.sin(this.monster.aim) * reach * 0.6,
+      };
+    }
+    return this.camera.screenToWorld(this.input.mouse.x, this.input.mouse.y);
   }
 
   /**
@@ -1005,6 +1073,12 @@ export class Game {
       // Sweep the battlefield: every soul still lying around comes to you. Souls
       // are experience now, so losing track of them would silently cost levels.
       for (const pickup of world.pickups) pickup.forceAttract();
+
+      // ...and only then the sigil, so the sweep can't drag it in before the player
+      // has decided whether they even want to walk over.
+      const fell = this.lastKillAt ?? this.monster;
+      world.spawnSigil(fell.x, fell.y);
+
       world.texts.add(
         this.monster.x,
         this.monster.y - 60,
@@ -1059,7 +1133,7 @@ export class Game {
       this.audio.setMuted(this.meta.muted);
       this.ambience.quiet();
 
-      const action = drawMainMenu(this.ui, this.meta, this.menuTime);
+      const action = drawMainMenu(this.ui, this.meta, this.menuTime, this.touchActive());
       if (action === 'start') this.beginRun();
       if (action === 'daily') this.beginRun(dailySeed(), true);
       if (action === 'stats') this.state = 'lifetime';
@@ -1131,7 +1205,13 @@ export class Game {
     // the modal screens below must still run in that case.
     const plan = this.currentPlan;
     if (plan) {
-      this.renderer.drawWorld(this.world, this.camera, plan.exit, this.exitReady);
+      // The reticle only follows a live cursor: while a modal is up the mouse belongs
+      // to the screen on top, and a ring trailing its buttons would be nonsense.
+      const aim =
+        this.state === 'playing' && !this.showBuildSheet && this.monster.ability
+          ? this.aimPoint()
+          : null;
+      this.renderer.drawWorld(this.world, this.camera, plan.exit, this.exitReady, aim);
 
       const boss = this.world.humans.find((h) => h.alive && h.archetype.role === 'boss');
 
@@ -1149,6 +1229,7 @@ export class Game {
         elapsed: this.tracker.elapsed,
         bossName: boss ? boss.archetype.name : null,
         bossHealth: boss ? boss.healthFraction : 0,
+        touchActive: this.touchActive(),
       });
 
       if (this.roomIntroTimer > 0) {
@@ -1162,11 +1243,22 @@ export class Game {
         if (this.showBuildSheet) {
           drawBuildSheet(this.ui, this.monster, this.tracker, this.skillPool.takenList);
         }
-        drawTouchControls(this.ui, this.input, this.meta.settings.touchControls);
+        drawTouchControls(
+          this.ui,
+          this.input,
+          this.meta.settings.touchControls,
+          this.monster.ability
+            ? { color: this.monster.ability.def.color, ready: this.monster.abilityReady }
+            : null,
+        );
         break;
 
       case 'cards':
         this.drawCardScreen();
+        break;
+
+      case 'gift':
+        this.drawGiftScreen();
         break;
 
       case 'mutation':
@@ -1174,7 +1266,7 @@ export class Game {
         break;
 
       case 'pause': {
-        const action = drawPause(this.ui);
+        const action = drawPause(this.ui, this.touchActive());
         if (action === 'resume' || this.input.consumePress('pause')) this.state = 'playing';
         if (action === 'settings') {
           this.settingsReturnState = 'pause';
@@ -1325,6 +1417,32 @@ export class Game {
     this.state = 'playing';
   }
 
+  /**
+   * The gift choice, opened by walking into a sigil.
+   *
+   * The settlement is already empty when a sigil exists, so returning to 'playing'
+   * drops the player back into a cleared arena with the portal open — nothing is
+   * waiting to hit them while they read.
+   */
+  private drawGiftScreen(): void {
+    const result = drawGiftSelect(this.ui, this.input, this.pendingGifts);
+    if (result.left) {
+      this.pendingGifts = [];
+      this.state = 'playing';
+      return;
+    }
+    if (result.picked < 0) return;
+
+    const gift = this.pendingGifts[result.picked];
+    if (!gift) return;
+
+    this.monster.grantAbility(gift);
+    this.sound.mutation();
+    this.world.texts.add(this.monster.x, this.monster.y - 56, gift.name.toUpperCase(), gift.color, 18, 1);
+    this.pendingGifts = [];
+    this.state = 'playing';
+  }
+
   private drawMutationScreen(): void {
     const picked = drawMutationSelect(this.ui, this.input, this.pendingMutations);
     if (picked < 0) return;
@@ -1342,6 +1460,21 @@ export class Game {
     this.returnToMap();
   }
 
+  /**
+   * Whether the player appears to be on the on-screen stick rather than a keyboard.
+   *
+   * Same three-way logic `Input` already uses to decide whether a touch on the arena
+   * steers: 'off' never counts, 'on' always does, 'auto' waits for an actual touch so
+   * a mouse-and-keyboard player is never shown a hint for a key that isn't there
+   * because their hardware happens to also have a touchscreen.
+   */
+  private touchActive(): boolean {
+    const mode = this.meta.settings.touchControls;
+    if (mode === 'off') return false;
+    if (mode === 'auto') return this.input.touchDetected;
+    return true;
+  }
+
   private applyCursor(): void {
     const wanted = this.ui.hoveringInteractive ? 'pointer' : this.state === 'playing' ? 'crosshair' : 'default';
     if (this.renderer.canvas.style.cursor !== wanted) {
@@ -1352,6 +1485,18 @@ export class Game {
   /** Exposed for the boot screen. */
   get isRunning(): boolean {
     return this.running;
+  }
+
+  /**
+   * Whether there is nowhere further back to go.
+   *
+   * Exposed for the Android hardware back button: everywhere else, "back" is already
+   * ESC — pausing a run, closing a dropdown, leaving a submenu — but the title screen
+   * has no ESC handler of its own, because there is nothing behind it to return to.
+   * That is also exactly the one place a back press should exit the app instead.
+   */
+  get atMainMenu(): boolean {
+    return this.state === 'menu';
   }
 
   /**

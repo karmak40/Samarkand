@@ -243,6 +243,66 @@ src/
 `scene(name)`, `shot(name)`. Снимки пишутся в `dev/shots/` через dev-эндпоинт
 `/__shot` (только в режиме разработки, в сборку не попадает).
 
+## Сборка под Android
+
+Обёрнуто в [Capacitor](https://capacitorjs.com/): [`capacitor.config.ts`](capacitor.config.ts)
+указывает на собранный `dist/`, нативный проект лежит в `android/` и уже
+закоммичен как обычный исходник — `android/.gitignore`, который сгенерировал
+сам Capacitor, вычищает build-артефакты и `local.properties` (в нём абсолютный
+путь к SDK конкретной машины, ему в репозитории не место).
+
+Нужны Android Studio и его SDK (переменная `ANDROID_HOME` в системе) — без них
+собирать нечем.
+
+```bash
+npm run android:sync
+```
+
+Пересобирает `dist/` и копирует его в нативный проект. Дальше — либо
+
+```bash
+npm run android:open
+```
+
+и запуск кнопкой Run в Android Studio, либо сборка из терминала:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+cd android
+.\gradlew.bat assembleDebug
+```
+
+APK окажется в `android\app\build\outputs\apk\debug\app-debug.apk`.
+
+Две вещи, о которые можно споткнуться:
+
+- **Обязательно PowerShell, не Git Bash.** Gradle падает с `Invalid file path` —
+  это MSYS (среда Git Bash) коверкает Windows-пути на пути к нативным
+  исполняемым файлам. Тот же самый `gradlew.bat` в PowerShell собирает без вопросов.
+- **`JAVA_HOME` — не системная Java.** Из коробки на машине может стоять
+  Java 8, а современный Android Gradle Plugin хочет 17+. Проще всего указать
+  на JDK, который уже идёт в комплекте с Android Studio (`...\Android
+  Studio\jbr`), а не ставить отдельный JDK.
+
+Что уже учтено в коде ради этой платформы:
+
+- **Аппаратная/жестовая кнопка «Назад».** Без обработки Capacitor по умолчанию
+  просто закрывает приложение, даже посреди боя. [`main.ts`](src/main.ts)
+  подписывается на `backButton` из `@capacitor/app` и превращает нажатие в
+  синтетический Escape — тот же путь, которым везде в игре уже работает пауза
+  и выход из подменю. На главном экране, где Escape ничего не делает, кнопка
+  действительно закрывает приложение.
+- **Подсказки под клавиатуру скрываются на тач-устройствах.** «WASD — движение»,
+  «TAB — статистика» и подобные строки не имеют смысла там, где физической
+  клавиатуры нет; при активном сенсорном управлении они не рисуются
+  (`touchActive` в [`hud.ts`](src/ui/hud.ts) и [`screens.ts`](src/ui/screens.ts)).
+
+Перед публикацией в Play Store остаётся: сменить `appId` в
+`capacitor.config.ts` с заглушки `com.samarkand.game` (после первого релиза он
+уже не меняется), подписать release-сборку своим keystore (не debug-APK),
+нарисовать иконку и splash вместо заглушек Capacitor, завести аккаунт Google
+Play Console.
+
 ## Что дальше
 
 Первая версия — вертикальный срез: один биом, 12 комнат, три возможных босса.

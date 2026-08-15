@@ -25,6 +25,7 @@
     "vite.config.ts",
     "playwright.config.ts",
     "eslint.config.js",
+    "capacitor.config.ts",
     "e2e"
   ]
 }

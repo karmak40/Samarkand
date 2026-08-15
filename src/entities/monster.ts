@@ -10,6 +10,7 @@ import { type StatusApplication } from '../combat/status';
 import { type Input } from '../core/input';
 import { clamp, damp, TAU } from '../core/math';
 import { t } from '../i18n';
+import { type AbilityDef } from '../progression/abilities';
 import { type BoonDef } from '../progression/boons';
 import {
   cloneBody,
@@ -41,6 +42,26 @@ export interface ActiveBoon {
   def: BoonDef;
   remaining: number;
   /** Full duration, so the HUD can draw a depleting timer. */
+  total: number;
+}
+
+/** The aimed gift the monster is currently carrying, if any. */
+export interface HeldAbility {
+  def: AbilityDef;
+  /** Seconds of play left before the gift fades. */
+  remaining: number;
+  total: number;
+  /** Seconds until it can be cast again. */
+  cooldown: number;
+}
+
+/** A cast that has been aimed and is now waiting out its windup. */
+export interface PendingCast {
+  def: AbilityDef;
+  x: number;
+  y: number;
+  /** Seconds left before it lands. */
+  timer: number;
   total: number;
 }
 
@@ -78,6 +99,10 @@ export class Monster extends Combatant {
   private form: MonsterBody = createBaseBody();
 
   private readonly boons: ActiveBoon[] = [];
+
+  /** The aimed gift, and the cast it may have in the air. */
+  private held: HeldAbility | null = null;
+  private pending: PendingCast | null = null;
 
   souls = 0;
   /** Souls banked this run, before the meta screen converts them. */
@@ -241,6 +266,89 @@ export class Monster extends Combatant {
 
   hasBoon(id: string): boolean {
     return this.boons.some((b) => b.def.id === id);
+  }
+
+  // ---- the aimed gift ------------------------------------------------------
+
+  get ability(): HeldAbility | null {
+    return this.held;
+  }
+
+  /** The cast waiting out its windup, for the telegraph the renderer draws. */
+  get pendingCast(): PendingCast | null {
+    return this.pending;
+  }
+
+  /** Held, off cooldown, and not already mid-cast. */
+  get abilityReady(): boolean {
+    return this.held !== null && this.held.cooldown <= 0 && this.pending === null;
+  }
+
+  /**
+   * Take a gift.
+   *
+   * A fresh one always replaces whatever was held: the player just chose it off a
+   * screen showing all three, and silently keeping the old one because its timer
+   * had not run out would make that choice a lie. The cooldown starts spent so the
+   * gift can be used the moment it is picked up.
+   */
+  grantAbility(def: AbilityDef): void {
+    this.held = { def, remaining: def.duration, total: def.duration, cooldown: 0 };
+    this.pending = null;
+  }
+
+  /**
+   * Aim the gift at a point and start the cast.
+   *
+   * The point is clamped into the gift's range rather than refused — a click just
+   * past the edge is obviously a cast at the edge, and swallowing it entirely reads
+   * as the button being broken.
+   */
+  castAbility(world: World, targetX: number, targetY: number): boolean {
+    const held = this.held;
+    if (!held || !this.abilityReady || !this.alive) return false;
+
+    const dx = targetX - this.x;
+    const dy = targetY - this.y;
+    const distance = Math.hypot(dx, dy);
+    const scale = distance > held.def.range ? held.def.range / distance : 1;
+    const x = this.x + dx * scale;
+    const y = this.y + dy * scale;
+
+    held.cooldown = held.def.cooldown;
+    this.aim = Math.atan2(dy, dx);
+    this.attackAnim = 1;
+
+    if (held.def.windup > 0) {
+      this.pending = { def: held.def, x, y, timer: held.def.windup, total: held.def.windup };
+    } else {
+      held.def.impact(this, world, x, y);
+    }
+    return true;
+  }
+
+  /** Timers for the held gift: its cooldown, its lifetime, and any cast in the air. */
+  private updateAbility(dt: number, world: World): void {
+    if (this.pending) {
+      this.pending.timer -= dt;
+      if (this.pending.timer <= 0) {
+        const cast = this.pending;
+        this.pending = null;
+        cast.def.impact(this, world, cast.x, cast.y);
+      }
+    }
+
+    const held = this.held;
+    if (!held) return;
+
+    if (held.cooldown > 0) held.cooldown = Math.max(0, held.cooldown - dt);
+    held.remaining -= dt;
+    if (held.remaining <= 0) {
+      // A cast already telegraphed still lands: the gift was spent while it was held.
+      this.held = null;
+      world.texts.add(this.x, this.y - 52, t('text.giftFading', { name: held.def.name }), held.def.color, 15, 1);
+      world.sound.boonExpire(this);
+    }
   }
 
   /**
@@ -855,6 +963,7 @@ export class Monster extends Combatant {
       if (boon.remaining <= 0) this.expireBoon(i, world);
     }
     this.emitBoonAmbience(dt, world);
+    this.updateAbility(dt, world);
 
     // Regeneration accrues fractionally so low regen values still tick.
     const regen = this.stats.get('hpRegen');

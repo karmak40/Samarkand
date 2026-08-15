@@ -111,7 +111,13 @@ export class Renderer {
     camera.zoom = clamp(Math.min(heightZoom, widthZoom), 0.6, 2.4);
   }
 
-  drawWorld(world: World, camera: Camera, exit: Vec2 | null, exitOpen: boolean): void {
+  drawWorld(
+    world: World,
+    camera: Camera,
+    exit: Vec2 | null,
+    exitOpen: boolean,
+    aim: Vec2 | null = null,
+  ): void {
     const ctx = this.ctx;
     const view = camera.visibleRect();
 
@@ -121,6 +127,9 @@ export class Renderer {
     this.terrain.draw(ctx, view);
     world.decals.draw(ctx, view);
     world.drawHazards(ctx);
+    // On the ground, under everything that walks on it: a reticle drawn over the
+    // crowd would hide the very thing being aimed at.
+    this.drawAbilityAim(ctx, world, aim);
 
     if (exit && exitOpen) {
       this.drawExit(ctx, exit, world.time);
@@ -147,6 +156,82 @@ export class Renderer {
     this.drawVignette();
     this.drawOffscreenMarkers(world, camera);
     if (exit && exitOpen) this.drawExitEdgeMarker(camera, exit);
+  }
+
+  /**
+   * Where the gift is pointed, and what it is about to do.
+   *
+   * Two marks in one place. The reticle follows the cursor whenever a gift is held
+   * and ready — that is the only thing making the mouse visibly alive. The telegraph
+   * is the committed cast: a ring that fills as its windup runs out, so both the
+   * player and anyone watching can see exactly where and when it lands.
+   */
+  private drawAbilityAim(ctx: CanvasRenderingContext2D, world: World, aim: Vec2 | null): void {
+    const monster = world.monster;
+    const cast = monster.pendingCast;
+
+    if (cast) {
+      const progress = clamp(1 - cast.timer / Math.max(0.0001, cast.total), 0, 1);
+      const radius = cast.def.radius * monster.stats.get('areaSize');
+
+      ctx.save();
+      ctx.translate(cast.x, cast.y);
+
+      ctx.fillStyle = hexAlpha(cast.def.color, 0.14);
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, TAU);
+      ctx.fill();
+
+      // The filling wedge is the clock: full circle means it is landing now.
+      ctx.fillStyle = hexAlpha(cast.def.color, 0.3);
+      ctx.beginPath();
+      ctx.moveTo(0, 0);
+      ctx.arc(0, 0, radius, -Math.PI / 2, -Math.PI / 2 + TAU * progress);
+      ctx.closePath();
+      ctx.fill();
+
+      ctx.strokeStyle = hexAlpha(cast.def.color, 0.9);
+      ctx.lineWidth = 2.5;
+      ctx.beginPath();
+      ctx.arc(0, 0, radius, 0, TAU);
+      ctx.stroke();
+      ctx.restore();
+      return;
+    }
+
+    const held = monster.ability;
+    if (!aim || !held) return;
+
+    const ready = monster.abilityReady;
+    const radius = held.def.radius * monster.stats.get('areaSize');
+
+    // Clamped the same way the cast itself is, so the reticle never promises reach
+    // the gift does not have.
+    const dx = aim.x - monster.x;
+    const dy = aim.y - monster.y;
+    const distance = Math.hypot(dx, dy);
+    const scale = distance > held.def.range ? held.def.range / distance : 1;
+
+    ctx.save();
+    ctx.translate(monster.x + dx * scale, monster.y + dy * scale);
+    ctx.strokeStyle = hexAlpha(held.def.color, ready ? 0.75 : 0.28);
+    ctx.lineWidth = ready ? 2 : 1.5;
+    ctx.setLineDash([10, 9]);
+    ctx.lineDashOffset = -world.time * 22;
+    ctx.beginPath();
+    ctx.arc(0, 0, radius, 0, TAU);
+    ctx.stroke();
+    ctx.setLineDash([]);
+
+    // A crosshair tick in the middle, so a small reticle is still findable on a
+    // busy floor of corpses and fire.
+    ctx.beginPath();
+    ctx.moveTo(-7, 0);
+    ctx.lineTo(7, 0);
+    ctx.moveTo(0, -7);
+    ctx.lineTo(0, 7);
+    ctx.stroke();
+    ctx.restore();
   }
 
   /** Gold pointer on the viewport border while the portal is off screen. */

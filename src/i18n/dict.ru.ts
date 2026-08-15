@@ -126,10 +126,28 @@ export const RU: Record<string, string> = {
   'hint.buildSheet': 'TAB — статистика',
   'hint.autoAttackTitle': 'ТЫ БЬЁШЬ САМ — ДАЖЕ НА БЕГУ',
   'hint.autoAttackSub': 'WASD — движение · остановишься — бьёшь точнее',
+  'hint.autoAttackSubTouch': 'Веди пальцем — двигаешься · остановишься — бьёшь точнее',
 
   'touch.dash': 'РЫВОК',
   'touch.pause': 'II',
   'touch.stats': '≡',
+  'touch.ability': 'ДАР',
+
+  // ---- gifts of the abyss ------------------------------------------------------
+  'gift.title': 'ДАР БЕЗДНЫ',
+  'gift.subtitle': 'Осколок предлагает силу, которой ты правишь сам. Ненадолго.',
+  'gift.cooldown': 'Откат',
+  'gift.duration': 'Держится',
+  'gift.leave': 'Уйти',
+  'hint.ability': 'ЛКМ / E — дар по курсору',
+  'text.giftFading': '{name} угасает',
+
+  'ability.abyss-strike.name': 'Удар бездны',
+  'ability.abyss-strike.desc': 'Круг тьмы в указанной точке. Через мгновение — взрыв твоей стихией, отбрасывающий всех вокруг.',
+  'ability.rift.name': 'Разлом',
+  'ability.rift.desc': 'В указанной точке рвётся земля: зона твоей стихии, разъедающая всё внутри пять секунд.',
+  'ability.pounce.name': 'Бросок',
+  'ability.pounce.desc': 'Ты мгновенно оказываешься в указанной точке, сминая всех при приземлении.',
 
   'pause.title': 'ПАУЗА',
   'pause.resume': 'Продолжить',

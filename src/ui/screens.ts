@@ -4,6 +4,7 @@ import { clamp, TAU } from '../core/math';
 import { HUMAN_ARCHETYPES } from '../entities/human';
 import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
+import { type AbilityDef } from '../progression/abilities';
 import {
   achievementName,
   type AchievementDef,
@@ -442,6 +443,150 @@ export function drawMutationSelect(
   if (input.wasPressed('slot3') && mutations.length > 2) picked = 2;
 
   return picked;
+}
+
+// ---------------------------------------------------------------------------
+
+export interface GiftChoiceResult {
+  picked: number;
+  left: boolean;
+}
+
+/**
+ * The gift of the abyss — the choice made at a sigil.
+ *
+ * Each card is in its gift's own colour and states its two numbers plainly, because
+ * the whole decision is a trade between them: a long cooldown that hits hard, a
+ * shorter one that denies ground, or a leap that repositions you. Walking away is
+ * offered as well; a screen you cannot decline turns a stray step into a mistake.
+ */
+export function drawGiftSelect(
+  ui: Ui,
+  input: Input,
+  gifts: readonly AbilityDef[],
+): GiftChoiceResult {
+  ui.scrim(0.88);
+
+  const result: GiftChoiceResult = { picked: -1, left: false };
+
+  ui.fittedText(t('gift.title'), ui.width / 2, 74, {
+    size: 32,
+    color: '#b06cff',
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 10,
+    maxWidth: ui.width - 48,
+  });
+  ui.fittedText(t('gift.subtitle'), ui.width / 2, 110, {
+    size: 14,
+    color: PALETTE.muted,
+    align: 'center',
+    baseline: 'middle',
+    italic: true,
+    maxWidth: ui.width - 48,
+  });
+
+  const stacked = ui.width < 640;
+  const bottom = ui.height - 84;
+
+  gifts.forEach((gift, i) => {
+    const bounds = stacked
+      ? giftRowBounds(ui, i, gifts.length, 146, bottom)
+      : giftCardBounds(ui, i, gifts.length);
+
+    const zone = ui.hitZone(bounds);
+    const hovered = zone.hovered;
+
+    ui.panel(bounds, {
+      fill: hovered ? 'rgba(30,24,38,0.97)' : 'rgba(16,14,20,0.95)',
+      border: hovered ? gift.color : 'rgba(148,138,118,0.35)',
+      radius: 8,
+    });
+
+    const pad = stacked ? 18 : 20;
+    ui.fittedText(gift.name, bounds.x + pad, bounds.y + 24, {
+      size: stacked ? 17 : 19,
+      color: gift.color,
+      baseline: 'middle',
+      bold: true,
+      maxWidth: bounds.w - pad * 2 - 24,
+    });
+
+    ui.paragraph(gift.description, bounds.x + pad, bounds.y + 48, bounds.w - pad * 2, {
+      size: stacked ? 12.5 : 13.5,
+      color: PALETTE.muted,
+      lineHeight: 17,
+    });
+
+    // The two numbers that decide it, on the bottom edge where they line up across
+    // all three cards and can be compared at a glance.
+    ui.statRow(
+      t('gift.cooldown'),
+      `${gift.cooldown}${t('unit.secondsAbbrev')}`,
+      bounds.x + pad,
+      bounds.y + bounds.h - 38,
+      bounds.w - pad * 2,
+      { size: 12, color: gift.color },
+    );
+    ui.statRow(
+      t('gift.duration'),
+      `${gift.duration}${t('unit.secondsAbbrev')}`,
+      bounds.x + pad,
+      bounds.y + bounds.h - 20,
+      bounds.w - pad * 2,
+      { size: 12 },
+    );
+
+    ui.text(`${i + 1}`, bounds.x + bounds.w - 14, bounds.y + 22, {
+      size: 12,
+      color: hovered ? gift.color : PALETTE.dim,
+      align: 'right',
+      baseline: 'middle',
+      bold: true,
+    });
+
+    if (zone.clicked) result.picked = i;
+  });
+
+  if (input.wasPressed('slot1') && gifts.length > 0) result.picked = 0;
+  if (input.wasPressed('slot2') && gifts.length > 1) result.picked = 1;
+  if (input.wasPressed('slot3') && gifts.length > 2) result.picked = 2;
+
+  if (
+    ui.button(rect(ui.width / 2 - 90, ui.height - 62, 180, 38), t('gift.leave'), {
+      accent: PALETTE.muted,
+      size: 13,
+    }) ||
+    input.consumePress('pause')
+  ) {
+    result.left = true;
+  }
+
+  return result;
+}
+
+function giftCardBounds(ui: Ui, index: number, count: number): ReturnType<typeof rect> {
+  const cardW = Math.max(160, Math.min(300, (ui.width - 140) / Math.max(1, count) - 24));
+  // Tight to its contents: a card sized to the window leaves a hole between the
+  // description and the two numbers, which reads as something failing to render.
+  const cardH = clamp(ui.height - 300, 172, 214);
+  const gap = 26;
+  const totalW = count * cardW + (count - 1) * gap;
+  const startX = (ui.width - totalW) / 2;
+  return rect(startX + index * (cardW + gap), ui.height / 2 - cardH / 2 + 10, cardW, cardH);
+}
+
+function giftRowBounds(
+  ui: Ui,
+  index: number,
+  count: number,
+  top: number,
+  bottom: number,
+): ReturnType<typeof rect> {
+  const margin = 20;
+  const gap = 10;
+  const rowH = clamp((bottom - top - gap * (count - 1)) / Math.max(1, count), 96, 150);
+  return rect(margin, top + index * (rowH + gap), ui.width - margin * 2, rowH);
 }
 
 // ---------------------------------------------------------------------------
@@ -915,7 +1060,7 @@ export type MenuAction =
   | 'reset';
 
 /** Title screen and soul shop. */
-export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuAction {
+export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActive: boolean): MenuAction {
   const ctx = ui.ctx;
 
   // Background: slow drifting embers over a dark field.
@@ -1009,12 +1154,15 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number): MenuActi
 
   drawAudioControl(ui, meta);
 
-  ui.text(t('menu.controlsFooter'), ui.width / 2, ui.height - 22, {
-    size: 12,
-    color: PALETTE.dim,
-    align: 'center',
-    baseline: 'middle',
-  });
+  // Nothing here to hint at on a screen with no keyboard behind it.
+  if (!touchActive) {
+    ui.text(t('menu.controlsFooter'), ui.width / 2, ui.height - 22, {
+      size: 12,
+      color: PALETTE.dim,
+      align: 'center',
+      baseline: 'middle',
+    });
+  }
 
   return action;
 }
@@ -1491,7 +1639,7 @@ function behaviorLabel(flag: string): string {
 
 export type PauseAction = 'none' | 'resume' | 'menu' | 'settings';
 
-export function drawPause(ui: Ui): PauseAction {
+export function drawPause(ui: Ui, touchActive: boolean): PauseAction {
   ui.scrim(0.78);
 
   ui.fittedText(t('pause.title'), ui.width / 2, ui.height / 2 - 90, {
@@ -1527,12 +1675,15 @@ export function drawPause(ui: Ui): PauseAction {
     action = 'menu';
   }
 
-  ui.text(t('pause.hint'), ui.width / 2, ui.height / 2 + 126, {
-    size: 12,
-    color: PALETTE.dim,
-    align: 'center',
-    baseline: 'middle',
-  });
+  // The Resume button above is already the tap target; ESC doesn't exist to hint at.
+  if (!touchActive) {
+    ui.text(t('pause.hint'), ui.width / 2, ui.height / 2 + 126, {
+      size: 12,
+      color: PALETTE.dim,
+      align: 'center',
+      baseline: 'middle',
+    });
+  }
 
   return action;
 }

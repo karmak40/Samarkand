@@ -4,6 +4,7 @@ import { clamp, TAU } from '../core/math';
 import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
 import { RARITY, type SkillCard } from '../progression/skills';
+import { hexAlpha } from '../render/monster-render';
 import type { RunStats } from '../stats/tracker';
 import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
 
@@ -23,6 +24,8 @@ export interface HudState {
   elapsed: number;
   bossName: string | null;
   bossHealth: number;
+  /** Whether the player is on the on-screen stick rather than a keyboard. */
+  touchActive: boolean;
 }
 
 /**
@@ -57,7 +60,7 @@ export function drawHud(ui: Ui, state: HudState): void {
     drawResources(ui, state);
   }
 
-  drawDash(ui, monster);
+  drawDash(ui, monster, state.touchActive);
   drawBoons(ui, state);
   drawBuild(ui, state);
   if (state.bossName) drawBossBar(ui, state);
@@ -436,7 +439,7 @@ function drawResources(ui: Ui, state: HudState): void {
   });
 }
 
-function drawDash(ui: Ui, monster: Monster): void {
+function drawDash(ui: Ui, monster: Monster, touchActive: boolean): void {
   const y = ui.height - 34;
   const x = 28;
   const max = monster.stats.getInt('dashCharges');
@@ -466,7 +469,79 @@ function drawDash(ui: Ui, monster: Monster): void {
     ui.ctx.restore();
   }
 
-  ui.text(t('hint.dash'), x - 6, y + 22, { size: 11, color: PALETTE.dim, baseline: 'middle' });
+  // The DASH button already carries its own label on touch; a key that doesn't
+  // exist on the device has nothing to hint at.
+  if (!touchActive) {
+    ui.text(t('hint.dash'), x - 6, y + 22, { size: 11, color: PALETTE.dim, baseline: 'middle' });
+  }
+
+  drawAbility(ui, monster, x + max * 26 + 10, y);
+}
+
+/**
+ * The held gift, next to the dash pips.
+ *
+ * Two timers in one disc, because they mean different things: the ring around it is
+ * how long the gift itself has left, and the fill inside is the cooldown until the
+ * next cast. A gift that is ready reads as a solid, lit button; one recharging is
+ * visibly filling back up.
+ */
+function drawAbility(ui: Ui, monster: Monster, x: number, y: number): void {
+  const held = monster.ability;
+  if (!held) return;
+
+  const ctx = ui.ctx;
+  const radius = 13;
+  const ready = monster.abilityReady;
+  const charge = held.def.cooldown > 0 ? 1 - held.cooldown / held.def.cooldown : 1;
+  const expiring = held.remaining < 5;
+  const flash = expiring ? 0.55 + 0.45 * Math.sin(monster.age * 12) : 1;
+
+  ctx.save();
+  ctx.globalAlpha = flash;
+
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, TAU);
+  ctx.fillStyle = 'rgba(24,20,30,0.9)';
+  ctx.fill();
+
+  // Cooldown fills clockwise from the top, exactly like a recharging dash pip.
+  if (charge < 1) {
+    ctx.beginPath();
+    ctx.moveTo(x, y);
+    ctx.arc(x, y, radius, -Math.PI / 2, -Math.PI / 2 + TAU * charge);
+    ctx.closePath();
+    ctx.fillStyle = hexAlpha(held.def.color, 0.35);
+    ctx.fill();
+  } else {
+    ctx.beginPath();
+    ctx.arc(x, y, radius, 0, TAU);
+    ctx.fillStyle = hexAlpha(held.def.color, 0.55);
+    ctx.fill();
+  }
+
+  ctx.beginPath();
+  ctx.arc(x, y, radius, 0, TAU);
+  ctx.strokeStyle = ready ? held.def.color : 'rgba(120,110,130,0.5)';
+  ctx.lineWidth = 1.6;
+  ctx.stroke();
+
+  // Outer arc: the gift's own lifetime draining away.
+  const life = clamp(held.remaining / held.total, 0, 1);
+  ctx.beginPath();
+  ctx.arc(x, y, radius + 4, -Math.PI / 2, -Math.PI / 2 + TAU * life);
+  ctx.strokeStyle = expiring ? PALETTE.bad : hexAlpha(held.def.color, 0.8);
+  ctx.lineWidth = 2.2;
+  ctx.stroke();
+  ctx.restore();
+
+  ui.text(`${Math.ceil(held.remaining)}`, x, y + radius + 14, {
+    size: 10,
+    color: expiring ? PALETTE.bad : PALETTE.dim,
+    align: 'center',
+    baseline: 'middle',
+    alpha: flash,
+  });
 }
 
 /**
@@ -580,12 +655,15 @@ function drawBuild(ui: Ui, state: HudState): void {
     if (zone.hovered) drawSkillTooltip(ui, entry.card, entry.stacks, x + size / 2, y - 8);
   });
 
-  ui.text(t('hint.buildSheet'), right, bottom - rows * (size + gap) - 12, {
-    size: 11,
-    color: PALETTE.dim,
-    align: 'right',
-    baseline: 'middle',
-  });
+  // The ≡ button already opens this on touch; TAB doesn't exist to hint at.
+  if (!state.touchActive) {
+    ui.text(t('hint.buildSheet'), right, bottom - rows * (size + gap) - 12, {
+      size: 11,
+      color: PALETTE.dim,
+      align: 'right',
+      baseline: 'middle',
+    });
+  }
 }
 
 function drawSkillTooltip(
@@ -666,13 +744,21 @@ function drawBossBar(ui: Ui, state: HudState): void {
 }
 
 function drawHints(ui: Ui, state: HudState): void {
-  // The core mechanic needs saying exactly once, early.
+  // The core mechanic needs saying exactly once, early — true on touch as much as on
+  // a keyboard, only the wording of how to move changes.
   if (state.elapsed > 14 || state.roomIndex > 0) return;
 
   const alpha = state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > 11 ? (14 - state.elapsed) / 3 : 1;
 
-  const maxWidth = ui.width - 32;
-  ui.fittedText(t('hint.autoAttackTitle'), ui.width / 2, ui.height - 120, {
+  // On touch, the right edge is the on-screen stick's button column — centre the
+  // hint in whatever's left of the screen instead of letting it run underneath them.
+  // `rightClearance` of 16 (the same margin as the left) reduces to the old
+  // full-width centring exactly when there is no touch column to dodge.
+  const rightClearance = state.touchActive ? 150 : 16;
+  const centerX = (16 + (ui.width - rightClearance)) / 2;
+  const maxWidth = ui.width - rightClearance - 16;
+
+  ui.fittedText(t('hint.autoAttackTitle'), centerX, ui.height - 120, {
     size: 16,
     color: PALETTE.gold,
     align: 'center',
@@ -682,14 +768,19 @@ function drawHints(ui: Ui, state: HudState): void {
     outline: true,
     maxWidth,
   });
-  ui.fittedText(t('hint.autoAttackSub'), ui.width / 2, ui.height - 98, {
-    size: 12,
-    color: PALETTE.muted,
-    align: 'center',
-    baseline: 'middle',
-    alpha: clamp(alpha, 0, 1),
-    maxWidth,
-  });
+  ui.fittedText(
+    state.touchActive ? t('hint.autoAttackSubTouch') : t('hint.autoAttackSub'),
+    centerX,
+    ui.height - 98,
+    {
+      size: 12,
+      color: PALETTE.muted,
+      align: 'center',
+      baseline: 'middle',
+      alpha: clamp(alpha, 0, 1),
+      maxWidth,
+    },
+  );
 }
 
 /** Colour for a damage type, exported for other screens. */

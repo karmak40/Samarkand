@@ -126,10 +126,28 @@ export const EN: Record<string, string> = {
   'hint.buildSheet': 'TAB — stats',
   'hint.autoAttackTitle': 'YOU ATTACK ON YOUR OWN — EVEN ON THE MOVE',
   'hint.autoAttackSub': 'WASD — move · stand still to hit true',
+  'hint.autoAttackSubTouch': 'Drag to move · stand still to hit true',
 
   'touch.dash': 'DASH',
   'touch.pause': 'II',
   'touch.stats': '≡',
+  'touch.ability': 'GIFT',
+
+  // ---- gifts of the abyss ------------------------------------------------------
+  'gift.title': 'GIFT OF THE ABYSS',
+  'gift.subtitle': 'The sigil offers a power you aim yourself. Not for long.',
+  'gift.cooldown': 'Cooldown',
+  'gift.duration': 'Lasts',
+  'gift.leave': 'Walk away',
+  'hint.ability': 'LMB / E — gift at the cursor',
+  'text.giftFading': '{name} fading',
+
+  'ability.abyss-strike.name': 'Abyssal Strike',
+  'ability.abyss-strike.desc': 'A circle of dark on the spot you choose. A heartbeat later it bursts in your own element and throws everything aside.',
+  'ability.rift.name': 'Rift',
+  'ability.rift.desc': 'The ground tears open where you point: a pool of your element that eats anything standing in it for five seconds.',
+  'ability.pounce.name': 'Pounce',
+  'ability.pounce.desc': 'You are simply there, at the point you chose, and whatever was standing on it is not.',
 
   'pause.title': 'PAUSED',
   'pause.resume': 'Resume',

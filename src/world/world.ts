@@ -93,6 +93,8 @@ export class World {
   onBuildingBreached?: (building: Building, occupants: number) => void;
   onHumanKilled?: (human: Human, ctx: DeathContext) => void;
   spawnHuman?: (id: HumanId, x: number, y: number, tier: number) => void;
+  /** A sigil was walked into: the run opens the choice of gifts. */
+  onGiftOffered?: () => void;
 
   private readonly delayed: Array<{ remaining: number; fn: (world: World) => void }> = [];
 
@@ -300,6 +302,18 @@ export class World {
     this.pickups.push(pickup);
 
     this.particles.ring(x, y, def.color, 70, 0.6);
+    this.sound.portal({ x, y });
+  }
+
+  /**
+   * Drop the sigil that offers a gift of the abyss.
+   *
+   * Placed where the settlement fell rather than handed over: walking to it is a
+   * small, optional detour, and a reward you can decline is a decision.
+   */
+  spawnSigil(x: number, y: number): void {
+    this.pickups.push(new Pickup('sigil', x, y, 1));
+    this.particles.ring(x, y, '#b06cff', 80, 0.7);
     this.sound.portal({ x, y });
   }
 
