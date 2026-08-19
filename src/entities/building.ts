@@ -11,6 +11,7 @@ export type BuildingKind =
   | 'granary'
   | 'chapel'
   | 'watchtower'
+  | 'stronghold'
   | 'well'
   | 'wall'
   | 'palisade'
@@ -114,6 +115,18 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
     hasRoof: true,
     opaque: true,
     relicChance: 0.12,
+  },
+  stronghold: {
+    kind: 'stronghold',
+    get name() { return t('building.stronghold.name'); },
+    hp: 620,
+    souls: 26,
+    occupancy: [1, 3],
+    wallColor: '#8a7a5c',
+    roofColor: '#5c4c38',
+    hasRoof: true,
+    opaque: true,
+    relicChance: 0.2,
   },
   well: {
     kind: 'well',
@@ -442,6 +455,32 @@ export class Building extends Entity {
       ctx.moveTo(-6, -h / 2 - h * 0.62 - 12);
       ctx.lineTo(6, -h / 2 - h * 0.62 - 12);
       ctx.stroke();
+    }
+
+    if (this.profile.kind === 'stronghold') {
+      // Crenellations along the wall top, and a corner turret rising above the
+      // roofline — what makes this read as a castle rather than a bigger house,
+      // since the siege engine it fields never leaves that turret.
+      ctx.fillStyle = p.wallColor;
+      const merlonW = 10;
+      for (let mx = -w / 2 + 4; mx < w / 2 - 4; mx += merlonW * 1.8) {
+        ctx.fillRect(mx, -h / 2 - 6, merlonW, 8);
+      }
+
+      const turretX = w / 2 - 16;
+      const turretTop = -h / 2 - h * 0.62 - 14;
+      ctx.fillStyle = p.wallColor;
+      ctx.fillRect(turretX - 12, turretTop, 24, h / 2 + h * 0.62 + 14);
+      ctx.fillStyle = p.roofColor;
+      ctx.beginPath();
+      ctx.moveTo(turretX - 14, turretTop);
+      ctx.lineTo(turretX + 14, turretTop);
+      ctx.lineTo(turretX, turretTop - 16);
+      ctx.closePath();
+      ctx.fill();
+      for (let mx = turretX - 10; mx <= turretX + 10; mx += 8) {
+        ctx.fillRect(mx, turretTop - 4, 4, 6);
+      }
     }
 
     // Door and window. Lit while occupied, dark once the family is dead.

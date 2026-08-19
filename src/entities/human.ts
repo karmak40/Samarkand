@@ -17,11 +17,14 @@ export type HumanId =
   | 'priest'
   | 'knight'
   | 'ballista'
+  | 'rider'
+  | 'siegeEngine'
   | 'inquisitor'
   | 'warlord'
-  | 'pyromancer';
+  | 'pyromancer'
+  | 'khagan';
 
-/** Every boss the run can end on. One is drawn per run from the seed. */
+/** Every boss the first biome's run can end on. One is drawn per run from the seed. */
 export const BOSS_IDS = ['inquisitor', 'warlord', 'pyromancer'] as const;
 
 export type BossId = (typeof BOSS_IDS)[number];
@@ -53,8 +56,15 @@ export interface HumanArchetype {
   readonly onHitStatuses?: StatusApplication[];
   /** Weight in the spawn table; 0 means "never rolled randomly". */
   readonly spawnWeight: number;
-  /** Earliest room index this unit can appear in. */
+  /** Earliest room index *within its biome* this unit can appear in. */
   readonly minDepth: number;
+  /**
+   * Earliest biome this unit can appear in. Omitted means every biome — most units
+   * predate the war-camp and have nothing biome-specific about them. Kept separate
+   * from `minDepth` because a biome picked directly from the menu restarts the depth
+   * count from 0, and a war-camp specialist must still show up on room 1 of it.
+   */
+  readonly minBiome?: 1 | 2;
   /** Chance to drop a blood (healing) orb. */
   readonly bloodChance: number;
   /** Chance this unit drops a relic granting a temporary form. */
@@ -294,6 +304,76 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     relicChance: 0.08,
     courage: 1,
   },
+
+  /**
+   * The Rider: a war-camp charger.
+   *
+   * No new AI — it is a melee unit whose speed alone changes the fight, closing
+   * from far outside the range any infantry could threaten from. Tuned to trip the
+   * stalemate-breaking charge much sooner than anything else in the roster (see
+   * `update()`), so it reads as committing to a run at you rather than shuffling
+   * into position like everyone else.
+   */
+  rider: {
+    id: 'rider',
+    get name() { return t('enemy.rider.name'); },
+    role: 'melee',
+    hp: 70,
+    armor: 8,
+    resist: NO_RESIST,
+    speed: 250,
+    radius: 13,
+    damage: [{ type: 'physical', amount: 22 }],
+    attackRange: 50,
+    preferredRange: 50,
+    attackCooldown: 1.3,
+    windup: 0.35,
+    recover: 0.5,
+    souls: 6,
+    knockbackResist: 1.6,
+    tunic: '#8a5a2e',
+    accent: '#c9a227',
+    spawnWeight: 16,
+    minDepth: 0,
+    minBiome: 2,
+    bloodChance: 0.15,
+    relicChance: 0.08,
+    courage: 0.9,
+  },
+
+  /**
+   * The Siege Engine: a stronger ballista fielded only by a stronghold.
+   *
+   * Placed the same way a watchtower fields its ballista — see `planSpawns` — just
+   * paired with the bigger structure instead, and hitting harder to match.
+   */
+  siegeEngine: {
+    id: 'siegeEngine',
+    get name() { return t('enemy.siegeEngine.name'); },
+    role: 'turret',
+    hp: 160,
+    armor: 26,
+    resist: { poison: 0.9, frost: 0.5 },
+    speed: 0,
+    radius: 18,
+    damage: [{ type: 'physical', amount: 44 }],
+    attackRange: 680,
+    preferredRange: 680,
+    attackCooldown: 3,
+    windup: 1.1,
+    recover: 0.7,
+    souls: 11,
+    knockbackResist: 99,
+    tunic: '#7a5c3a',
+    accent: '#c9a25c',
+    spawnWeight: 0,
+    minDepth: 0,
+    minBiome: 2,
+    bloodChance: 0,
+    relicChance: 0.1,
+    courage: 1,
+  },
+
   inquisitor: {
     id: 'inquisitor',
     get name() { return t('enemy.inquisitor.name'); },
@@ -386,6 +466,39 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     relicChance: 1,
     courage: 1,
   },
+
+  /**
+   * The Khagan: the war-camp's own warlord, and the run's real ending.
+   *
+   * Mounted like a Rider (see `draw()`), commands them into the fight rather than
+   * relying on its own reach, and closes the fight it can't win by attrition with a
+   * storm that answers standing still with a dust cloud that doesn't miss.
+   */
+  khagan: {
+    id: 'khagan',
+    get name() { return t('enemy.khagan.name'); },
+    role: 'boss',
+    hp: 2100,
+    armor: 55,
+    resist: { physical: 0.15, frost: 0.3 },
+    speed: 150,
+    radius: 26,
+    damage: [{ type: 'physical', amount: 36 }],
+    attackRange: 90,
+    preferredRange: 80,
+    attackCooldown: 1.6,
+    windup: 0.6,
+    recover: 0.55,
+    souls: 95,
+    knockbackResist: 14,
+    tunic: '#8a5a2e',
+    accent: '#d4af37',
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
 };
 
 type AiState = 'idle' | 'approach' | 'windup' | 'recover' | 'reposition' | 'flee' | 'stunned';
@@ -451,8 +564,10 @@ export class Human extends Combatant {
     this.faction = 'human';
     this.radius = archetype.radius;
 
-    // Depth scaling: +18% HP and +11% damage per room, compounding.
-    const hpScale = Math.pow(1.18, tier);
+    // Depth scaling: +13% HP and +8% damage per room, compounding. Was 18%/11% —
+    // that pace made the mid-run rooms (where the enemy count is also ramping up)
+    // spike much harder than the player's own growth could keep up with.
+    const hpScale = Math.pow(1.13, tier);
     this.maxHp = archetype.hp * hpScale;
     this.hp = this.maxHp;
 
@@ -462,7 +577,7 @@ export class Human extends Combatant {
   }
 
   get damageScale(): number {
-    return Math.pow(1.11, this.tier);
+    return Math.pow(1.08, this.tier);
   }
 
   override defenses(): Defenses {
@@ -562,9 +677,13 @@ export class Human extends Combatant {
     // without landing a blow — because it is stuck behind a house, or kiting a
     // player who is also kiting — commits and charges. Without this, the tail of
     // a room degenerates into chasing survivors around buildings.
+    //
+    // A Rider trips this almost on sight rather than waiting out the room: a horse
+    // that patiently jogs into position reads as a slow militiaman, not a charge.
     if (this.alerted && this.archetype.role !== 'civilian' && this.archetype.speed > 0) {
+      const patience = this.archetype.id === 'rider' ? 1.4 : 7;
       this.timeSinceAttack += dt;
-      if (this.timeSinceAttack > 7) {
+      if (this.timeSinceAttack > patience) {
         this.timeSinceAttack = 0;
         this.charging = 4;
       }
@@ -834,6 +953,9 @@ export class Human extends Combatant {
       case 'pyromancer':
         this.castPyromancer(world);
         return;
+      case 'khagan':
+        this.castKhagan(world);
+        return;
       default:
         this.castInquisitor(world);
     }
@@ -1038,6 +1160,69 @@ export class Human extends Combatant {
           );
         }
         world.texts.add(this.x, this.y - 40, t('text.lightCalls'), '#ffe9a8', 18);
+        break;
+      }
+    }
+  }
+
+  /** War-camp pressure: call the horde, a javelin volley, and a blinding sandstorm. */
+  private castKhagan(world: World): void {
+    const monster = world.monster;
+    const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const power = this.damageScale;
+
+    switch (this.specialIndex) {
+      case 0: {
+        // Riders answer the horn rather than the Khagan closing the distance itself.
+        for (let i = 0; i < 2; i++) {
+          const a = angle + Math.PI + (i - 0.5) * 1.1;
+          world.spawnHuman?.('rider', this.x + Math.cos(a) * 90, this.y + Math.sin(a) * 90, this.tier);
+        }
+        world.texts.add(this.x, this.y - 40, t('text.khaganHorde'), '#d4af37', 18);
+        break;
+      }
+      case 1: {
+        // A fan of javelins — dodgeable sideways, like the Pyromancer's bolts, but
+        // hitting harder and flying faster to fit a mounted throw.
+        for (let i = -3; i <= 3; i++) {
+          world.spawnProjectile({
+            x: this.x + Math.cos(angle) * 26,
+            y: this.y + Math.sin(angle) * 26,
+            angle: angle + i * 0.15,
+            speed: 460,
+            packets: [{ type: 'physical', amount: 24 * power }],
+            faction: 'human',
+            sourceLabel: t('effect.javelinVolley'),
+            radius: 6,
+            range: 850,
+            color: '#c9a25c',
+            glow: '#f0d8a0',
+            shape: 'bolt',
+            owner: this,
+            knockback: 60,
+          });
+        }
+        break;
+      }
+      default: {
+        // A ring of blinding dust that doesn't care where you're standing when it
+        // lands — the one answer the Khagan has to a player who just kites forever.
+        for (let i = 0; i < 8; i++) {
+          const a = (i / 8) * TAU;
+          world.addGroundHazard({
+            x: this.x + Math.cos(a) * 120,
+            y: this.y + Math.sin(a) * 120,
+            radius: 76,
+            life: 6,
+            dps: 20 * power,
+            type: 'physical',
+            color: '#c9a25c',
+            sourceLabel: t('effect.sandstorm'),
+          });
+        }
+        world.particles.ring(this.x, this.y, '#c9a25c', 160, 0.8);
+        world.camera.shake(8);
+        world.texts.add(this.x, this.y - 40, t('text.sandstormRises'), '#e8d4a0', 18);
         break;
       }
     }
@@ -1322,18 +1507,23 @@ export class Human extends Combatant {
 
     const flash = this.hitFlash;
     const tint = this.statuses.tint();
+    const mounted = a.id === 'rider' || a.id === 'khagan';
 
-    // Legs: two simple strokes swinging out of phase.
-    const legSwing = Math.sin(this.stride * 2) * this.radius * 0.55;
-    ctx.strokeStyle = '#3b3128';
-    ctx.lineWidth = 3.2;
-    ctx.lineCap = 'round';
-    ctx.beginPath();
-    ctx.moveTo(-2, this.radius * 0.2);
-    ctx.lineTo(-2 + legSwing, this.radius * 1.05);
-    ctx.moveTo(2, this.radius * 0.2);
-    ctx.lineTo(2 - legSwing, this.radius * 1.05);
-    ctx.stroke();
+    if (mounted) {
+      this.drawMount(ctx);
+    } else {
+      // Legs: two simple strokes swinging out of phase.
+      const legSwing = Math.sin(this.stride * 2) * this.radius * 0.55;
+      ctx.strokeStyle = '#3b3128';
+      ctx.lineWidth = 3.2;
+      ctx.lineCap = 'round';
+      ctx.beginPath();
+      ctx.moveTo(-2, this.radius * 0.2);
+      ctx.lineTo(-2 + legSwing, this.radius * 1.05);
+      ctx.moveTo(2, this.radius * 0.2);
+      ctx.lineTo(2 - legSwing, this.radius * 1.05);
+      ctx.stroke();
+    }
 
     // Torso.
     ctx.fillStyle = a.tunic;
@@ -1387,6 +1577,51 @@ export class Human extends Combatant {
     this.drawOverlays(ctx, world);
   }
 
+  /** A horse under a Rider or the Khagan, drawn in place of walking legs. */
+  private drawMount(ctx: CanvasRenderingContext2D): void {
+    const r = this.radius;
+
+    // Four legs, cantering in diagonal pairs.
+    ctx.strokeStyle = '#3b3128';
+    ctx.lineWidth = 3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    for (const [ox, phase] of [
+      [-r * 0.75, 0],
+      [-r * 0.35, Math.PI],
+      [r * 0.35, 0],
+      [r * 0.75, Math.PI],
+    ] as const) {
+      const swing = Math.sin(this.stride * 2.4 + phase) * r * 0.4;
+      ctx.moveTo(ox, r * 0.35);
+      ctx.lineTo(ox + swing * 0.3, r * 1.15);
+    }
+    ctx.stroke();
+
+    // A low, elongated barrel for the body.
+    ctx.fillStyle = '#5c4a36';
+    ctx.beginPath();
+    ctx.ellipse(0, r * 0.25, r * 1.15, r * 0.55, 0, 0, TAU);
+    ctx.fill();
+
+    // Neck and head, reaching toward whatever the rider is facing.
+    ctx.save();
+    ctx.rotate(this.facing);
+    ctx.fillStyle = '#4a3a2a';
+    ctx.beginPath();
+    ctx.ellipse(r * 1.1, -r * 0.05, r * 0.55, r * 0.28, 0, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+
+    // Tail, trailing behind.
+    ctx.strokeStyle = '#3b2e22';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-r * 1.1, r * 0.1);
+    ctx.lineTo(-r * 1.4, r * 0.6 + Math.sin(this.stride) * 3);
+    ctx.stroke();
+  }
+
   private drawWeapon(ctx: CanvasRenderingContext2D): void {
     const a = this.archetype;
     // The weapon swings forward through the wind-up, so the telegraph is readable.
@@ -1423,9 +1658,24 @@ export class Human extends Combatant {
 
       case 'crossbowman':
       case 'ballista':
+      case 'siegeEngine':
         ctx.fillStyle = '#5c4c38';
         ctx.fillRect(-2, -2, this.radius * 1.6, 4);
         ctx.fillRect(this.radius * 0.5, -this.radius * 0.7, 3, this.radius * 1.4);
+        break;
+
+      case 'rider':
+        // A lance, held level rather than swept in an arc — a charge doesn't wind up.
+        ctx.strokeStyle = '#6b5334';
+        ctx.lineWidth = 2.8;
+        ctx.beginPath();
+        ctx.moveTo(-10, 0);
+        ctx.lineTo(this.radius * 2.8, 0);
+        ctx.stroke();
+        ctx.fillStyle = a.accent;
+        ctx.beginPath();
+        ctx.arc(this.radius * 2.8, 0, 3, 0, TAU);
+        ctx.fill();
         break;
 
       case 'torchbearer': {
@@ -1505,6 +1755,18 @@ export class Human extends Combatant {
         ctx.ellipse(this.radius * 0.5, 0, this.radius * 0.4, this.radius * 0.75, 0, 0, TAU);
         ctx.fill();
         break;
+
+      case 'khagan': {
+        // A curved sabre, held forward.
+        ctx.strokeStyle = a.accent;
+        ctx.lineWidth = 4;
+        ctx.lineCap = 'round';
+        ctx.beginPath();
+        ctx.moveTo(-6, 2);
+        ctx.quadraticCurveTo(this.radius * 1.2, -6, this.radius * 2.1, 0);
+        ctx.stroke();
+        break;
+      }
 
       case 'militia':
         ctx.fillStyle = '#b4a583';

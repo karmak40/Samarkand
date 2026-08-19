@@ -10,7 +10,6 @@ import { type StatusApplication } from '../combat/status';
 import { type Input } from '../core/input';
 import { clamp, damp, TAU } from '../core/math';
 import { t } from '../i18n';
-import { type AbilityDef } from '../progression/abilities';
 import { type BoonDef } from '../progression/boons';
 import {
   cloneBody,
@@ -42,26 +41,6 @@ export interface ActiveBoon {
   def: BoonDef;
   remaining: number;
   /** Full duration, so the HUD can draw a depleting timer. */
-  total: number;
-}
-
-/** The aimed gift the monster is currently carrying, if any. */
-export interface HeldAbility {
-  def: AbilityDef;
-  /** Seconds of play left before the gift fades. */
-  remaining: number;
-  total: number;
-  /** Seconds until it can be cast again. */
-  cooldown: number;
-}
-
-/** A cast that has been aimed and is now waiting out its windup. */
-export interface PendingCast {
-  def: AbilityDef;
-  x: number;
-  y: number;
-  /** Seconds left before it lands. */
-  timer: number;
   total: number;
 }
 
@@ -99,10 +78,6 @@ export class Monster extends Combatant {
   private form: MonsterBody = createBaseBody();
 
   private readonly boons: ActiveBoon[] = [];
-
-  /** The aimed gift, and the cast it may have in the air. */
-  private held: HeldAbility | null = null;
-  private pending: PendingCast | null = null;
 
   souls = 0;
   /** Souls banked this run, before the meta screen converts them. */
@@ -161,6 +136,15 @@ export class Monster extends Combatant {
 
   /** Current target, cached for the renderer's gaze direction. */
   target: Human | null = null;
+
+  /**
+   * Humans that have landed a hit recently, keyed to the world-time of that hit.
+   *
+   * A ranged attacker can be well off screen when its shot lands, and without this
+   * there is no way to tell the player which direction the damage came from — the
+   * renderer uses it to flag those attackers on the off-screen edge markers.
+   */
+  readonly recentAttackers = new Map<Human, number>();
 
   constructor(x: number, y: number, species: Species = resolveSpecies(DEFAULT_SPECIES_ID)) {
     super();
@@ -266,89 +250,6 @@ export class Monster extends Combatant {
 
   hasBoon(id: string): boolean {
     return this.boons.some((b) => b.def.id === id);
-  }
-
-  // ---- the aimed gift ------------------------------------------------------
-
-  get ability(): HeldAbility | null {
-    return this.held;
-  }
-
-  /** The cast waiting out its windup, for the telegraph the renderer draws. */
-  get pendingCast(): PendingCast | null {
-    return this.pending;
-  }
-
-  /** Held, off cooldown, and not already mid-cast. */
-  get abilityReady(): boolean {
-    return this.held !== null && this.held.cooldown <= 0 && this.pending === null;
-  }
-
-  /**
-   * Take a gift.
-   *
-   * A fresh one always replaces whatever was held: the player just chose it off a
-   * screen showing all three, and silently keeping the old one because its timer
-   * had not run out would make that choice a lie. The cooldown starts spent so the
-   * gift can be used the moment it is picked up.
-   */
-  grantAbility(def: AbilityDef): void {
-    this.held = { def, remaining: def.duration, total: def.duration, cooldown: 0 };
-    this.pending = null;
-  }
-
-  /**
-   * Aim the gift at a point and start the cast.
-   *
-   * The point is clamped into the gift's range rather than refused — a click just
-   * past the edge is obviously a cast at the edge, and swallowing it entirely reads
-   * as the button being broken.
-   */
-  castAbility(world: World, targetX: number, targetY: number): boolean {
-    const held = this.held;
-    if (!held || !this.abilityReady || !this.alive) return false;
-
-    const dx = targetX - this.x;
-    const dy = targetY - this.y;
-    const distance = Math.hypot(dx, dy);
-    const scale = distance > held.def.range ? held.def.range / distance : 1;
-    const x = this.x + dx * scale;
-    const y = this.y + dy * scale;
-
-    held.cooldown = held.def.cooldown;
-    this.aim = Math.atan2(dy, dx);
-    this.attackAnim = 1;
-
-    if (held.def.windup > 0) {
-      this.pending = { def: held.def, x, y, timer: held.def.windup, total: held.def.windup };
-    } else {
-      held.def.impact(this, world, x, y);
-    }
-    return true;
-  }
-
-  /** Timers for the held gift: its cooldown, its lifetime, and any cast in the air. */
-  private updateAbility(dt: number, world: World): void {
-    if (this.pending) {
-      this.pending.timer -= dt;
-      if (this.pending.timer <= 0) {
-        const cast = this.pending;
-        this.pending = null;
-        cast.def.impact(this, world, cast.x, cast.y);
-      }
-    }
-
-    const held = this.held;
-    if (!held) return;
-
-    if (held.cooldown > 0) held.cooldown = Math.max(0, held.cooldown - dt);
-    held.remaining -= dt;
-    if (held.remaining <= 0) {
-      // A cast already telegraphed still lands: the gift was spent while it was held.
-      this.held = null;
-      world.texts.add(this.x, this.y - 52, t('text.giftFading', { name: held.def.name }), held.def.color, 15, 1);
-      world.sound.boonExpire(this);
-    }
   }
 
   /**
@@ -522,6 +423,7 @@ export class Monster extends Combatant {
   }
 
   onRoomStart(world: World): void {
+    this.recentAttackers.clear();
     this.secondWindReady = true;
     this.dashCharges = this.stats.getInt('dashCharges');
     this.dashRecharge = 0;
@@ -652,6 +554,17 @@ export class Monster extends Combatant {
 
   protected override recordDamage(): void {
     // Damage taken is recorded centrally in World.onDamageDealt.
+  }
+
+  protected override onDamaged(
+    world: World,
+    _result: DamageResult,
+    _options: DamageOptions,
+    attacker: Combatant | null,
+  ): void {
+    if (attacker && attacker.faction === 'human') {
+      this.recentAttackers.set(attacker as Human, world.time);
+    }
   }
 
   // ---- attack construction -------------------------------------------------
@@ -963,7 +876,6 @@ export class Monster extends Combatant {
       if (boon.remaining <= 0) this.expireBoon(i, world);
     }
     this.emitBoonAmbience(dt, world);
-    this.updateAbility(dt, world);
 
     // Regeneration accrues fractionally so low regen values still tick.
     const regen = this.stats.get('hpRegen');

@@ -131,23 +131,6 @@ export const FR: Record<string, string> = {
   'touch.dash': 'RUÉE',
   'touch.pause': 'II',
   'touch.stats': '≡',
-  'touch.ability': 'DON',
-
-  // ---- gifts of the abyss ------------------------------------------------------
-  'gift.title': 'DON DE L’ABÎME',
-  'gift.subtitle': 'Le sceau offre un pouvoir que tu vises toi-même. Pas pour longtemps.',
-  'gift.cooldown': 'Recharge',
-  'gift.duration': 'Durée',
-  'gift.leave': 'Passer son chemin',
-  'hint.ability': 'CLIC / E — le don sous le curseur',
-  'text.giftFading': '{name} s’efface',
-
-  'ability.abyss-strike.name': 'Frappe de l’abîme',
-  'ability.abyss-strike.desc': 'Un cercle de ténèbres à l’endroit choisi. Un battement de cœur plus tard, il éclate dans ton élément et projette tout au loin.',
-  'ability.rift.name': 'Faille',
-  'ability.rift.desc': 'Le sol se déchire là où tu pointes : une zone de ton élément qui ronge tout ce qui s’y tient pendant cinq secondes.',
-  'ability.pounce.name': 'Bond',
-  'ability.pounce.desc': 'Tu es simplement là, au point choisi — et ce qui s’y trouvait ne l’est plus.',
 
   'pause.title': 'PAUSE',
   'pause.resume': 'Reprendre',
@@ -527,6 +510,8 @@ export const FR: Record<string, string> = {
   // ---- run map ---------------------------------------------------------------
   'map.title': 'LE CHEMIN',
   'map.subtitle': 'Choisis où aller ensuite. Il n’y a pas de retour.',
+  'map.titleAct2': 'LE CAMP DE GUERRE',
+  'map.subtitleAct2': 'Les villages sont derrière toi. C’est ici qu’ils tenaient leur armée.',
   'map.depth': 'profondeur {n} / {total}',
   'map.current': 'tu es ici',
   'node.battle.name': 'Colonie',
@@ -689,8 +674,20 @@ export const FR: Record<string, string> = {
   'text.warlordRally': 'À MOI !',
   'text.pyreRises': 'BRÛLE',
 
+  // ---- camp de guerre (second biome) ------------------------------------------
+  'building.stronghold.name': 'Forteresse',
+  'enemy.rider.name': 'Cavalier',
+  'enemy.siegeEngine.name': 'Machine de siège',
+  'enemy.khagan.name': 'Le Khagan',
+  'effect.javelinVolley': 'Volée de javelots',
+  'effect.sandstorm': 'Tempête de sable',
+  'text.khaganHorde': 'CHARGEZ !',
+  'text.sandstormRises': 'LE SABLE SE LÈVE',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'corps : {name}',
+  'menu.biome.1': 'Villages',
+  'menu.biome.2': 'Camp de guerre',
   'lair.tab.species': 'Corps',
   'species.active': 'CHOISI',
   'species.choose': 'PRENDRE',
@@ -745,7 +742,6 @@ export const FR: Record<string, string> = {
   'action.left': 'Gauche',
   'action.right': 'Droite',
   'action.dash': 'Ruée',
-  'action.ability': 'Capacité',
   'action.stats': 'Stats',
 
 };

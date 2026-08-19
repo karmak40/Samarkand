@@ -1,7 +1,6 @@
 import { describe, expect, it } from 'vitest';
 import { BOONS } from '../progression/boons';
 import { CURSES } from '../progression/curses';
-import { ABILITIES } from '../progression/abilities';
 import { ACHIEVEMENTS } from '../progression/achievements';
 import { MUTATIONS } from '../progression/evolution';
 import { SKILL_CARDS } from '../progression/skills';
@@ -62,7 +61,6 @@ describe('every content table is fully translated', () => {
     ['boons', BOONS.flatMap((b) => [`boon.${b.id}.name`, `boon.${b.id}.description`])],
     ['curses', CURSES.flatMap((c) => [`curse.${c.id}.name`, `curse.${c.id}.desc`])],
     ['trials', ACHIEVEMENTS.flatMap((a) => [`achv.${a.id}.name`, `achv.${a.id}.desc`])],
-    ['gifts', ABILITIES.map((a) => a.id).flatMap((id) => [`ability.${id}.name`, `ability.${id}.desc`])],
     ['enemies', Object.keys(HUMAN_ARCHETYPES).map((id) => `enemy.${id}.name`)],
     [
       'species',

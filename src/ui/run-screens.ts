@@ -1,5 +1,6 @@
 import type { Input } from '../core/input';
 import { clamp, TAU } from '../core/math';
+import { RNG } from '../core/rng';
 import { t } from '../i18n';
 import { type Curse, curseDescription, curseName } from '../progression/curses';
 import { RARITY, type SkillCard } from '../progression/skills';
@@ -38,6 +39,13 @@ export function nodeKindDescription(kind: NodeKind): string {
  * connected to where you stand are clickable; everything else is dimmed to make the
  * commitment obvious.
  */
+export interface RunMapResult {
+  /** Id of the node the player chose to travel to, or -1 for none this frame. */
+  picked: number;
+  /** The player asked to abandon the run from here instead of picking a stop. */
+  back: boolean;
+}
+
 export function drawRunMap(
   ui: Ui,
   input: Input,
@@ -47,25 +55,38 @@ export function drawRunMap(
     reachable: readonly MapNode[];
     visited: ReadonlySet<number>;
     time: number;
+    /** Which half of the run this map belongs to — the war-camp reads the terrain too. */
+    biome: 1 | 2;
   },
-): number {
-  ui.scrim(0.9);
+): RunMapResult {
+  ui.ctx.drawImage(mapBackdrop(map, ui.width, ui.height, context.biome), 0, 0);
 
-  ui.fittedText(t('map.title'), ui.width / 2, 54, {
+  // A painted map is busy everywhere, unlike the plain dark screens elsewhere — the
+  // title needs a banner under it, not just an outline, or it gets lost over a green
+  // hillside.
+  const bannerW = Math.min(560, ui.width - 40);
+  ui.panel(rect(ui.width / 2 - bannerW / 2, 22, bannerW, 78), {
+    fill: 'rgba(24,19,12,0.6)',
+    border: 'rgba(216,161,58,0.35)',
+    radius: 6,
+    shadow: false,
+  });
+
+  ui.fittedText(context.biome === 2 ? t('map.titleAct2') : t('map.title'), ui.width / 2, 54, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 10,
-    maxWidth: ui.width - 48,
+    maxWidth: bannerW - 32,
   });
-  ui.fittedText(t('map.subtitle'), ui.width / 2, 88, {
+  ui.fittedText(context.biome === 2 ? t('map.subtitleAct2') : t('map.subtitle'), ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     italic: true,
-    maxWidth: ui.width - 48,
+    maxWidth: bannerW - 32,
   });
 
   const margin = 70;
@@ -83,7 +104,7 @@ export function drawRunMap(
   const reachableIds = new Set(context.reachable.map((n) => n.id));
   const ctx = ui.ctx;
 
-  // --- edges ----------------------------------------------------------------
+  // --- roads ------------------------------------------------------------
   for (const node of map.nodes) {
     const from = position(node);
     for (const nextId of node.next) {
@@ -93,21 +114,7 @@ export function drawRunMap(
       // Highlight only the edges leading out of where the player stands.
       const live = node.id === context.currentNodeId && reachableIds.has(nextId);
       const walked = context.visited.has(node.id) && context.visited.has(nextId);
-
-      ctx.strokeStyle = live
-        ? 'rgba(216,161,58,0.9)'
-        : walked
-          ? 'rgba(216,161,58,0.4)'
-          : 'rgba(150,142,124,0.32)';
-      ctx.lineWidth = live ? 2.6 : 1.4;
-      ctx.setLineDash(live ? [] : [5, 6]);
-      ctx.beginPath();
-      ctx.moveTo(from.x, from.y);
-      // A shallow S-curve reads as a road rather than a wiring diagram. Control
-      // points sit close to each end so a lane change stays a short kink.
-      const lean = (to.x - from.x) * 0.34;
-      ctx.bezierCurveTo(from.x + lean, from.y, to.x - lean, to.y, to.x, to.y);
-      ctx.stroke();
+      drawRoad(ctx, from, to, live, walked);
     }
   }
   ctx.setLineDash([]);
@@ -128,7 +135,9 @@ export function drawRunMap(
     if (zone.hovered) hoveredNode = node;
     if (zone.clicked) picked = node.id;
 
-    // Reachable nodes breathe so the eye goes straight to the live choices.
+    // Reachable settlements breathe so the eye goes straight to the live choices.
+    // A burnt one stands dead still — the one thing left here that doesn't move is
+    // the smoke, drawn inside drawRuin itself.
     const pulse = isReachable ? 1 + Math.sin(context.time * 4 + node.lane) * 0.08 : 1;
     const radius = style.radius * pulse;
     const bright = isCurrent || isReachable || isVisited;
@@ -147,27 +156,34 @@ export function drawRunMap(
       ctx.globalCompositeOperation = 'source-over';
     }
 
-    ctx.fillStyle = bright ? 'rgba(16,14,20,0.95)' : 'rgba(15,14,18,0.9)';
+    // A soft shadow so the badge reads as a marker sitting on the map, not a hole
+    // painted into it.
+    ctx.fillStyle = 'rgba(10,8,6,0.35)';
+    ctx.beginPath();
+    ctx.ellipse(pos.x + 2, pos.y + radius * 0.5, radius * 0.85, radius * 0.32, 0, 0, TAU);
+    ctx.fill();
+
+    // A cleared settlement is ash: the ground plate itself goes dark and cold, no
+    // longer tinted by what it used to be.
+    ctx.fillStyle = isVisited
+      ? 'rgba(11,10,9,0.95)'
+      : bright
+        ? 'rgba(16,14,20,0.95)'
+        : 'rgba(15,14,18,0.9)';
     ctx.beginPath();
     ctx.arc(pos.x, pos.y, radius, 0, TAU);
     ctx.fill();
 
     // Distant stops keep their own colour, just muted — the player should be able
     // to see that an elite waits three depths away.
-    ctx.strokeStyle = bright ? style.color : hexAlpha(style.color, 0.5);
+    ctx.strokeStyle = isVisited ? 'rgba(80,70,58,0.6)' : bright ? style.color : hexAlpha(style.color, 0.5);
     ctx.lineWidth = isCurrent ? 3 : 2;
     ctx.stroke();
 
-    drawNodeGlyph(ctx, node.kind, pos.x, pos.y, radius, bright ? style.glow : hexAlpha(style.glow, 0.55));
-
-    // Visited nodes get a slash so the travelled route is obvious at a glance.
-    if (isVisited && !isCurrent) {
-      ctx.strokeStyle = 'rgba(216,161,58,0.6)';
-      ctx.lineWidth = 2;
-      ctx.beginPath();
-      ctx.moveTo(pos.x - radius * 0.5, pos.y + radius * 0.5);
-      ctx.lineTo(pos.x + radius * 0.5, pos.y - radius * 0.5);
-      ctx.stroke();
+    if (isVisited) {
+      drawRuin(ctx, pos.x, pos.y, radius, context.time);
+    } else {
+      drawSettlement(ctx, node.kind, pos.x, pos.y, radius, bright ? style.glow : hexAlpha(style.glow, 0.55));
     }
 
     if (isCurrent) {
@@ -177,11 +193,21 @@ export function drawRunMap(
         align: 'center',
         baseline: 'middle',
         letterSpacing: 1,
+        outline: true,
       });
     }
   });
 
-  // Depth ruler along the bottom.
+  // A second banner for the ruler and the inspector line — same reasoning as the
+  // title: this text sits over open terrain and needs its own dark ground.
+  const footW = Math.min(620, ui.width - 40);
+  ui.panel(rect(ui.width / 2 - footW / 2, bottom + 26, footW, 78), {
+    fill: 'rgba(24,19,12,0.6)',
+    border: 'rgba(216,161,58,0.3)',
+    radius: 6,
+    shadow: false,
+  });
+
   ui.text(
     t('map.depth', {
       n: (context.currentNodeId !== null ? map.nodes[context.currentNodeId]!.depth + 1 : 1),
@@ -208,10 +234,16 @@ export function drawRunMap(
       align: 'center',
       baseline: 'middle',
       bold: true,
+      outline: true,
     });
   });
 
-  return picked;
+  const back = ui.button(rect(ui.width / 2 - 90, ui.height - 44, 180, 34), t('common.back'), {
+    accent: PALETTE.muted,
+    size: 13,
+  });
+
+  return { picked, back };
 }
 
 /** Hovering explains a stop; with nothing hovered, the live options are listed. */
@@ -250,8 +282,15 @@ function drawNodeInspector(
   });
 }
 
-/** A distinct mark per stop type, so colour is never the only cue. */
-function drawNodeGlyph(
+// ---------------------------------------------------------------------------
+
+/**
+ * A living settlement, drawn as a tiny huddle of roofs rather than an abstract
+ * glyph — the map should read as places, not a legend of icons. Shape carries the
+ * kind; colour (passed in by the caller, bright or dimmed) carries distance and
+ * reachability the same way it always did.
+ */
+function drawSettlement(
   ctx: CanvasRenderingContext2D,
   kind: NodeKind,
   x: number,
@@ -263,68 +302,435 @@ function drawNodeGlyph(
   ctx.translate(x, y);
   ctx.strokeStyle = color;
   ctx.fillStyle = color;
-  ctx.lineWidth = 2;
-  const r = radius * 0.5;
+  ctx.lineWidth = Math.max(1, radius * 0.09);
+  const r = radius * 0.62;
 
   switch (kind) {
     case 'battle':
-      // Crossed blades.
-      ctx.beginPath();
-      ctx.moveTo(-r, -r);
-      ctx.lineTo(r, r);
-      ctx.moveTo(r, -r);
-      ctx.lineTo(-r, r);
-      ctx.stroke();
+      // A pair of huts — the plainest stop on the road.
+      drawHut(ctx, -r * 0.5, r * 0.55, r * 0.85, r * 1.3);
+      drawHut(ctx, r * 0.42, r * 0.62, r * 0.7, r * 1.05);
       break;
 
-    case 'elite': {
-      // A crown: three peaks.
+    case 'elite':
+      // A watchtower next to its hut: this stop is guarded.
+      drawHut(ctx, -r * 0.55, r * 0.6, r * 0.72, r * 1.05);
+      drawTower(ctx, r * 0.4, r * 0.62, r * 0.48, r * 1.9);
+      break;
+
+    case 'market': {
+      // A merchant's canopy on two poles.
       ctx.beginPath();
-      ctx.moveTo(-r, r * 0.6);
-      ctx.lineTo(-r, -r * 0.2);
-      ctx.lineTo(-r * 0.5, r * 0.2);
-      ctx.lineTo(0, -r * 0.8);
-      ctx.lineTo(r * 0.5, r * 0.2);
-      ctx.lineTo(r, -r * 0.2);
-      ctx.lineTo(r, r * 0.6);
+      ctx.moveTo(-r * 0.95, r * 0.25);
+      ctx.lineTo(0, -r * 1.05);
+      ctx.lineTo(r * 0.95, r * 0.25);
       ctx.closePath();
+      ctx.fill();
+      ctx.beginPath();
+      ctx.moveTo(-r * 0.6, r * 0.25);
+      ctx.lineTo(-r * 0.6, r * 1.15);
+      ctx.moveTo(r * 0.6, r * 0.25);
+      ctx.lineTo(r * 0.6, r * 1.15);
       ctx.stroke();
       break;
     }
 
-    case 'market':
-      // Coin.
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 0.8, 0, TAU);
-      ctx.stroke();
-      ctx.beginPath();
-      ctx.arc(0, 0, r * 0.3, 0, TAU);
-      ctx.fill();
-      break;
-
     case 'cursed':
-      // Inverted horns.
+      // A leaning, cracked monolith — wrong in a way a hut never is.
+      ctx.save();
+      ctx.rotate(-0.14);
       ctx.beginPath();
-      ctx.moveTo(-r, -r * 0.6);
-      ctx.quadraticCurveTo(-r * 0.3, r * 0.8, 0, -r * 0.2);
-      ctx.quadraticCurveTo(r * 0.3, r * 0.8, r, -r * 0.6);
-      ctx.stroke();
+      ctx.moveTo(-r * 0.4, r * 1.15);
+      ctx.lineTo(-r * 0.55, -r * 0.55);
+      ctx.lineTo(0, -r * 1.3);
+      ctx.lineTo(r * 0.35, -r * 0.45);
+      ctx.lineTo(r * 0.28, r * 1.15);
+      ctx.closePath();
+      ctx.fill();
+      ctx.restore();
       break;
 
     case 'boss':
-      // A skull-ish mark: two sockets over a jaw line.
+      // A small keep: two flanking towers, a wall, and a taller one behind it.
+      drawTower(ctx, -r * 0.85, r * 0.65, r * 0.5, r * 1.55);
+      drawTower(ctx, r * 0.85, r * 0.65, r * 0.5, r * 1.55);
       ctx.beginPath();
-      ctx.arc(-r * 0.4, -r * 0.25, r * 0.26, 0, TAU);
-      ctx.arc(r * 0.4, -r * 0.25, r * 0.26, 0, TAU);
+      ctx.rect(-r * 0.6, -r * 0.05, r * 1.2, r * 0.75);
       ctx.fill();
-      ctx.beginPath();
-      ctx.moveTo(-r * 0.5, r * 0.5);
-      ctx.lineTo(r * 0.5, r * 0.5);
-      ctx.stroke();
+      drawTower(ctx, 0, -r * 0.05, r * 0.55, r * 1.85);
       break;
   }
 
   ctx.restore();
+}
+
+/** A simple house: a wall block under a peaked roof, in the current fill/stroke. */
+function drawHut(ctx: CanvasRenderingContext2D, cx: number, groundY: number, w: number, h: number): void {
+  const wallH = h * 0.55;
+  const bodyTop = groundY - wallH;
+  ctx.beginPath();
+  ctx.rect(cx - w / 2, bodyTop, w, wallH);
+  ctx.stroke();
+  ctx.beginPath();
+  ctx.moveTo(cx - w * 0.62, bodyTop);
+  ctx.lineTo(cx, groundY - h);
+  ctx.lineTo(cx + w * 0.62, bodyTop);
+  ctx.closePath();
+  ctx.fill();
+}
+
+/** A narrow tower with a capstone, taller than any hut on the same map. */
+function drawTower(ctx: CanvasRenderingContext2D, cx: number, groundY: number, w: number, h: number): void {
+  ctx.beginPath();
+  ctx.rect(cx - w / 2, groundY - h, w, h);
+  ctx.fill();
+  ctx.fillRect(cx - w * 0.65, groundY - h - w * 0.35, w * 1.3, w * 0.35);
+}
+
+/**
+ * What's left once a settlement is cleared: a dead mound of rubble, a couple of
+ * wall stumps leaning off true, and the two things that still move — a slow
+ * drift of smoke and a few embers still breathing under the ash.
+ */
+function drawRuin(ctx: CanvasRenderingContext2D, x: number, y: number, radius: number, time: number): void {
+  ctx.save();
+  ctx.translate(x, y);
+  const r = radius * 0.62;
+
+  ctx.fillStyle = 'rgba(20,18,16,0.92)';
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.9, r * 0.7);
+  ctx.lineTo(-r * 0.3, r * 0.1);
+  ctx.lineTo(r * 0.1, r * 0.5);
+  ctx.lineTo(r * 0.9, r * 0.62);
+  ctx.lineTo(r * 0.75, r * 1.1);
+  ctx.lineTo(-r * 0.8, r * 1.1);
+  ctx.closePath();
+  ctx.fill();
+
+  ctx.strokeStyle = 'rgba(10,9,8,0.95)';
+  ctx.lineWidth = Math.max(1.5, r * 0.18);
+  ctx.beginPath();
+  ctx.moveTo(-r * 0.5, r * 0.5);
+  ctx.lineTo(-r * 0.62, -r * 0.55);
+  ctx.moveTo(r * 0.35, r * 0.55);
+  ctx.lineTo(r * 0.15, -r * 0.35);
+  ctx.stroke();
+
+  // Smoke drifting sideways, slow enough that it reads as still rising rather
+  // than blowing away.
+  const drift = Math.sin(time * 0.4) * r * 0.3;
+  const wisp = ctx.createLinearGradient(0, -r * 0.4, drift, -r * 2.8);
+  wisp.addColorStop(0, 'rgba(150,148,142,0.3)');
+  wisp.addColorStop(1, 'rgba(150,148,142,0)');
+  ctx.fillStyle = wisp;
+  ctx.beginPath();
+  ctx.ellipse(drift * 0.4, -r * 1.5, r * 0.55, r * 1.35, 0, 0, TAU);
+  ctx.fill();
+
+  // Embers still breathing under the ash.
+  ctx.globalCompositeOperation = 'lighter';
+  for (let i = 0; i < 3; i++) {
+    const phase = time * 2.2 + i * 2.1;
+    const ex = Math.sin(phase * 0.6 + i) * r * 0.5;
+    const ey = r * 0.55 - Math.abs(Math.sin(phase)) * r * 0.12;
+    ctx.globalAlpha = 0.3 + Math.sin(phase) * 0.22;
+    ctx.fillStyle = '#ff8a3c';
+    ctx.beginPath();
+    ctx.arc(ex, ey, Math.max(1, r * 0.08), 0, TAU);
+    ctx.fill();
+  }
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+
+  ctx.restore();
+}
+
+/** A worn dirt road: a wide dark track with a lighter, broken tread down the middle. */
+function drawRoad(
+  ctx: CanvasRenderingContext2D,
+  from: { x: number; y: number },
+  to: { x: number; y: number },
+  live: boolean,
+  walked: boolean,
+): void {
+  // A shallow S-curve reads as a road rather than a wiring diagram. Control points
+  // sit close to each end so a lane change stays a short kink.
+  const lean = (to.x - from.x) * 0.34;
+  const path = (): void => {
+    ctx.beginPath();
+    ctx.moveTo(from.x, from.y);
+    ctx.bezierCurveTo(from.x + lean, from.y, to.x - lean, to.y, to.x, to.y);
+  };
+
+  ctx.setLineDash([]);
+  ctx.strokeStyle = live ? 'rgba(70,52,28,0.9)' : walked ? 'rgba(52,42,30,0.72)' : 'rgba(44,40,32,0.6)';
+  ctx.lineWidth = live ? 7 : 5;
+  path();
+  ctx.stroke();
+
+  ctx.strokeStyle = live ? 'rgba(230,178,68,0.95)' : walked ? 'rgba(206,180,120,0.55)' : 'rgba(230,222,196,0.4)';
+  ctx.lineWidth = live ? 2.2 : 1.2;
+  ctx.setLineDash(live ? [] : [3, 7]);
+  path();
+  ctx.stroke();
+  ctx.setLineDash([]);
+}
+
+// ---------------------------------------------------------------------------
+
+/** Cached per run: the terrain never changes once a map is generated. */
+let cachedBackdrop: {
+  forMap: RunMap;
+  width: number;
+  height: number;
+  biome: 1 | 2;
+  canvas: HTMLCanvasElement;
+} | null = null;
+
+function mapBackdrop(map: RunMap, width: number, height: number, biome: 1 | 2): HTMLCanvasElement {
+  if (
+    cachedBackdrop &&
+    cachedBackdrop.forMap === map &&
+    cachedBackdrop.width === width &&
+    cachedBackdrop.height === height &&
+    cachedBackdrop.biome === biome
+  ) {
+    return cachedBackdrop.canvas;
+  }
+
+  const canvas = document.createElement('canvas');
+  canvas.width = Math.max(1, Math.ceil(width));
+  canvas.height = Math.max(1, Math.ceil(height));
+  const ctx = canvas.getContext('2d');
+  if (ctx) paintBackdrop(ctx, canvas.width, canvas.height, new RNG(), biome);
+
+  cachedBackdrop = { forMap: map, width, height, biome, canvas };
+  return canvas;
+}
+
+interface Biome {
+  readonly key: 'forest' | 'plains' | 'mountain' | 'water' | 'sand';
+  readonly fill: string;
+  readonly edge: string;
+  /** Relative chance of an anchor rolling this biome. */
+  readonly weight: number;
+}
+
+const BIOMES: readonly Biome[] = [
+  { key: 'plains', fill: '#b6ab6c', edge: '#8f8352', weight: 3 },
+  { key: 'forest', fill: '#5c7a45', edge: '#3c5730', weight: 3 },
+  { key: 'mountain', fill: '#8d7c68', edge: '#5b4d3f', weight: 2 },
+  { key: 'water', fill: '#4f8892', edge: '#33616a', weight: 2 },
+  { key: 'sand', fill: '#d9c48a', edge: '#b29a5c', weight: 1 },
+];
+
+/** The war-camp's map: dominated by sand and stony highlands, with only a rare oasis. */
+const WAR_CAMP_BIOMES: readonly Biome[] = [
+  { key: 'sand', fill: '#d9c48a', edge: '#b29a5c', weight: 4 },
+  { key: 'plains', fill: '#c2a968', edge: '#9c8350', weight: 3 },
+  { key: 'mountain', fill: '#8d7c68', edge: '#5b4d3f', weight: 3 },
+  { key: 'forest', fill: '#5c7a45', edge: '#3c5730', weight: 1 },
+  { key: 'water', fill: '#4f8892', edge: '#33616a', weight: 0.6 },
+];
+
+interface BiomeAnchor {
+  readonly x: number;
+  readonly y: number;
+  readonly r: number;
+  readonly biome: Biome;
+}
+
+/**
+ * A painted region map, in the style of a fantasy-game world map: soft irregular
+ * biome patches — forest, plains, stony highlands, water, sand — each with its own
+ * hand-drawn texture, rather than the abstract dark war-table this replaced. Baked
+ * once per run into an offscreen canvas, since none of it depends on where the
+ * player has been; only the settlements and roads drawn on top change frame to
+ * frame.
+ */
+function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, mapBiome: 1 | 2): void {
+  const palette = mapBiome === 2 ? WAR_CAMP_BIOMES : BIOMES;
+
+  ctx.fillStyle = mapBiome === 2 ? '#c2a968' : '#b6ab6c';
+  ctx.fillRect(0, 0, w, h);
+
+  const anchors: BiomeAnchor[] = [];
+  const count = 10;
+  for (let i = 0; i < count; i++) {
+    anchors.push({
+      x: rng.range(w * -0.05, w * 1.05),
+      y: rng.range(h * -0.1, h * 1.1),
+      r: rng.range(Math.min(w, h) * 0.16, Math.min(w, h) * 0.3),
+      biome: rng.pickWeighted(palette, (b) => b.weight),
+    });
+  }
+  // Water settles into the low ground first; everything else is painted over it,
+  // the way a coastline reads as land overlapping a sea rather than the reverse.
+  const ordered = [...anchors].sort((a, b) => (a.biome.key === 'water' ? -1 : 0) - (b.biome.key === 'water' ? -1 : 0));
+
+  for (const anchor of ordered) paintBiomeBlob(ctx, anchor, rng);
+  for (const anchor of ordered) paintBiomeTexture(ctx, anchor, rng);
+
+  paintGrain(ctx, w, h, rng);
+
+  // Vignette, so the edges recede and the route through the middle stays the focus.
+  const vignette = ctx.createRadialGradient(
+    w / 2,
+    h / 2,
+    Math.min(w, h) * 0.4,
+    w / 2,
+    h / 2,
+    Math.max(w, h) * 0.75,
+  );
+  vignette.addColorStop(0, 'rgba(0,0,0,0)');
+  vignette.addColorStop(1, 'rgba(20,14,8,0.55)');
+  ctx.fillStyle = vignette;
+  ctx.fillRect(0, 0, w, h);
+
+  paintMapFrame(ctx, w, h);
+}
+
+/** One soft-edged biome patch — a jittered polygon, blurred so it blends into its neighbours. */
+function paintBiomeBlob(ctx: CanvasRenderingContext2D, anchor: BiomeAnchor, rng: RNG): void {
+  const points = 10 + rng.int(0, 4);
+  ctx.save();
+  ctx.filter = `blur(${Math.max(10, anchor.r * 0.22)}px)`;
+  ctx.globalAlpha = 0.88;
+  ctx.fillStyle = anchor.biome.fill;
+  ctx.beginPath();
+  for (let i = 0; i <= points; i++) {
+    const a = (i / points) * TAU;
+    const rad = anchor.r * (0.7 + rng.next() * 0.5);
+    const px = anchor.x + Math.cos(a) * rad;
+    const py = anchor.y + Math.sin(a) * rad * 0.82;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
+  ctx.fill();
+  ctx.restore();
+}
+
+/** The hand-drawn detail that tells one biome apart from another at a glance. */
+function paintBiomeTexture(ctx: CanvasRenderingContext2D, anchor: BiomeAnchor, rng: RNG): void {
+  const density = Math.round((anchor.r / 22) ** 1.3);
+
+  switch (anchor.biome.key) {
+    case 'forest':
+      for (let i = 0; i < density * 3; i++) {
+        const { x, y } = jitterWithin(anchor, rng);
+        drawTreeGlyph(ctx, x, y, rng.range(7, 13));
+      }
+      break;
+
+    case 'mountain':
+      for (let i = 0; i < density; i++) {
+        const { x, y } = jitterWithin(anchor, rng, 0.75);
+        drawMountainGlyph(ctx, x, y, rng.range(16, 30));
+      }
+      break;
+
+    case 'water':
+      ctx.strokeStyle = 'rgba(210,236,238,0.35)';
+      ctx.lineWidth = 1.4;
+      for (let i = 0; i < density * 2; i++) {
+        const { x, y } = jitterWithin(anchor, rng);
+        const len = rng.range(8, 18);
+        ctx.beginPath();
+        ctx.moveTo(x - len / 2, y);
+        ctx.quadraticCurveTo(x, y - 3, x + len / 2, y);
+        ctx.stroke();
+      }
+      break;
+
+    case 'sand':
+      ctx.fillStyle = 'rgba(140,116,64,0.3)';
+      for (let i = 0; i < density * 4; i++) {
+        const { x, y } = jitterWithin(anchor, rng);
+        ctx.beginPath();
+        ctx.arc(x, y, rng.range(1, 2.4), 0, TAU);
+        ctx.fill();
+      }
+      break;
+
+    case 'plains':
+      ctx.strokeStyle = 'rgba(230,220,150,0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < density * 3; i++) {
+        const { x, y } = jitterWithin(anchor, rng);
+        const h = rng.range(3, 7);
+        ctx.beginPath();
+        ctx.moveTo(x, y);
+        ctx.lineTo(x + rng.range(-2, 2), y - h);
+        ctx.stroke();
+      }
+      break;
+  }
+}
+
+function jitterWithin(anchor: BiomeAnchor, rng: RNG, fill = 0.9): { x: number; y: number } {
+  const a = rng.next() * TAU;
+  const rad = anchor.r * fill * Math.sqrt(rng.next());
+  return { x: anchor.x + Math.cos(a) * rad, y: anchor.y + Math.sin(a) * rad * 0.82 };
+}
+
+function drawMountainGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  ctx.fillStyle = '#6e6052';
+  ctx.strokeStyle = 'rgba(40,32,24,0.55)';
+  ctx.lineWidth = 1.4;
+  ctx.beginPath();
+  ctx.moveTo(x - s, y + s * 0.6);
+  ctx.lineTo(x - s * 0.15, y - s);
+  ctx.lineTo(x + s * 0.25, y - s * 0.3);
+  ctx.lineTo(x + s, y + s * 0.6);
+  ctx.closePath();
+  ctx.fill();
+  ctx.stroke();
+
+  // A pale scree line on the sunlit face gives the peak volume rather than a
+  // flat silhouette.
+  ctx.fillStyle = 'rgba(226,218,198,0.5)';
+  ctx.beginPath();
+  ctx.moveTo(x - s * 0.15, y - s);
+  ctx.lineTo(x + s * 0.25, y - s * 0.3);
+  ctx.lineTo(x - s * 0.05, y - s * 0.15);
+  ctx.closePath();
+  ctx.fill();
+}
+
+function drawTreeGlyph(ctx: CanvasRenderingContext2D, x: number, y: number, s: number): void {
+  ctx.fillStyle = '#3f5730';
+  for (let i = 0; i < 3; i++) {
+    const ox = x + (i - 1) * s * 0.5;
+    const oy = y - Math.abs(i - 1) * s * 0.15;
+    ctx.beginPath();
+    ctx.moveTo(ox, oy - s);
+    ctx.lineTo(ox - s * 0.4, oy + s * 0.3);
+    ctx.lineTo(ox + s * 0.4, oy + s * 0.3);
+    ctx.closePath();
+    ctx.fill();
+  }
+}
+
+/** A faint stipple over everything, so flat-filled blobs read as painted, not vector. */
+function paintGrain(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG): void {
+  const count = Math.round((w * h) / 900);
+  for (let i = 0; i < count; i++) {
+    ctx.fillStyle = rng.bool(0.5) ? 'rgba(255,248,220,0.035)' : 'rgba(20,14,6,0.035)';
+    ctx.fillRect(rng.range(0, w), rng.range(0, h), 1, 1);
+  }
+}
+
+/** A simple painted border, like the ruled edge of a map spread on a table. */
+function paintMapFrame(ctx: CanvasRenderingContext2D, w: number, h: number): void {
+  const inset = 10;
+  ctx.strokeStyle = 'rgba(36,26,16,0.5)';
+  ctx.lineWidth = 3;
+  ctx.strokeRect(inset, inset, w - inset * 2, h - inset * 2);
+  ctx.strokeStyle = 'rgba(216,196,138,0.25)';
+  ctx.lineWidth = 1;
+  ctx.strokeRect(inset + 5, inset + 5, w - (inset + 5) * 2, h - (inset + 5) * 2);
 }
 
 // ---------------------------------------------------------------------------

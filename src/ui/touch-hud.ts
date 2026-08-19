@@ -8,7 +8,6 @@ const BUTTON_LABEL: Record<TouchButtonId, string> = {
   dash: 'touch.dash',
   pause: 'touch.pause',
   stats: 'touch.stats',
-  ability: 'touch.ability',
 };
 
 /**
@@ -21,18 +20,13 @@ const BUTTON_LABEL: Record<TouchButtonId, string> = {
  * every touch as a stick or button in that case, so a control drawn here would be one
  * that doesn't work.
  */
-export function drawTouchControls(
-  ui: Ui,
-  input: Input,
-  mode: TouchControlsMode,
-  ability: { color: string; ready: boolean } | null = null,
-): void {
+export function drawTouchControls(ui: Ui, input: Input, mode: TouchControlsMode): void {
   if (mode === 'off') return;
   if (mode === 'auto' && !input.touchDetected) return;
 
   const ctx = ui.ctx;
-  // Must match what Input hit-tests to the pixel, gift button included.
-  const layout = touchLayout(ui.width, ui.height, ability !== null);
+  // Must match what Input hit-tests to the pixel.
+  const layout = touchLayout(ui.width, ui.height);
 
   const stick = input.stickView();
   if (stick) {
@@ -55,28 +49,19 @@ export function drawTouchControls(
 
   for (const button of layout.buttons) {
     const held = input.isTouchButtonHeld(button.id);
-    // The gift button wears its own colour and greys out on cooldown, so a thumb
-    // knows whether pressing it will do anything before it does.
-    const gift = button.id === 'ability' ? ability : null;
-    const dimmed = gift !== null && !gift.ready;
 
     ctx.save();
-    ctx.globalAlpha = dimmed ? 0.45 : 1;
     ctx.beginPath();
     ctx.arc(button.x, button.y, button.r, 0, Math.PI * 2);
     ctx.fillStyle = held ? 'rgba(168,35,42,0.7)' : 'rgba(20,19,23,0.55)';
     ctx.fill();
-    ctx.strokeStyle = held
-      ? PALETTE.bloodBright
-      : gift
-        ? gift.color
-        : 'rgba(232,226,212,0.45)';
+    ctx.strokeStyle = held ? PALETTE.bloodBright : 'rgba(232,226,212,0.45)';
     ctx.lineWidth = 1.5;
     ctx.stroke();
     ctx.restore();
 
     ui.text(t(BUTTON_LABEL[button.id]), button.x, button.y, {
-      size: button.id === 'dash' ? 12 : button.id === 'ability' ? 11 : 9,
+      size: button.id === 'dash' ? 12 : 9,
       color: PALETTE.ink,
       align: 'center',
       baseline: 'middle',

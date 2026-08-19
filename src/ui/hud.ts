@@ -4,7 +4,6 @@ import { clamp, TAU } from '../core/math';
 import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
 import { RARITY, type SkillCard } from '../progression/skills';
-import { hexAlpha } from '../render/monster-render';
 import type { RunStats } from '../stats/tracker';
 import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
 
@@ -474,74 +473,6 @@ function drawDash(ui: Ui, monster: Monster, touchActive: boolean): void {
   if (!touchActive) {
     ui.text(t('hint.dash'), x - 6, y + 22, { size: 11, color: PALETTE.dim, baseline: 'middle' });
   }
-
-  drawAbility(ui, monster, x + max * 26 + 10, y);
-}
-
-/**
- * The held gift, next to the dash pips.
- *
- * Two timers in one disc, because they mean different things: the ring around it is
- * how long the gift itself has left, and the fill inside is the cooldown until the
- * next cast. A gift that is ready reads as a solid, lit button; one recharging is
- * visibly filling back up.
- */
-function drawAbility(ui: Ui, monster: Monster, x: number, y: number): void {
-  const held = monster.ability;
-  if (!held) return;
-
-  const ctx = ui.ctx;
-  const radius = 13;
-  const ready = monster.abilityReady;
-  const charge = held.def.cooldown > 0 ? 1 - held.cooldown / held.def.cooldown : 1;
-  const expiring = held.remaining < 5;
-  const flash = expiring ? 0.55 + 0.45 * Math.sin(monster.age * 12) : 1;
-
-  ctx.save();
-  ctx.globalAlpha = flash;
-
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, TAU);
-  ctx.fillStyle = 'rgba(24,20,30,0.9)';
-  ctx.fill();
-
-  // Cooldown fills clockwise from the top, exactly like a recharging dash pip.
-  if (charge < 1) {
-    ctx.beginPath();
-    ctx.moveTo(x, y);
-    ctx.arc(x, y, radius, -Math.PI / 2, -Math.PI / 2 + TAU * charge);
-    ctx.closePath();
-    ctx.fillStyle = hexAlpha(held.def.color, 0.35);
-    ctx.fill();
-  } else {
-    ctx.beginPath();
-    ctx.arc(x, y, radius, 0, TAU);
-    ctx.fillStyle = hexAlpha(held.def.color, 0.55);
-    ctx.fill();
-  }
-
-  ctx.beginPath();
-  ctx.arc(x, y, radius, 0, TAU);
-  ctx.strokeStyle = ready ? held.def.color : 'rgba(120,110,130,0.5)';
-  ctx.lineWidth = 1.6;
-  ctx.stroke();
-
-  // Outer arc: the gift's own lifetime draining away.
-  const life = clamp(held.remaining / held.total, 0, 1);
-  ctx.beginPath();
-  ctx.arc(x, y, radius + 4, -Math.PI / 2, -Math.PI / 2 + TAU * life);
-  ctx.strokeStyle = expiring ? PALETTE.bad : hexAlpha(held.def.color, 0.8);
-  ctx.lineWidth = 2.2;
-  ctx.stroke();
-  ctx.restore();
-
-  ui.text(`${Math.ceil(held.remaining)}`, x, y + radius + 14, {
-    size: 10,
-    color: expiring ? PALETTE.bad : PALETTE.dim,
-    align: 'center',
-    baseline: 'middle',
-    alpha: flash,
-  });
 }
 
 /**

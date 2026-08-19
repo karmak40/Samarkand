@@ -103,6 +103,10 @@ export interface SaveData {
   daily: DailyRecord;
   /** Id of the body the next run starts in. */
   speciesId: string;
+  /** Highest biome ever reached. Ratchets up only. */
+  deepestBiomeReached: number;
+  /** Which biome the next run starts in, capped at `deepestBiomeReached`. */
+  selectedStartBiome: number;
   /** Presentation and controls. Never anything that changes difficulty. */
   settings: Settings;
   /** Master volume, 0..1. */
@@ -137,6 +141,20 @@ export class MetaProgress implements ContentGate {
    * making the player re-pick it before every hunt would be friction, not a decision.
    */
   speciesId: string = DEFAULT_SPECIES_ID;
+
+  /**
+   * Highest biome ever reached, permanently. Ratchets up only — reaching the
+   * war-camp once is enough to unlock starting there directly forever after.
+   */
+  deepestBiomeReached = 1;
+
+  /**
+   * Which biome the next run starts in.
+   *
+   * A standing preference, same reasoning as `speciesId`: asking before every
+   * hunt would be friction, not a decision. Always within `[1, deepestBiomeReached]`.
+   */
+  selectedStartBiome = 1;
 
   /** Trials earned. Their soul reward is paid on the frame they land, once. */
   readonly achievements = new Set<string>();
@@ -212,6 +230,29 @@ export class MetaProgress implements ContentGate {
     this.speciesId = id;
     this.save();
     return true;
+  }
+
+  // ---- biome select ----------------------------------------------------------
+
+  /**
+   * Permanently unlock a biome as a run starting point.
+   *
+   * Called the instant its predecessor's boss falls, not on run end — dying
+   * partway through the war-camp must not cost the player the unlock they just
+   * earned by reaching it.
+   */
+  recordBiomeReached(biome: number): void {
+    if (biome <= this.deepestBiomeReached) return;
+    this.deepestBiomeReached = biome;
+    this.save();
+  }
+
+  /** Change which biome the next run starts in. Silently capped at what's unlocked. */
+  chooseStartBiome(biome: number): void {
+    const clamped = Math.min(Math.max(1, Math.round(biome)), this.deepestBiomeReached);
+    if (clamped === this.selectedStartBiome) return;
+    this.selectedStartBiome = clamped;
+    this.save();
   }
 
   /** Total souls spent on unlocks, for the profile screen. */
@@ -371,6 +412,8 @@ export class MetaProgress implements ContentGate {
       souls: this.souls,
       unlocked: [...this.unlocked],
       speciesId: this.speciesId,
+      deepestBiomeReached: this.deepestBiomeReached,
+      selectedStartBiome: this.selectedStartBiome,
       settings: this.settings,
       lifetime: this.lifetime,
       achievements: [...this.achievements],
@@ -418,6 +461,17 @@ export class MetaProgress implements ContentGate {
       // A body the profile no longer owns (or that this build removed) falls back to
       // the starter rather than leaving the player with an invalid creature.
       this.speciesId = this.canUseSpecies(data.speciesId ?? '') ? data.speciesId! : DEFAULT_SPECIES_ID;
+
+      // Missing on any save older than this feature — defaults both to biome 1,
+      // same as if the player had never reached the war-camp.
+      this.deepestBiomeReached =
+        typeof data.deepestBiomeReached === 'number' && data.deepestBiomeReached >= 1
+          ? Math.floor(data.deepestBiomeReached)
+          : 1;
+      this.selectedStartBiome =
+        typeof data.selectedStartBiome === 'number'
+          ? Math.min(Math.max(1, Math.floor(data.selectedStartBiome)), this.deepestBiomeReached)
+          : 1;
 
       // Merge rather than replace, so a save written by an older build that lacks
       // newer counters still loads with sane defaults.
@@ -474,6 +528,8 @@ export class MetaProgress implements ContentGate {
   reset(): void {
     this.souls = 0;
     this.speciesId = DEFAULT_SPECIES_ID;
+    this.deepestBiomeReached = 1;
+    this.selectedStartBiome = 1;
     this.settings = defaultSettings();
     this.unlocked.clear();
     this.achievements.clear();

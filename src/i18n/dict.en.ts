@@ -131,23 +131,6 @@ export const EN: Record<string, string> = {
   'touch.dash': 'DASH',
   'touch.pause': 'II',
   'touch.stats': '≡',
-  'touch.ability': 'GIFT',
-
-  // ---- gifts of the abyss ------------------------------------------------------
-  'gift.title': 'GIFT OF THE ABYSS',
-  'gift.subtitle': 'The sigil offers a power you aim yourself. Not for long.',
-  'gift.cooldown': 'Cooldown',
-  'gift.duration': 'Lasts',
-  'gift.leave': 'Walk away',
-  'hint.ability': 'LMB / E — gift at the cursor',
-  'text.giftFading': '{name} fading',
-
-  'ability.abyss-strike.name': 'Abyssal Strike',
-  'ability.abyss-strike.desc': 'A circle of dark on the spot you choose. A heartbeat later it bursts in your own element and throws everything aside.',
-  'ability.rift.name': 'Rift',
-  'ability.rift.desc': 'The ground tears open where you point: a pool of your element that eats anything standing in it for five seconds.',
-  'ability.pounce.name': 'Pounce',
-  'ability.pounce.desc': 'You are simply there, at the point you chose, and whatever was standing on it is not.',
 
   'pause.title': 'PAUSED',
   'pause.resume': 'Resume',
@@ -527,6 +510,8 @@ export const EN: Record<string, string> = {
   // ---- run map ---------------------------------------------------------------
   'map.title': 'THE PATH',
   'map.subtitle': 'Choose where you go next. There is no way back.',
+  'map.titleAct2': 'THE WAR-CAMP',
+  'map.subtitleAct2': 'The villages are behind you now. This is where they kept their army.',
   'map.depth': 'depth {n} / {total}',
   'map.current': 'you are here',
   'node.battle.name': 'Settlement',
@@ -689,8 +674,20 @@ export const EN: Record<string, string> = {
   'text.warlordRally': 'TO ME!',
   'text.pyreRises': 'BURN',
 
+  // ---- war-camp biome ---------------------------------------------------------
+  'building.stronghold.name': 'Stronghold',
+  'enemy.rider.name': 'Rider',
+  'enemy.siegeEngine.name': 'Siege Engine',
+  'enemy.khagan.name': 'The Khagan',
+  'effect.javelinVolley': 'Javelin Volley',
+  'effect.sandstorm': 'Sandstorm',
+  'text.khaganHorde': 'RIDE!',
+  'text.sandstormRises': 'THE SANDS RISE',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'body: {name}',
+  'menu.biome.1': 'Villages',
+  'menu.biome.2': 'War-camp',
   'lair.tab.species': 'Bodies',
   'species.active': 'CHOSEN',
   'species.choose': 'TAKE',
@@ -745,7 +742,6 @@ export const EN: Record<string, string> = {
   'action.left': 'Left',
   'action.right': 'Right',
   'action.dash': 'Dash',
-  'action.ability': 'Ability',
   'action.stats': 'Stats',
 
 };

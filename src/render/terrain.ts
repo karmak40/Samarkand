@@ -26,7 +26,7 @@ export class Terrain {
     const rng = new RNG(plan.groundSeed);
     this.paintBase(ctx, bounds, plan, rng);
     this.paintPaths(ctx, bounds, plan, rng);
-    this.paintScatter(ctx, bounds, rng);
+    this.paintScatter(ctx, bounds, rng, plan.biome);
     this.paintBoundary(ctx, bounds, plan, rng);
 
     this.canvas = canvas;
@@ -47,7 +47,17 @@ export class Terrain {
       shrine: ['#2f3733', '#3d4641'],
       boss: ['#2c262e', '#3a323f'],
     };
-    const [dark, light] = palettes[plan.kind] ?? palettes.village!;
+    // The war-camp trades the first biome's earth and grass for sun-baked sand —
+    // the one thing every room in it shares, whatever kind it rolls.
+    const aridPalettes: Record<string, [string, string]> = {
+      hamlet: ['#4a3d26', '#5c4c30'],
+      village: ['#453923', '#57482c'],
+      fortified: ['#42361f', '#4f4128'],
+      shrine: ['#3d3420', '#4a4029'],
+      boss: ['#372a1c', '#453524'],
+    };
+    const set = plan.biome === 2 ? aridPalettes : palettes;
+    const [dark, light] = set[plan.kind] ?? set.village!;
 
     ctx.fillStyle = dark;
     ctx.fillRect(0, 0, bounds.w, bounds.h);
@@ -118,7 +128,12 @@ export class Terrain {
     void plan;
   }
 
-  private paintScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG): void {
+  private paintScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG, biome: 1 | 2): void {
+    if (biome === 2) {
+      this.paintAridScatter(ctx, bounds, rng);
+      return;
+    }
+
     // Grass tufts.
     for (let i = 0; i < 900; i++) {
       const x = rng.range(0, bounds.w);
@@ -139,6 +154,47 @@ export class Terrain {
       ctx.fillStyle = `rgba(120,112,96,${rng.range(0.1, 0.3).toFixed(2)})`;
       ctx.beginPath();
       ctx.ellipse(x, y, rng.range(1.5, 4), rng.range(1, 2.6), rng.next() * TAU, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /** Dry scrub, sand ripples and cracked earth instead of grass and pebbles. */
+  private paintAridScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG): void {
+    // Sparse dead scrub — thinner and far less numerous than the grassland's tufts,
+    // since the whole point of the war-camp is that little grows there.
+    for (let i = 0; i < 220; i++) {
+      const x = rng.range(0, bounds.w);
+      const y = rng.range(0, bounds.h);
+      const h = rng.range(4, 9);
+      ctx.strokeStyle = rng.bool(0.5) ? 'rgba(120,104,64,0.5)' : 'rgba(96,82,50,0.45)';
+      ctx.lineWidth = 1;
+      ctx.beginPath();
+      ctx.moveTo(x, y);
+      ctx.lineTo(x + rng.range(-3, 3), y - h);
+      ctx.lineTo(x + rng.range(-3, 3), y - h * 0.5);
+      ctx.stroke();
+    }
+
+    // Wind-blown sand ripples: long, shallow arcs rather than round pebbles.
+    for (let i = 0; i < 140; i++) {
+      const x = rng.range(0, bounds.w);
+      const y = rng.range(0, bounds.h);
+      const w = rng.range(20, 50);
+      ctx.strokeStyle = `rgba(200,178,128,${rng.range(0.08, 0.18).toFixed(2)})`;
+      ctx.lineWidth = rng.range(1.5, 3);
+      ctx.beginPath();
+      ctx.moveTo(x - w / 2, y);
+      ctx.quadraticCurveTo(x, y - w * 0.12, x + w / 2, y);
+      ctx.stroke();
+    }
+
+    // Cracked earth flecks.
+    for (let i = 0; i < 180; i++) {
+      const x = rng.range(0, bounds.w);
+      const y = rng.range(0, bounds.h);
+      ctx.fillStyle = `rgba(50,40,26,${rng.range(0.15, 0.35).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rng.range(1, 3), rng.range(0.6, 1.8), rng.next() * TAU, 0, TAU);
       ctx.fill();
     }
   }

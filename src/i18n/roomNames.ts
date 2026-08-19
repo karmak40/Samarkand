@@ -21,7 +21,7 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Гарнизон', 'Дозор', 'Ставка', 'Караул'],
       boss: ['Собор', 'Оплот', 'Твердыня'],
     },
-    bossSuffix: { inquisitor: 'Инквизиции', warlord: 'Воеводы', pyromancer: 'Огнедержицы' },
+    bossSuffix: { inquisitor: 'Инквизиции', warlord: 'Воеводы', pyromancer: 'Огнедержицы', khagan: 'Хагана' },
   },
   en: {
     prefixes: ['Quiet', 'Grey', 'Old', 'Far', 'Wet', 'Crooked', 'Wolf', 'Ashen', 'Deaf', 'Last'],
@@ -33,7 +33,12 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Garrison', 'Watch', 'Encampment', 'Guardpost'],
       boss: ['Cathedral', 'Bastion', 'Stronghold'],
     },
-    bossSuffix: { inquisitor: 'of the Inquisition', warlord: 'of the Warlord', pyromancer: 'of the Pyromancer' },
+    bossSuffix: {
+      inquisitor: 'of the Inquisition',
+      warlord: 'of the Warlord',
+      pyromancer: 'of the Pyromancer',
+      khagan: 'of the Khagan',
+    },
   },
   de: {
     prefixes: ['Stiller', 'Grauer', 'Alter', 'Ferner', 'Nasser', 'Krummer', 'Wölfischer', 'Aschener', 'Tauber', 'Letzter'],
@@ -45,7 +50,12 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Garnison', 'Wache', 'Feldlager', 'Wachposten'],
       boss: ['Kathedrale', 'Bastion', 'Feste'],
     },
-    bossSuffix: { inquisitor: 'der Inquisition', warlord: 'des Heerführers', pyromancer: 'der Feuerherrin' },
+    bossSuffix: {
+      inquisitor: 'der Inquisition',
+      warlord: 'des Heerführers',
+      pyromancer: 'der Feuerherrin',
+      khagan: 'des Khagans',
+    },
   },
   uk: {
     prefixes: ['Тихий', 'Сірий', 'Старий', 'Далекий', 'Мокрий', 'Кривий', 'Вовчий', 'Попелястий', 'Глухий', 'Останній'],
@@ -57,7 +67,7 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Гарнізон', 'Дозор', 'Ставка', 'Караул'],
       boss: ['Собор', 'Бастіон', 'Твердиня'],
     },
-    bossSuffix: { inquisitor: 'Інквізиції', warlord: 'Воєводи', pyromancer: 'Вогнетримачки' },
+    bossSuffix: { inquisitor: 'Інквізиції', warlord: 'Воєводи', pyromancer: 'Вогнетримачки', khagan: 'Хагана' },
   },
   fr: {
     prefixes: ['Silencieux', 'Gris', 'Vieux', 'Lointain', 'Humide', 'Tordu', 'Loup', 'Cendré', 'Sourd', 'Dernier'],
@@ -69,7 +79,12 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Garnison', 'Guet', 'Campement', 'Corps de garde'],
       boss: ['Cathédrale', 'Bastion', 'Forteresse'],
     },
-    bossSuffix: { inquisitor: "de l'Inquisition", warlord: 'du Seigneur de guerre', pyromancer: 'de la Pyromancienne' },
+    bossSuffix: {
+      inquisitor: "de l'Inquisition",
+      warlord: 'du Seigneur de guerre',
+      pyromancer: 'de la Pyromancienne',
+      khagan: 'du Khagan',
+    },
   },
 };
 

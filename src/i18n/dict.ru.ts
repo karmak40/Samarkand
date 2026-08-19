@@ -131,23 +131,6 @@ export const RU: Record<string, string> = {
   'touch.dash': 'РЫВОК',
   'touch.pause': 'II',
   'touch.stats': '≡',
-  'touch.ability': 'ДАР',
-
-  // ---- gifts of the abyss ------------------------------------------------------
-  'gift.title': 'ДАР БЕЗДНЫ',
-  'gift.subtitle': 'Осколок предлагает силу, которой ты правишь сам. Ненадолго.',
-  'gift.cooldown': 'Откат',
-  'gift.duration': 'Держится',
-  'gift.leave': 'Уйти',
-  'hint.ability': 'ЛКМ / E — дар по курсору',
-  'text.giftFading': '{name} угасает',
-
-  'ability.abyss-strike.name': 'Удар бездны',
-  'ability.abyss-strike.desc': 'Круг тьмы в указанной точке. Через мгновение — взрыв твоей стихией, отбрасывающий всех вокруг.',
-  'ability.rift.name': 'Разлом',
-  'ability.rift.desc': 'В указанной точке рвётся земля: зона твоей стихии, разъедающая всё внутри пять секунд.',
-  'ability.pounce.name': 'Бросок',
-  'ability.pounce.desc': 'Ты мгновенно оказываешься в указанной точке, сминая всех при приземлении.',
 
   'pause.title': 'ПАУЗА',
   'pause.resume': 'Продолжить',
@@ -527,6 +510,8 @@ export const RU: Record<string, string> = {
   // ---- run map ---------------------------------------------------------------
   'map.title': 'ПУТЬ',
   'map.subtitle': 'Выбери, куда двинешься дальше. Назад дороги нет.',
+  'map.titleAct2': 'ВОЕННЫЙ ЛАГЕРЬ',
+  'map.subtitleAct2': 'Деревни позади. Здесь держали армию.',
   'map.depth': 'глубина {n} / {total}',
   'map.current': 'ты здесь',
   'node.battle.name': 'Поселение',
@@ -689,8 +674,20 @@ export const RU: Record<string, string> = {
   'text.warlordRally': 'КО МНЕ!',
   'text.pyreRises': 'ГОРИ',
 
+  // ---- военный лагерь (второй биом) ------------------------------------------
+  'building.stronghold.name': 'Твердыня',
+  'enemy.rider.name': 'Всадник',
+  'enemy.siegeEngine.name': 'Осадная машина',
+  'enemy.khagan.name': 'Хаган',
+  'effect.javelinVolley': 'Град дротиков',
+  'effect.sandstorm': 'Песчаная буря',
+  'text.khaganHorde': 'В АТАКУ!',
+  'text.sandstormRises': 'ПЕСОК ПОДНИМАЕТСЯ',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тело: {name}',
+  'menu.biome.1': 'Деревни',
+  'menu.biome.2': 'Военный лагерь',
   'lair.tab.species': 'Тела',
   'species.active': 'ВЫБРАНО',
   'species.choose': 'ВЗЯТЬ',
@@ -745,7 +742,6 @@ export const RU: Record<string, string> = {
   'action.left': 'Влево',
   'action.right': 'Вправо',
   'action.dash': 'Рывок',
-  'action.ability': 'Способность',
   'action.stats': 'Статистика',
 
 };

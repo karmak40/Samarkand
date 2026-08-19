@@ -84,7 +84,12 @@ export abstract class Combatant extends Entity {
   protected abstract onDeath(world: World, ctx: DeathContext): void;
 
   /** Hook for reacting to a landed hit (thorns, rage, on-hit procs). */
-  protected onDamaged(_world: World, _result: DamageResult, _options: DamageOptions): void {}
+  protected onDamaged(
+    _world: World,
+    _result: DamageResult,
+    _options: DamageOptions,
+    _attacker: Combatant | null,
+  ): void {}
 
   /** Hook for stats/telemetry; separated so subclasses can attribute correctly. */
   protected recordDamage(_world: World, _result: DamageResult, _options: DamageOptions): void {}
@@ -178,7 +183,7 @@ export abstract class Combatant extends Entity {
     }
 
     this.recordDamage(world, result, options);
-    this.onDamaged(world, result, options);
+    this.onDamaged(world, result, options, attacker);
 
     world.onDamageDealt(attacker, this, result, options);
 

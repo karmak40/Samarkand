@@ -1,5 +1,6 @@
 import { Camera } from '../core/camera';
 import { clamp, TAU, type Vec2 } from '../core/math';
+import type { Human } from '../entities/human';
 import { t } from '../i18n';
 import type { World } from '../world/world';
 import { hexAlpha } from './monster-render';
@@ -111,13 +112,7 @@ export class Renderer {
     camera.zoom = clamp(Math.min(heightZoom, widthZoom), 0.6, 2.4);
   }
 
-  drawWorld(
-    world: World,
-    camera: Camera,
-    exit: Vec2 | null,
-    exitOpen: boolean,
-    aim: Vec2 | null = null,
-  ): void {
+  drawWorld(world: World, camera: Camera, exit: Vec2 | null, exitOpen: boolean): void {
     const ctx = this.ctx;
     const view = camera.visibleRect();
 
@@ -127,9 +122,6 @@ export class Renderer {
     this.terrain.draw(ctx, view);
     world.decals.draw(ctx, view);
     world.drawHazards(ctx);
-    // On the ground, under everything that walks on it: a reticle drawn over the
-    // crowd would hide the very thing being aimed at.
-    this.drawAbilityAim(ctx, world, aim);
 
     if (exit && exitOpen) {
       this.drawExit(ctx, exit, world.time);
@@ -156,82 +148,6 @@ export class Renderer {
     this.drawVignette();
     this.drawOffscreenMarkers(world, camera);
     if (exit && exitOpen) this.drawExitEdgeMarker(camera, exit);
-  }
-
-  /**
-   * Where the gift is pointed, and what it is about to do.
-   *
-   * Two marks in one place. The reticle follows the cursor whenever a gift is held
-   * and ready — that is the only thing making the mouse visibly alive. The telegraph
-   * is the committed cast: a ring that fills as its windup runs out, so both the
-   * player and anyone watching can see exactly where and when it lands.
-   */
-  private drawAbilityAim(ctx: CanvasRenderingContext2D, world: World, aim: Vec2 | null): void {
-    const monster = world.monster;
-    const cast = monster.pendingCast;
-
-    if (cast) {
-      const progress = clamp(1 - cast.timer / Math.max(0.0001, cast.total), 0, 1);
-      const radius = cast.def.radius * monster.stats.get('areaSize');
-
-      ctx.save();
-      ctx.translate(cast.x, cast.y);
-
-      ctx.fillStyle = hexAlpha(cast.def.color, 0.14);
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, TAU);
-      ctx.fill();
-
-      // The filling wedge is the clock: full circle means it is landing now.
-      ctx.fillStyle = hexAlpha(cast.def.color, 0.3);
-      ctx.beginPath();
-      ctx.moveTo(0, 0);
-      ctx.arc(0, 0, radius, -Math.PI / 2, -Math.PI / 2 + TAU * progress);
-      ctx.closePath();
-      ctx.fill();
-
-      ctx.strokeStyle = hexAlpha(cast.def.color, 0.9);
-      ctx.lineWidth = 2.5;
-      ctx.beginPath();
-      ctx.arc(0, 0, radius, 0, TAU);
-      ctx.stroke();
-      ctx.restore();
-      return;
-    }
-
-    const held = monster.ability;
-    if (!aim || !held) return;
-
-    const ready = monster.abilityReady;
-    const radius = held.def.radius * monster.stats.get('areaSize');
-
-    // Clamped the same way the cast itself is, so the reticle never promises reach
-    // the gift does not have.
-    const dx = aim.x - monster.x;
-    const dy = aim.y - monster.y;
-    const distance = Math.hypot(dx, dy);
-    const scale = distance > held.def.range ? held.def.range / distance : 1;
-
-    ctx.save();
-    ctx.translate(monster.x + dx * scale, monster.y + dy * scale);
-    ctx.strokeStyle = hexAlpha(held.def.color, ready ? 0.75 : 0.28);
-    ctx.lineWidth = ready ? 2 : 1.5;
-    ctx.setLineDash([10, 9]);
-    ctx.lineDashOffset = -world.time * 22;
-    ctx.beginPath();
-    ctx.arc(0, 0, radius, 0, TAU);
-    ctx.stroke();
-    ctx.setLineDash([]);
-
-    // A crosshair tick in the middle, so a small reticle is still findable on a
-    // busy floor of corpses and fire.
-    ctx.beginPath();
-    ctx.moveTo(-7, 0);
-    ctx.lineTo(7, 0);
-    ctx.moveTo(0, -7);
-    ctx.lineTo(0, 7);
-    ctx.stroke();
-    ctx.restore();
   }
 
   /** Gold pointer on the viewport border while the portal is off screen. */
@@ -386,46 +302,103 @@ export class Renderer {
     ctx.restore();
   }
 
-  /** Edge arrows pointing at surviving humans the player can't see. */
+  /** Recent hits still flag their source on the edge marker after this long. */
+  private static readonly THREAT_MARKER_WINDOW = 2.5;
+
+  /**
+   * Edge arrows pointing at surviving humans the player can't see.
+   *
+   * Every off-screen human gets a small, muted marker so the arena never feels like
+   * it hides threats outright, but two cases need to read at a glance rather than be
+   * found by scanning eight identical triangles: whoever the monster is currently
+   * shooting at (so the player's own damage doesn't vanish into the fog), and whoever
+   * just landed a hit from off screen (so a "where did that come from" moment always
+   * has an answer). Those two get their own bigger, brighter, pulsing markers and are
+   * drawn outside the generic cap so a crowded room can never push them out.
+   */
   private drawOffscreenMarkers(world: World, camera: Camera): void {
     const ctx = this.ctx;
     const margin = 34;
     const cx = this.width / 2;
     const cy = this.height / 2;
+    const halfW = this.width / 2 - margin;
+    const halfH = this.height / 2 - margin;
 
-    let drawn = 0;
-    for (const human of world.humans) {
-      if (!human.alive || drawn >= 8) continue;
-
-      const screen = camera.worldToScreen(human.x, human.y);
+    const project = (wx: number, wy: number): { x: number; y: number; angle: number; onScreen: boolean } => {
+      const screen = camera.worldToScreen(wx, wy);
       const onScreen =
         screen.x > -20 && screen.x < this.width + 20 && screen.y > -20 && screen.y < this.height + 20;
-      if (onScreen) continue;
-
       const angle = Math.atan2(screen.y - cy, screen.x - cx);
-      // Project onto the viewport rectangle border.
-      const halfW = this.width / 2 - margin;
-      const halfH = this.height / 2 - margin;
       const scale = Math.min(
         Math.abs(halfW / Math.cos(angle)) || Infinity,
         Math.abs(halfH / Math.sin(angle)) || Infinity,
       );
-      const mx = cx + Math.cos(angle) * scale;
-      const my = cy + Math.sin(angle) * scale;
+      return { x: cx + Math.cos(angle) * scale, y: cy + Math.sin(angle) * scale, angle, onScreen };
+    };
 
+    const drawArrow = (
+      point: { x: number; y: number; angle: number },
+      color: string,
+      alpha: number,
+      size: number,
+      ring: boolean,
+    ): void => {
       ctx.save();
-      ctx.translate(mx, my);
-      ctx.rotate(angle);
-      ctx.globalAlpha = human.archetype.role === 'boss' ? 0.95 : 0.5;
-      ctx.fillStyle = human.archetype.role === 'boss' ? '#d8a13a' : '#a8232a';
+      ctx.translate(point.x, point.y);
+      if (ring) {
+        ctx.globalAlpha = alpha * 0.5;
+        ctx.strokeStyle = color;
+        ctx.lineWidth = 1.5;
+        ctx.beginPath();
+        ctx.arc(0, 0, size + 7, 0, TAU);
+        ctx.stroke();
+      }
+      ctx.rotate(point.angle);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = color;
       ctx.beginPath();
-      ctx.moveTo(9, 0);
-      ctx.lineTo(-6, -6);
-      ctx.lineTo(-6, 6);
+      ctx.moveTo(size, 0);
+      ctx.lineTo(-size * 0.65, -size * 0.65);
+      ctx.lineTo(-size * 0.65, size * 0.65);
       ctx.closePath();
       ctx.fill();
       ctx.restore();
+    };
 
+    const target = world.monster.target;
+    const attackers = world.monster.recentAttackers;
+    const pulse = 0.7 + Math.sin(world.time * 8) * 0.3;
+
+    const special = new Set<Human>();
+
+    if (target && target.alive) {
+      const point = project(target.x, target.y);
+      if (!point.onScreen) {
+        const isAttacker = attackers.has(target) && world.time - attackers.get(target)! < Renderer.THREAT_MARKER_WINDOW;
+        drawArrow(point, isAttacker ? '#ff6a4c' : '#7fe0ff', 1, 12, true);
+      }
+      special.add(target);
+    }
+
+    for (const human of world.humans) {
+      if (!human.alive || special.has(human)) continue;
+      const lastHit = attackers.get(human);
+      if (lastHit === undefined || world.time - lastHit >= Renderer.THREAT_MARKER_WINDOW) continue;
+
+      const point = project(human.x, human.y);
+      if (point.onScreen) continue;
+      drawArrow(point, '#ff6a4c', 0.55 + 0.45 * pulse, 11, true);
+      special.add(human);
+    }
+
+    let drawn = 0;
+    for (const human of world.humans) {
+      if (!human.alive || special.has(human) || drawn >= 8) continue;
+
+      const point = project(human.x, human.y);
+      if (point.onScreen) continue;
+
+      drawArrow(point, human.archetype.role === 'boss' ? '#d8a13a' : '#a8232a', human.archetype.role === 'boss' ? 0.95 : 0.5, 9, false);
       drawn++;
     }
     ctx.globalAlpha = 1;

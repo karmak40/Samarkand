@@ -10,7 +10,6 @@ import { Building } from './entities/building';
 import { Human } from './entities/human';
 import { Monster } from './entities/monster';
 import { t } from './i18n';
-import { ABILITIES, type AbilityDef } from './progression/abilities';
 import { type AchievementDef } from './progression/achievements';
 import { getBoon } from './progression/boons';
 import { dailySeed } from './progression/daily';
@@ -29,7 +28,6 @@ import {
   drawCardSelect,
   drawLifetime,
   drawMainMenu,
-  drawGiftSelect,
   drawMutationSelect,
   drawPause,
   drawResults,
@@ -50,11 +48,12 @@ import { drawReviveOffer, newReviveView, type ReviveView } from './ui/revive';
 import { drawSettings, newSettingsView, type SettingsView } from './ui/settings';
 import { drawTouchControls } from './ui/touch-hud';
 import { PALETTE, Ui } from './ui/widgets';
-import { generateRoom, type RoomPlan } from './world/roomgen';
+import { BIOME_ROOMS, generateRoom, type RoomPlan } from './world/roomgen';
  import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
 
-const MAP_DEPTHS = 12;
+/** Whole-run room count: two biomes, each `BIOME_ROOMS` deep, back to back. */
+const TOTAL_DEPTHS = BIOME_ROOMS * 2;
 const FIXED_STEP = 1 / 60;
 const MAX_STEPS_PER_FRAME = 5;
 
@@ -73,7 +72,6 @@ type GameState =
   | 'map'
   | 'playing'
   | 'cards'
-  | 'gift'
   | 'mutation'
   | 'market'
   | 'cursed'
@@ -135,6 +133,20 @@ export class Game {
   /** Arena plans keyed by node id — only fighting stops need one. */
   private plansByNode = new Map<number, RoomPlan>();
   private mapTime = 0;
+  /** Which biome's content (roster, terrain, boss) the active map uses. */
+  private biome: 1 | 2 = 1;
+  /**
+   * Depth offset added to `this.runMap`'s own node depths (which always start at 0
+   * again for every biome) for every difficulty curve and for `roomIndex`.
+   *
+   * Continuing naturally into the war-camp after the first biome's boss keeps this
+   * at `BIOME_ROOMS`, so the climb never resets — the player is already built up for
+   * it. Starting the war-camp directly from the menu keeps it at 0 instead: nothing
+   * has been earned yet, so the ramp has to be as gentle as the first biome's own.
+   */
+  private difficultyBase = 0;
+  /** This run's total room count, for the HUD and for `generateRoom`'s pacing. */
+  private totalRunRooms = TOTAL_DEPTHS;
 
   private marketOffers: MarketOffer[] = [];
   private cursedOffers: CursedOffer[] = [];
@@ -153,10 +165,6 @@ export class Game {
   private soulsAtRunStart = 0;
   /** Whether this run is on the shared daily seed. */
   private isDailyRun = false;
-  /** Where the last human died — the sigil's drop point. */
-  private lastKillAt: { x: number; y: number } | null = null;
-  /** Gifts on offer while the choice screen is up. */
-  private pendingGifts: readonly AbilityDef[] = [];
   /** Trials the finished run just earned, shown on the results screen. */
   private earnedTrials: readonly AchievementDef[] = [];
 
@@ -178,6 +186,15 @@ export class Game {
   private readonly resultsView: ResultsView = newResultsView();
   /** Where 'back' returns to: the title screen, or the paused run it was opened from. */
   private settingsReturnState: GameState = 'menu';
+  /**
+   * Where resuming from pause goes back to.
+   *
+   * Pause used to be reachable only from 'playing', so resuming could just say so.
+   * The map, the market and the cursed altar had no way back to the title screen at
+   * all — picking a destination was the only button on the whole screen — so pause
+   * opens from there too now, and needs to remember which of the four it interrupted.
+   */
+  private pauseReturnState: GameState = 'playing';
 
   // --- loop -----------------------------------------------------------------
   private accumulator = 0;
@@ -300,31 +317,67 @@ export class Game {
 
     this.installWorldHooks();
 
-    // The map and every arena behind it come from the seed, so a run is fully
-    // reproducible — including which branches were on offer.
-    this.runMap = generateRunMap(MAP_DEPTHS, this.runRng.fork());
+    this.pendingCards = [];
+    this.pendingMutations = [];
+    this.cardAfterMutation = false;
+    this.cardsReturnState = null;
+    this.hurtFlash = 0;
+    this.reviveAdUsed = false;
+    this.reviveView.phase = 'offer';
+
+    // Biomes reached in a past run are a standing preference, same as the starting
+    // body — asking again before every hunt would be friction, not a decision.
+    // Chosen directly rather than continued into, the war-camp is its own short
+    // run: a fresh difficulty ramp and its own ending, not the back half of a
+    // longer one the player never played the front half of.
+    if (this.meta.selectedStartBiome >= 2) {
+      this.generateBiome(2, 0, BIOME_ROOMS);
+    } else {
+      // The first biome's map and every arena behind it come from the seed, so a
+      // run is fully reproducible — including which branches were on offer.
+      this.generateBiome(1, 0, TOTAL_DEPTHS);
+    }
+  }
+
+  /**
+   * Generate one biome's map and pre-build every arena behind it.
+   *
+   * Called once at the start of a run, and again — without ending the run —
+   * whenever the first biome's boss falls and the war-camp opens up, so the second
+   * biome is exactly as reproducible from the seed as the first.
+   *
+   * `difficultyBase` is added to the biome's own node depths (which always start
+   * at 0) for every difficulty curve and for `roomIndex`; `totalRunRooms` is this
+   * run's whole length, for the HUD and for `generateRoom`'s pacing. Continuing
+   * naturally into the war-camp passes `BIOME_ROOMS`/`TOTAL_DEPTHS` so the climb
+   * started in the first biome keeps going; starting the war-camp directly from
+   * the menu passes `0`/`BIOME_ROOMS` so it ramps up fresh, like a short run of
+   * its own.
+   */
+  private generateBiome(biome: 1 | 2, difficultyBase: number, totalRunRooms: number): void {
+    this.biome = biome;
+    this.difficultyBase = difficultyBase;
+    this.totalRunRooms = totalRunRooms;
+    this.runMap = generateRunMap(BIOME_ROOMS, this.runRng.fork());
 
     const planRng = this.runRng.fork();
     this.plansByNode = new Map();
     for (const node of this.runMap.nodes) {
       if (!isArenaNode(node.kind)) continue;
       const request = node.kind === 'boss' ? 'boss' : node.kind === 'elite' ? 'elite' : 'battle';
-      this.plansByNode.set(node.id, generateRoom(node.depth, MAP_DEPTHS, planRng, request));
+      this.plansByNode.set(
+        node.id,
+        generateRoom(difficultyBase + node.depth, totalRunRooms, planRng, request, biome),
+      );
     }
 
     this.currentNodeId = null;
     this.visitedNodes.clear();
-    this.roomIndex = 0;
-    this.pendingCards = [];
-    this.pendingMutations = [];
-    this.cardAfterMutation = false;
-    this.cardsReturnState = null;
-    this.hurtFlash = 0;
+    this.roomIndex = difficultyBase;
     this.mapTime = 0;
-    this.reviveAdUsed = false;
-    this.reviveView.phase = 'offer';
 
-    // The run opens on the map: the very first stop is already a choice of one.
+    // The map opens as soon as it's ready: the very first stop is already a choice
+    // of one, same as the run's own opening.
     this.state = 'map';
   }
 
@@ -348,7 +401,7 @@ export class Game {
 
     this.currentNodeId = nodeId;
     this.visitedNodes.add(nodeId);
-    this.roomIndex = node.depth;
+    this.roomIndex = this.difficultyBase + node.depth;
 
     switch (node.kind) {
       case 'battle':
@@ -368,10 +421,24 @@ export class Game {
     }
   }
 
-  /** Back to the map after a stop is done, or straight to victory after the boss. */
+  /**
+   * Back to the map after a stop is done — or, after a boss, onward. The first
+   * biome's boss opens a gate into the war-camp instead of ending the run; every
+   * other boss (the war-camp's, whether reached naturally or started there
+   * directly) actually finishes it.
+   */
   private returnToMap(): void {
     const node = this.currentNodeId !== null ? this.runMap.nodes[this.currentNodeId] : null;
     if (node && node.kind === 'boss') {
+      if (this.biome === 1) {
+        // Permanent the instant the boss falls, independent of how the run
+        // subsequently ends — dying partway through the war-camp must not cost
+        // the player the unlock they just earned reaching it.
+        this.meta.recordBiomeReached(2);
+        this.sound.victory();
+        this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
+        return;
+      }
       this.tracker.outcome = 'victory';
       this.sound.victory();
       this.finishRun();
@@ -411,24 +478,8 @@ export class Game {
     };
 
     world.onHumanKilled = (human, ctx) => {
-      // Remembered so the sigil can drop where the settlement actually fell, rather
-      // than at the player's feet where it would be a handout instead of a choice.
-      this.lastKillAt = { x: human.x, y: human.y };
       this.applyOnKillEffects(human, ctx.sourceLabel);
     };
-
-    world.onGiftOffered = () => this.openGiftChoice();
-  }
-
-  /**
-   * Offer the three gifts.
-   *
-   * All three, every time: there are only three, and hiding one behind a roll would
-   * turn a decision about how you want to fight into a lottery.
-   */
-  private openGiftChoice(): void {
-    this.pendingGifts = ABILITIES;
-    this.state = 'gift';
   }
 
   private applyOnKillEffects(human: Human, sourceLabel: string): void {
@@ -513,7 +564,7 @@ export class Game {
   private loadRoom(nodeId: number): void {
     const plan = this.plansByNode.get(nodeId);
     if (!plan) return;
-    const index = this.runMap.nodes[nodeId]!.depth;
+    const index = this.difficultyBase + this.runMap.nodes[nodeId]!.depth;
     this.roomIndex = index;
 
     this.world.reset(plan.bounds, plan.wallThickness);
@@ -780,7 +831,6 @@ export class Game {
       this.input.setTouchContext(
         this.meta.settings.touchControls !== 'off',
         this.state === 'playing' ? 'play' : 'ui',
-        this.monster?.ability != null,
       );
       this.ui.frame(this.input, this.renderer.width, this.renderer.height);
 
@@ -852,13 +902,17 @@ export class Game {
       case 'map':
       case 'market':
       case 'cursed':
+        if (this.input.consumePress('pause')) {
+          this.pauseReturnState = this.state;
+          this.state = 'pause';
+          return;
+        }
         // Between-stop screens have no world behind them; only their own clock runs.
         this.mapTime += delta;
         this.ambience.update(0.05, 0);
         return;
 
       case 'cards':
-      case 'gift':
       case 'mutation':
       case 'pause':
       case 'results':
@@ -878,11 +932,10 @@ export class Game {
     // Claimed, or the pause screen drawn later this same frame would read the very
     // same press and resume immediately.
     if (this.input.consumePress('pause')) {
+      this.pauseReturnState = 'playing';
       this.state = 'pause';
       return;
     }
-
-    this.tryCastAbility();
 
     this.accumulator += delta;
     let steps = 0;
@@ -915,47 +968,6 @@ export class Game {
   }
 
   /**
-   * The one thing in the game you aim yourself.
-   *
-   * Click, or the ability key: both cast at the point under the cursor. The build
-   * sheet is checked because it covers the arena — a click meant for reading a stat
-   * must not throw the monster across the settlement.
-   */
-  private tryCastAbility(): void {
-    if (this.showBuildSheet || !this.monster.abilityReady) return;
-    const asked = this.input.consumePress('ability') || this.input.mouseClicked;
-    if (!asked) return;
-
-    const target = this.aimPoint();
-    if (!target) return;
-    if (this.monster.castAbility(this.world, target.x, target.y)) this.input.mouseClicked = false;
-  }
-
-  /**
-   * Where the gift is aimed.
-   *
-   * The cursor, or — on glass, where there is no cursor to follow — whatever is
-   * closest. A phone cannot point at a spot and steer with the same thumb, and an
-   * on-screen aiming mode for one button would cost more than the button is worth.
-   */
-  private aimPoint(): { x: number; y: number } | null {
-    const reach = this.monster.ability?.def.range ?? 0;
-
-    if (this.input.touchDetected) {
-      // Line of sight is not required: the gift lands on a point, and a wall between
-      // you and the target is the target's problem, not the cast's.
-      const nearest = this.world.nearestHuman(this.monster.x, this.monster.y, reach, false);
-      if (nearest) return { x: nearest.x, y: nearest.y };
-      // Nothing left alive: throw it straight ahead rather than swallowing the press.
-      return {
-        x: this.monster.x + Math.cos(this.monster.aim) * reach * 0.6,
-        y: this.monster.y + Math.sin(this.monster.aim) * reach * 0.6,
-      };
-    }
-    return this.camera.screenToWorld(this.input.mouse.x, this.input.mouse.y);
-  }
-
-  /**
    * Keep the mix following the fight.
    *
    * Tension rises with how much of the settlement is still standing against you and
@@ -971,8 +983,9 @@ export class Game {
     const crowd = Math.min(1, alive / 8);
     const tension = this.exitReady ? 0.05 : Math.min(1, crowd * 0.8 + this.heat * 0.4);
     const danger = this.monster.alive ? Math.max(0, 1 - this.monster.healthFraction / 0.35) : 0;
+    const boss = !this.exitReady && this.world.humans.some((h) => h.alive && h.archetype.role === 'boss');
 
-    this.ambience.update(tension, danger);
+    this.ambience.update(tension, danger, boss);
   }
 
   /** One fixed simulation tick. */
@@ -1073,11 +1086,6 @@ export class Game {
       // Sweep the battlefield: every soul still lying around comes to you. Souls
       // are experience now, so losing track of them would silently cost levels.
       for (const pickup of world.pickups) pickup.forceAttract();
-
-      // ...and only then the sigil, so the sweep can't drag it in before the player
-      // has decided whether they even want to walk over.
-      const fell = this.lastKillAt ?? this.monster;
-      world.spawnSigil(fell.x, fell.y);
 
       world.texts.add(
         this.monster.x,
@@ -1196,6 +1204,7 @@ export class Game {
     // the first fight there is no world to draw at all.
     if (this.state === 'map' || this.state === 'market' || this.state === 'cursed') {
       this.drawBetweenStops();
+      this.drawPauseIcon();
       this.applyCursor();
       return;
     }
@@ -1205,13 +1214,7 @@ export class Game {
     // the modal screens below must still run in that case.
     const plan = this.currentPlan;
     if (plan) {
-      // The reticle only follows a live cursor: while a modal is up the mouse belongs
-      // to the screen on top, and a ring trailing its buttons would be nonsense.
-      const aim =
-        this.state === 'playing' && !this.showBuildSheet && this.monster.ability
-          ? this.aimPoint()
-          : null;
-      this.renderer.drawWorld(this.world, this.camera, plan.exit, this.exitReady, aim);
+      this.renderer.drawWorld(this.world, this.camera, plan.exit, this.exitReady);
 
       const boss = this.world.humans.find((h) => h.alive && h.archetype.role === 'boss');
 
@@ -1219,7 +1222,7 @@ export class Game {
         monster: this.monster,
         tracker: this.tracker,
         roomIndex: this.roomIndex,
-        totalRooms: MAP_DEPTHS,
+        totalRooms: this.totalRunRooms,
         roomName: plan.name,
         humansAlive: this.world.livingHumans,
         humansTotal: this.humansAtRoomStart,
@@ -1243,22 +1246,11 @@ export class Game {
         if (this.showBuildSheet) {
           drawBuildSheet(this.ui, this.monster, this.tracker, this.skillPool.takenList);
         }
-        drawTouchControls(
-          this.ui,
-          this.input,
-          this.meta.settings.touchControls,
-          this.monster.ability
-            ? { color: this.monster.ability.def.color, ready: this.monster.abilityReady }
-            : null,
-        );
+        drawTouchControls(this.ui, this.input, this.meta.settings.touchControls);
         break;
 
       case 'cards':
         this.drawCardScreen();
-        break;
-
-      case 'gift':
-        this.drawGiftScreen();
         break;
 
       case 'mutation':
@@ -1267,7 +1259,7 @@ export class Game {
 
       case 'pause': {
         const action = drawPause(this.ui, this.touchActive());
-        if (action === 'resume' || this.input.consumePress('pause')) this.state = 'playing';
+        if (action === 'resume' || this.input.consumePress('pause')) this.state = this.pauseReturnState;
         if (action === 'settings') {
           this.settingsReturnState = 'pause';
           this.state = 'settings';
@@ -1333,14 +1325,23 @@ export class Game {
           return;
         }
 
-        const picked = drawRunMap(this.ui, this.input, this.runMap, {
+        const mapResult = drawRunMap(this.ui, this.input, this.runMap, {
           currentNodeId: this.currentNodeId,
           reachable,
           visited: this.visitedNodes,
           time: this.mapTime,
+          biome: this.biome,
         });
-        if (picked >= 0 && reachable.some((node) => node.id === picked)) {
-          this.enterNode(picked);
+        if (mapResult.picked >= 0 && reachable.some((node) => node.id === mapResult.picked)) {
+          this.enterNode(mapResult.picked);
+        } else if (mapResult.back) {
+          // Straight to the title screen, not the results report — this is a "never
+          // mind, get me out" button, not a run worth reading a summary of. The run
+          // still counts for lifetime stats and souls; it just skips the screen.
+          this.tracker.outcome = 'death';
+          this.tracker.killedBy = t('source.retreat');
+          this.finishRun();
+          this.state = 'menu';
         }
         break;
       }
@@ -1417,32 +1418,6 @@ export class Game {
     this.state = 'playing';
   }
 
-  /**
-   * The gift choice, opened by walking into a sigil.
-   *
-   * The settlement is already empty when a sigil exists, so returning to 'playing'
-   * drops the player back into a cleared arena with the portal open — nothing is
-   * waiting to hit them while they read.
-   */
-  private drawGiftScreen(): void {
-    const result = drawGiftSelect(this.ui, this.input, this.pendingGifts);
-    if (result.left) {
-      this.pendingGifts = [];
-      this.state = 'playing';
-      return;
-    }
-    if (result.picked < 0) return;
-
-    const gift = this.pendingGifts[result.picked];
-    if (!gift) return;
-
-    this.monster.grantAbility(gift);
-    this.sound.mutation();
-    this.world.texts.add(this.monster.x, this.monster.y - 56, gift.name.toUpperCase(), gift.color, 18, 1);
-    this.pendingGifts = [];
-    this.state = 'playing';
-  }
-
   private drawMutationScreen(): void {
     const picked = drawMutationSelect(this.ui, this.input, this.pendingMutations);
     if (picked < 0) return;
@@ -1473,6 +1448,47 @@ export class Game {
     if (mode === 'off') return false;
     if (mode === 'auto') return this.input.touchDetected;
     return true;
+  }
+
+  /**
+   * Small pause icon, top-right, on every between-stop screen.
+   *
+   * The map has no button of its own that leads back to the title screen — picking a
+   * destination used to be the only thing the screen let you do. The market and the
+   * altar already have their own "leave", but that only backs out to the map, not out
+   * of the run, and a touch player has no Escape key to fall back on either. Reuses
+   * the same "II" glyph the in-arena touch controls already use for pause, so it reads
+   * as the same button appearing somewhere new rather than a second one to learn.
+   */
+  private drawPauseIcon(): void {
+    const r = 18;
+    const x = this.ui.width - r - 14;
+    const y = r + 14;
+    const zone = this.ui.hitZone({ x: x - r, y: y - r, w: r * 2, h: r * 2 });
+
+    const ctx = this.ui.ctx;
+    ctx.save();
+    ctx.beginPath();
+    ctx.arc(x, y, r, 0, TAU);
+    ctx.fillStyle = zone.hovered ? 'rgba(46,40,36,0.9)' : 'rgba(20,19,23,0.7)';
+    ctx.fill();
+    ctx.strokeStyle = zone.hovered ? PALETTE.gold : 'rgba(232,226,212,0.4)';
+    ctx.lineWidth = 1.5;
+    ctx.stroke();
+    ctx.restore();
+
+    this.ui.text(t('touch.pause'), x, y, {
+      size: 12,
+      color: PALETTE.ink,
+      align: 'center',
+      baseline: 'middle',
+      bold: true,
+    });
+
+    if (zone.clicked) {
+      this.pauseReturnState = this.state;
+      this.state = 'pause';
+    }
   }
 
   private applyCursor(): void {
@@ -1510,10 +1526,10 @@ export class Game {
     this.frame(this.lastFrameMs + deltaMs);
   }
 
-  /** Dev: jump straight to a room, ending the current one normally. */
+  /** Dev: jump straight to a room in the active biome's map, ending the current one normally. */
   debugLoadRoom(depth: number): void {
     if (!this.runMap) return;
-    const wanted = clamp(Math.round(depth), 0, MAP_DEPTHS - 1);
+    const wanted = clamp(Math.round(depth), 0, BIOME_ROOMS - 1);
     // Depths hold several nodes; take the first that is actually a fight.
     const nodeId = this.runMap.byDepth[wanted]!.find((id) =>
       isArenaNode(this.runMap.nodes[id]!.kind),
@@ -1522,6 +1538,20 @@ export class Game {
 
     if (this.state === 'playing') this.tracker.endRoom(this.monster.healthFraction);
     this.enterNode(nodeId);
+  }
+
+  /**
+   * Dev: jump straight to a biome's map, skipping the grind to reach it normally.
+   *
+   * Only ever called by hand from the console — there is nothing to "turn off"
+   * beyond not calling it again, and nothing here is reachable outside a dev build
+   * (see `main.ts`'s `window.samarkand` gate). Requires a run already in progress,
+   * same as every other `debug*` helper.
+   */
+  debugSetBiome(biome: 1 | 2): void {
+    if (!this.runMap) return;
+    if (biome === 2) this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
+    else this.generateBiome(1, 0, TOTAL_DEPTHS);
   }
 
   /** Dev: bank souls, for exercising the lair without grinding runs. */

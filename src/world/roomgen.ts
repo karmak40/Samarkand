@@ -1,5 +1,5 @@
 import { type BuildingKind } from '../entities/building';
-import { BOSS_IDS, type BossId, HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
+import { BOSS_IDS, HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
 import { clamp, type Rect, rectsOverlap, segmentRectHit, TAU, type Vec2 } from '../core/math';
 import { RNG } from '../core/rng';
 import { roomNameBossSuffix, roomNamePrefixes, roomNameRoots } from '../i18n';
@@ -8,6 +8,13 @@ export type RoomKind = 'hamlet' | 'village' | 'fortified' | 'shrine' | 'elite' |
 
 /** What the run map asked for. `battle` is expanded into one of the flavour kinds. */
 export type ArenaRequest = 'battle' | 'elite' | 'boss';
+
+/**
+ * Rooms per biome/map. The run generates one biome's worth of map at a time — see
+ * `Game.generateBiome` — so this is also the single source of truth both sides
+ * share for how deep each biome's own map goes.
+ */
+export const BIOME_ROOMS = 12;
 
 export interface PlannedBuilding {
   kind: BuildingKind;
@@ -31,7 +38,7 @@ export interface RoomPlan {
   /** Where the portal opens once the settlement is cleared. */
   exit: Vec2;
   /** Which boss holds this room. Only set on the boss arena. */
-  bossId: BossId | null;
+  bossId: HumanId | null;
   /** Relics lying in the settlement, each granting a temporary form. */
   relics: Vec2[];
   /** Deterministic tint for the ground, so each room reads as its own place. */
@@ -42,6 +49,8 @@ export interface RoomPlan {
    */
   wallThickness: number;
   isBoss: boolean;
+  /** Which biome this room belongs to — the terrain palette reads this. */
+  biome: 1 | 2;
 }
 
 /**
@@ -129,9 +138,12 @@ const SPAWN_COST: Record<HumanId, number> = {
   priest: 6,
   knight: 9,
   ballista: 7,
+  rider: 5,
+  siegeEngine: 10,
   inquisitor: 0,
   warlord: 0,
   pyromancer: 0,
+  khagan: 0,
 };
 
 /**
@@ -141,16 +153,30 @@ const SPAWN_COST: Record<HumanId, number> = {
  * sampling on a loose ring around it, and defenders spawn near the structures they
  * would plausibly be guarding. The monster always starts at the arena edge furthest
  * from the densest cluster, so the first thing you see is the village, not a wall.
+ *
+ * `index` drives every difficulty curve (arena size, spawn budget, pacing) and is
+ * *not* always the room's position within `biome` — a run that reaches the war-camp
+ * by clearing the first biome keeps counting up from where that left off, while a
+ * war-camp run started directly from the menu counts from 0 like any fresh run.
+ * `biome` alone decides which content (roster, terrain, boss) shows up.
  */
 export function generateRoom(
   index: number,
   totalRooms: number,
   rng: RNG,
   request: ArenaRequest = 'battle',
+  biome: 1 | 2 = 1,
 ): RoomPlan {
   const kind: RoomKind =
     request === 'boss' ? 'boss' : request === 'elite' ? 'elite' : roomKindForDepth(index, totalRooms, rng);
   const config = KIND_CONFIG[kind];
+  // The war-camp fields a stronghold or two wherever it would otherwise field a
+  // watchtower — the building `planSpawns` pairs a siege engine with, the same way
+  // a watchtower is paired with a ballista.
+  const palette =
+    biome === 2 && (kind === 'fortified' || kind === 'elite' || kind === 'boss')
+      ? [...config.palette, 'stronghold' as const, 'stronghold' as const]
+      : config.palette;
 
   // Arenas grow only slightly with depth. Earlier tuning at 3% per room reached
   // four screens across by the finale, which turned late fights into long walks.
@@ -188,7 +214,7 @@ export function generateRoom(
   while (buildings.length < target && attempts < target * 40) {
     attempts++;
 
-    const buildingKind = rng.pick(config.palette);
+    const buildingKind = rng.pick(palette);
     const size = buildingSize(buildingKind, rng);
 
     // Ring distribution: most structures sit between the plaza and the outskirts.
@@ -235,9 +261,11 @@ export function generateRoom(
 
   // --- defenders -----------------------------------------------------------
   // Drawn from the run seed, so the finale differs between runs and every player
-  // on a daily seed faces the same one.
-  const bossId: BossId | null = kind === 'boss' ? rng.pick(BOSS_IDS) : null;
-  const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId);
+  // on a daily seed faces the same one. The war-camp's boss is fixed rather than
+  // rolled — the Khagan is the run's real ending, not one of three interchangeable
+  // finales the way the first biome's boss is.
+  const bossId: HumanId | null = kind === 'boss' ? (biome === 2 ? 'khagan' : rng.pick(BOSS_IDS)) : null;
+  const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId, biome);
 
   const name =
     kind === 'boss'
@@ -258,6 +286,7 @@ export function generateRoom(
     groundSeed: rng.int(0, 100000),
     wallThickness: WALL_THICKNESS,
     isBoss: kind === 'boss',
+    biome,
   };
 }
 
@@ -285,6 +314,8 @@ function buildingSize(kind: BuildingKind, rng: RNG): { w: number; h: number } {
       return { w: rng.range(110, 140), h: rng.range(74, 92) };
     case 'watchtower':
       return { w: rng.range(52, 64), h: rng.range(52, 64) };
+    case 'stronghold':
+      return { w: rng.range(130, 165), h: rng.range(110, 140) };
     case 'well':
       return { w: 46, h: 46 };
     case 'cart':
@@ -443,7 +474,8 @@ function planSpawns(
   buildings: PlannedBuilding[],
   monsterStart: Vec2,
   rng: RNG,
-  bossId: BossId | null,
+  bossId: HumanId | null,
+  biome: 1 | 2,
 ): PlannedSpawn[] {
   const spawns: PlannedSpawn[] = [];
 
@@ -467,20 +499,23 @@ function planSpawns(
 
   const available = (Object.keys(HUMAN_ARCHETYPES) as HumanId[]).filter((id) => {
     const a = HUMAN_ARCHETYPES[id];
-    return a.spawnWeight > 0 && a.minDepth <= index;
+    return a.spawnWeight > 0 && a.minDepth <= index && (a.minBiome ?? 1) <= biome;
   });
 
-  // Watchtowers field a ballista each; that's what makes them worth destroying.
+  // Watchtowers field a ballista each, and a stronghold fields a siege engine —
+  // that's what makes either worth destroying.
   //
-  // Placement is critical: a ballista cannot move, so if it ends up in a building's
-  // shadow neither side can ever see the other and the room becomes uncompletable.
-  // It is therefore stood off in open ground with a clear line to the arena centre.
+  // Placement is critical: neither turret can move, so if it ends up in a
+  // building's shadow neither side can ever see the other and the room becomes
+  // uncompletable. It is therefore stood off in open ground with a clear line to
+  // the arena centre.
   for (const building of buildings) {
-    if (building.kind !== 'watchtower') continue;
+    const turretId = building.kind === 'watchtower' ? 'ballista' : building.kind === 'stronghold' ? 'siegeEngine' : null;
+    if (!turretId) continue;
     const spot = placeTurret(building.rect, bounds, buildings, rng);
     if (!spot) continue;
-    spawns.push({ id: 'ballista', x: spot.x, y: spot.y });
-    budget -= SPAWN_COST.ballista * 0.5;
+    spawns.push({ id: turretId, x: spot.x, y: spot.y });
+    budget -= SPAWN_COST[turretId] * 0.5;
   }
 
   // Guarantee a ranged presence from the very first room. A settlement defended
@@ -616,6 +651,7 @@ const OPAQUE_KINDS = new Set<BuildingKind>([
   'granary',
   'chapel',
   'watchtower',
+  'stronghold',
   'wall',
 ]);
 

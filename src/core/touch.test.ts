@@ -40,49 +40,6 @@ describe('touchLayout', () => {
   });
 });
 
-describe('the gift button', () => {
-  it('is absent unless a gift is held', () => {
-    const without = touchLayout(390, 844);
-    expect(without.buttons.some((b) => b.id === 'ability')).toBe(false);
-
-    const withGift = touchLayout(390, 844, true);
-    expect(withGift.buttons.some((b) => b.id === 'ability')).toBe(true);
-  });
-
-  /**
-   * Its whole cost is the steering it eats. A button hit-tested where no button is
-   * drawn — or drawn under the dash thumb — turns a dodge into a cast.
-   */
-  it('clears dash and stays on screen, on every shape of viewport', () => {
-    for (const [w, h] of [
-      [390, 844],
-      [844, 390],
-      [844, 320],
-      [1280, 720],
-    ] as const) {
-      const layout = touchLayout(w, h, true);
-      const gift = layout.buttons.find((b) => b.id === 'ability')!;
-
-      expect(gift.x - gift.r).toBeGreaterThanOrEqual(0);
-      expect(gift.x + gift.r).toBeLessThanOrEqual(w);
-      expect(gift.y - gift.r).toBeGreaterThanOrEqual(0);
-      expect(gift.y + gift.r).toBeLessThanOrEqual(h);
-
-      for (const other of layout.buttons) {
-        if (other.id === 'ability') continue;
-        const distance = Math.hypot(gift.x - other.x, gift.y - other.y);
-        expect(distance).toBeGreaterThanOrEqual(gift.r + other.r - 1);
-      }
-    }
-  });
-
-  it('is what a touch on it resolves to', () => {
-    const layout = touchLayout(390, 844, true);
-    const gift = layout.buttons.find((b) => b.id === 'ability')!;
-    expect(buttonAt(layout, gift.x, gift.y)).toBe('ability');
-  });
-});
-
 describe('buttonAt', () => {
   it('finds the button under a point, slop included', () => {
     const layout = touchLayout(390, 844);

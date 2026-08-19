@@ -131,23 +131,6 @@ export const DE: Record<string, string> = {
   'touch.dash': 'SPRINT',
   'touch.pause': 'II',
   'touch.stats': '≡',
-  'touch.ability': 'GABE',
-
-  // ---- gifts of the abyss ------------------------------------------------------
-  'gift.title': 'GABE DES ABGRUNDS',
-  'gift.subtitle': 'Das Siegel bietet eine Macht, die du selbst richtest. Nicht lange.',
-  'gift.cooldown': 'Abklingzeit',
-  'gift.duration': 'Hält',
-  'gift.leave': 'Weitergehen',
-  'hint.ability': 'LMT / E — Gabe auf den Zeiger',
-  'text.giftFading': '{name} verblasst',
-
-  'ability.abyss-strike.name': 'Schlag des Abgrunds',
-  'ability.abyss-strike.desc': 'Ein Kreis aus Dunkelheit auf der gewählten Stelle. Einen Herzschlag später birst er in deinem Element und wirft alles beiseite.',
-  'ability.rift.name': 'Riss',
-  'ability.rift.desc': 'Der Boden reißt auf, wo du hinzeigst: eine Zone deines Elements, die fünf Sekunden lang alles darin zerfrisst.',
-  'ability.pounce.name': 'Satz',
-  'ability.pounce.desc': 'Du bist einfach dort, an der gewählten Stelle — und was darauf stand, ist es nicht mehr.',
 
   'pause.title': 'PAUSE',
   'pause.resume': 'Fortsetzen',
@@ -527,6 +510,8 @@ export const DE: Record<string, string> = {
   // ---- run map ---------------------------------------------------------------
   'map.title': 'DER WEG',
   'map.subtitle': 'Wähle, wohin du weitergehst. Es gibt kein Zurück.',
+  'map.titleAct2': 'DAS KRIEGSLAGER',
+  'map.subtitleAct2': 'Die Dörfer liegen hinter dir. Hier hielten sie ihr Heer.',
   'map.depth': 'Tiefe {n} / {total}',
   'map.current': 'du bist hier',
   'node.battle.name': 'Siedlung',
@@ -689,8 +674,20 @@ export const DE: Record<string, string> = {
   'text.warlordRally': 'ZU MIR!',
   'text.pyreRises': 'BRENNT',
 
+  // ---- Kriegslager (zweites Biom) ---------------------------------------------
+  'building.stronghold.name': 'Feste',
+  'enemy.rider.name': 'Reiter',
+  'enemy.siegeEngine.name': 'Belagerungsmaschine',
+  'enemy.khagan.name': 'Der Khagan',
+  'effect.javelinVolley': 'Speerhagel',
+  'effect.sandstorm': 'Sandsturm',
+  'text.khaganHorde': 'REITET!',
+  'text.sandstormRises': 'DER SAND ERHEBT SICH',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'Körper: {name}',
+  'menu.biome.1': 'Dörfer',
+  'menu.biome.2': 'Kriegslager',
   'lair.tab.species': 'Körper',
   'species.active': 'GEWÄHLT',
   'species.choose': 'NEHMEN',
@@ -745,7 +742,6 @@ export const DE: Record<string, string> = {
   'action.left': 'Links',
   'action.right': 'Rechts',
   'action.dash': 'Sprint',
-  'action.ability': 'Fähigkeit',
   'action.stats': 'Statistik',
 
 };

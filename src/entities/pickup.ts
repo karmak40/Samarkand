@@ -4,7 +4,7 @@ import { type BoonDef } from '../progression/boons';
 import type { World } from '../world/world';
 import { Entity } from './entity';
 
-export type PickupKind = 'soul' | 'blood' | 'ember' | 'boon' | 'sigil';
+export type PickupKind = 'soul' | 'blood' | 'ember' | 'boon';
 
 interface PickupStyle {
   color: string;
@@ -17,7 +17,6 @@ const STYLES: Record<PickupKind, PickupStyle> = {
   blood: { color: '#c0343c', glow: '#ff8a92', size: 5.5 },
   ember: { color: '#ffb347', glow: '#ffe0a0', size: 5 },
   boon: { color: '#d8a13a', glow: '#fff2c0', size: 11 },
-  sigil: { color: '#b06cff', glow: '#e6d0ff', size: 11 },
 };
 
 /**
@@ -62,9 +61,9 @@ export class Pickup extends Entity {
     this.faction = 'neutral';
     this.bobPhase = Math.random() * TAU;
     this.boon = boon;
-    // Relics and sigils are landmarks, not litter: they wait for you and are never
-    // magnetised away by the end-of-room sweep timer.
-    if (kind === 'boon' || kind === 'sigil') this.lifetime = Infinity;
+    // Relics are landmarks, not litter: they wait for you and are never magnetised
+    // away by the end-of-room sweep timer.
+    if (kind === 'boon') this.lifetime = Infinity;
   }
 
   override update(dt: number, world: World): void {
@@ -149,18 +148,11 @@ export class Pickup extends Entity {
         if (this.boon) world.monster.grantBoon(this.boon, world);
         break;
       }
-      case 'sigil': {
-        // The sigil itself grants nothing — it opens the choice of the three gifts,
-        // which only the game layer can put on screen.
-        world.sound.boon(this);
-        world.onGiftOffered?.();
-        break;
-      }
     }
   }
 
   override draw(ctx: CanvasRenderingContext2D): void {
-    if (this.kind === 'boon' || this.kind === 'sigil') {
+    if (this.kind === 'boon') {
       this.drawRelic(ctx);
       return;
     }

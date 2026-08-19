@@ -131,23 +131,6 @@ export const UK: Record<string, string> = {
   'touch.dash': 'РИВОК',
   'touch.pause': 'II',
   'touch.stats': '≡',
-  'touch.ability': 'ДАР',
-
-  // ---- gifts of the abyss ------------------------------------------------------
-  'gift.title': 'ДАР БЕЗОДНІ',
-  'gift.subtitle': 'Уламок пропонує силу, якою ти керуєш сам. Ненадовго.',
-  'gift.cooldown': 'Відкат',
-  'gift.duration': 'Триває',
-  'gift.leave': 'Піти',
-  'hint.ability': 'ЛКМ / E — дар за курсором',
-  'text.giftFading': '{name} згасає',
-
-  'ability.abyss-strike.name': 'Удар безодні',
-  'ability.abyss-strike.desc': 'Коло темряви в обраній точці. За мить — вибух твоєю стихією, що відкидає всіх навколо.',
-  'ability.rift.name': 'Розлам',
-  'ability.rift.desc': 'В обраній точці рветься земля: зона твоєї стихії, що роз’їдає все всередині п’ять секунд.',
-  'ability.pounce.name': 'Стрибок',
-  'ability.pounce.desc': 'Ти вмить опиняєшся в обраній точці, зминаючи всіх при приземленні.',
 
   'pause.title': 'ПАУЗА',
   'pause.resume': 'Продовжити',
@@ -527,6 +510,8 @@ export const UK: Record<string, string> = {
   // ---- run map ---------------------------------------------------------------
   'map.title': 'ШЛЯХ',
   'map.subtitle': 'Обери, куди рушиш далі. Назад дороги немає.',
+  'map.titleAct2': 'ВІЙСЬКОВИЙ ТАБІР',
+  'map.subtitleAct2': 'Села позаду. Тут тримали армію.',
   'map.depth': 'глибина {n} / {total}',
   'map.current': 'ти тут',
   'node.battle.name': 'Поселення',
@@ -689,8 +674,20 @@ export const UK: Record<string, string> = {
   'text.warlordRally': 'ДО МЕНЕ!',
   'text.pyreRises': 'ГОРИ',
 
+  // ---- військовий табір (другий біом) -----------------------------------------
+  'building.stronghold.name': 'Твердиня',
+  'enemy.rider.name': 'Вершник',
+  'enemy.siegeEngine.name': 'Облогова машина',
+  'enemy.khagan.name': 'Хаган',
+  'effect.javelinVolley': 'Град дротиків',
+  'effect.sandstorm': 'Піщана буря',
+  'text.khaganHorde': 'В АТАКУ!',
+  'text.sandstormRises': 'ПІСОК ЗДІЙМАЄТЬСЯ',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тіло: {name}',
+  'menu.biome.1': 'Села',
+  'menu.biome.2': 'Військовий табір',
   'lair.tab.species': 'Тіла',
   'species.active': 'ОБРАНО',
   'species.choose': 'ОБРАТИ',
@@ -745,6 +742,5 @@ export const UK: Record<string, string> = {
   'action.left': 'Вліво',
   'action.right': 'Вправо',
   'action.dash': 'Ривок',
-  'action.ability': 'Здатність',
   'action.stats': 'Статистика',
 };

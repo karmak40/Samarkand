@@ -300,8 +300,12 @@ export function getMutation(id: string): Mutation | undefined {
   return MUTATIONS_BY_ID.get(id);
 }
 
-/** Rooms at which an evolution choice is offered. */
-export const EVOLUTION_ROOMS = [3, 7, 11] as const;
+/**
+ * Rooms at which an evolution choice is offered. Every 4th room, symmetric across
+ * both biomes — including each one's boss, so the war-camp's ending gets the same
+ * flourish the first biome's did.
+ */
+export const EVOLUTION_ROOMS = [3, 7, 11, 15, 19, 23] as const;
 
 export function isEvolutionRoom(roomIndex: number): boolean {
   return (EVOLUTION_ROOMS as readonly number[]).includes(roomIndex);

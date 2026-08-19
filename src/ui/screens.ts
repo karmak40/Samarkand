@@ -4,7 +4,6 @@ import { clamp, TAU } from '../core/math';
 import { HUMAN_ARCHETYPES } from '../entities/human';
 import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
-import { type AbilityDef } from '../progression/abilities';
 import {
   achievementName,
   type AchievementDef,
@@ -447,150 +446,6 @@ export function drawMutationSelect(
 
 // ---------------------------------------------------------------------------
 
-export interface GiftChoiceResult {
-  picked: number;
-  left: boolean;
-}
-
-/**
- * The gift of the abyss — the choice made at a sigil.
- *
- * Each card is in its gift's own colour and states its two numbers plainly, because
- * the whole decision is a trade between them: a long cooldown that hits hard, a
- * shorter one that denies ground, or a leap that repositions you. Walking away is
- * offered as well; a screen you cannot decline turns a stray step into a mistake.
- */
-export function drawGiftSelect(
-  ui: Ui,
-  input: Input,
-  gifts: readonly AbilityDef[],
-): GiftChoiceResult {
-  ui.scrim(0.88);
-
-  const result: GiftChoiceResult = { picked: -1, left: false };
-
-  ui.fittedText(t('gift.title'), ui.width / 2, 74, {
-    size: 32,
-    color: '#b06cff',
-    align: 'center',
-    baseline: 'middle',
-    letterSpacing: 10,
-    maxWidth: ui.width - 48,
-  });
-  ui.fittedText(t('gift.subtitle'), ui.width / 2, 110, {
-    size: 14,
-    color: PALETTE.muted,
-    align: 'center',
-    baseline: 'middle',
-    italic: true,
-    maxWidth: ui.width - 48,
-  });
-
-  const stacked = ui.width < 640;
-  const bottom = ui.height - 84;
-
-  gifts.forEach((gift, i) => {
-    const bounds = stacked
-      ? giftRowBounds(ui, i, gifts.length, 146, bottom)
-      : giftCardBounds(ui, i, gifts.length);
-
-    const zone = ui.hitZone(bounds);
-    const hovered = zone.hovered;
-
-    ui.panel(bounds, {
-      fill: hovered ? 'rgba(30,24,38,0.97)' : 'rgba(16,14,20,0.95)',
-      border: hovered ? gift.color : 'rgba(148,138,118,0.35)',
-      radius: 8,
-    });
-
-    const pad = stacked ? 18 : 20;
-    ui.fittedText(gift.name, bounds.x + pad, bounds.y + 24, {
-      size: stacked ? 17 : 19,
-      color: gift.color,
-      baseline: 'middle',
-      bold: true,
-      maxWidth: bounds.w - pad * 2 - 24,
-    });
-
-    ui.paragraph(gift.description, bounds.x + pad, bounds.y + 48, bounds.w - pad * 2, {
-      size: stacked ? 12.5 : 13.5,
-      color: PALETTE.muted,
-      lineHeight: 17,
-    });
-
-    // The two numbers that decide it, on the bottom edge where they line up across
-    // all three cards and can be compared at a glance.
-    ui.statRow(
-      t('gift.cooldown'),
-      `${gift.cooldown}${t('unit.secondsAbbrev')}`,
-      bounds.x + pad,
-      bounds.y + bounds.h - 38,
-      bounds.w - pad * 2,
-      { size: 12, color: gift.color },
-    );
-    ui.statRow(
-      t('gift.duration'),
-      `${gift.duration}${t('unit.secondsAbbrev')}`,
-      bounds.x + pad,
-      bounds.y + bounds.h - 20,
-      bounds.w - pad * 2,
-      { size: 12 },
-    );
-
-    ui.text(`${i + 1}`, bounds.x + bounds.w - 14, bounds.y + 22, {
-      size: 12,
-      color: hovered ? gift.color : PALETTE.dim,
-      align: 'right',
-      baseline: 'middle',
-      bold: true,
-    });
-
-    if (zone.clicked) result.picked = i;
-  });
-
-  if (input.wasPressed('slot1') && gifts.length > 0) result.picked = 0;
-  if (input.wasPressed('slot2') && gifts.length > 1) result.picked = 1;
-  if (input.wasPressed('slot3') && gifts.length > 2) result.picked = 2;
-
-  if (
-    ui.button(rect(ui.width / 2 - 90, ui.height - 62, 180, 38), t('gift.leave'), {
-      accent: PALETTE.muted,
-      size: 13,
-    }) ||
-    input.consumePress('pause')
-  ) {
-    result.left = true;
-  }
-
-  return result;
-}
-
-function giftCardBounds(ui: Ui, index: number, count: number): ReturnType<typeof rect> {
-  const cardW = Math.max(160, Math.min(300, (ui.width - 140) / Math.max(1, count) - 24));
-  // Tight to its contents: a card sized to the window leaves a hole between the
-  // description and the two numbers, which reads as something failing to render.
-  const cardH = clamp(ui.height - 300, 172, 214);
-  const gap = 26;
-  const totalW = count * cardW + (count - 1) * gap;
-  const startX = (ui.width - totalW) / 2;
-  return rect(startX + index * (cardW + gap), ui.height / 2 - cardH / 2 + 10, cardW, cardH);
-}
-
-function giftRowBounds(
-  ui: Ui,
-  index: number,
-  count: number,
-  top: number,
-  bottom: number,
-): ReturnType<typeof rect> {
-  const margin = 20;
-  const gap = 10;
-  const rowH = clamp((bottom - top - gap * (count - 1)) / Math.max(1, count), 96, 150);
-  return rect(margin, top + index * (rowH + gap), ui.width - margin * 2, rowH);
-}
-
-// ---------------------------------------------------------------------------
-
 export type ResultsAction = 'none' | 'again' | 'menu';
 
 /** Persisted between frames so scrolling the narrow report survives a redraw. */
@@ -840,6 +695,17 @@ function drawResultsOverview(
   options: { panel?: boolean } = {},
 ): number {
   if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+  // A fixed-height column, unlike the narrow stacked layout (bounds.h === 0 there,
+  // measured rather than clipped): a run with enough threats or a long survival
+  // streak can outgrow the column, and unclipped text used to run straight through
+  // the earned-trials banner below it instead of stopping at the column's edge.
+  const clipped = bounds.h > 0;
+  if (clipped) {
+    ui.ctx.save();
+    ui.ctx.beginPath();
+    ui.ctx.rect(bounds.x, bounds.y, bounds.w, bounds.h);
+    ui.ctx.clip();
+  }
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -892,6 +758,7 @@ function drawResultsOverview(
     y += 20;
   }
 
+  if (clipped) ui.ctx.restore();
   return y - bounds.y;
 }
 
@@ -902,6 +769,13 @@ function drawResultsDamage(
   options: { panel?: boolean } = {},
 ): number {
   if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+  const clipped = bounds.h > 0;
+  if (clipped) {
+    ui.ctx.save();
+    ui.ctx.beginPath();
+    ui.ctx.rect(bounds.x, bounds.y, bounds.w, bounds.h);
+    ui.ctx.clip();
+  }
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -969,6 +843,7 @@ function drawResultsDamage(
     y += 19;
   }
 
+  if (clipped) ui.ctx.restore();
   return y - bounds.y;
 }
 
@@ -979,6 +854,13 @@ function drawResultsRun(
   options: { panel?: boolean } = {},
 ): number {
   if (options.panel !== false) ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+  const clipped = bounds.h > 0;
+  if (clipped) {
+    ui.ctx.save();
+    ui.ctx.beginPath();
+    ui.ctx.rect(bounds.x, bounds.y, bounds.w, bounds.h);
+    ui.ctx.clip();
+  }
   const x = bounds.x + 20;
   const w = bounds.w - 40;
   let y = bounds.y + 28;
@@ -1043,6 +925,7 @@ function drawResultsRun(
     y += 18;
   }
 
+  if (clipped) ui.ctx.restore();
   return y - bounds.y;
 }
 
@@ -1104,6 +987,8 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActi
     action = 'start';
   }
   by += 60;
+
+  by = drawBiomeSelect(ui, meta, bx, by, buttonW);
 
   if (ui.button(rect(bx, by, buttonW, 42), t('menu.daily'), { accent: '#8fd6a8', size: 15, sub: dailySubtitle(meta) })) {
     action = 'daily';
@@ -1183,6 +1068,64 @@ function dailySubtitle(meta: MetaProgress): string {
   }
   if (today.victory) return t('daily.subVictory', { kills: today.bestKills });
   return t('daily.subPlayed', { rooms: today.bestRooms, kills: today.bestKills });
+}
+
+/**
+ * Which biome the next hunt starts in.
+ *
+ * Hidden entirely on a profile that has never reached a second biome — there is
+ * nothing to page through yet, and showing an arrow pair with nowhere to go would
+ * just be a question with one answer. Once it appears, flipping past the first
+ * biome starts a standalone run there instead of the usual one that grows into it:
+ * see `Game.beginRun`.
+ *
+ * Returns the y position just past the row, so the caller can place what comes
+ * next without duplicating this layout's numbers — same convention as the results
+ * columns.
+ */
+function drawBiomeSelect(ui: Ui, meta: MetaProgress, x: number, y: number, w: number): number {
+  if (meta.deepestBiomeReached < 2) return y;
+
+  const arrowW = 28;
+  const rowH = 28;
+  const gap = 6;
+  const labelW = w - arrowW * 2 - gap * 2;
+
+  if (
+    ui.button(rect(x, y, arrowW, rowH), '‹', {
+      size: 14,
+      accent: PALETTE.muted,
+      disabled: meta.selectedStartBiome <= 1,
+    })
+  ) {
+    meta.chooseStartBiome(meta.selectedStartBiome - 1);
+  }
+
+  const labelRect = rect(x + arrowW + gap, y, labelW, rowH);
+  ui.panel(labelRect, {
+    fill: 'rgba(20,19,23,0.75)',
+    border: 'rgba(148,138,118,0.3)',
+    radius: 5,
+    shadow: false,
+  });
+  ui.text(
+    t(`menu.biome.${meta.selectedStartBiome}`),
+    labelRect.x + labelRect.w / 2,
+    labelRect.y + labelRect.h / 2,
+    { size: 13, color: PALETTE.ink, align: 'center', baseline: 'middle' },
+  );
+
+  if (
+    ui.button(rect(x + arrowW + gap + labelW + gap, y, arrowW, rowH), '›', {
+      size: 14,
+      accent: PALETTE.muted,
+      disabled: meta.selectedStartBiome >= meta.deepestBiomeReached,
+    })
+  ) {
+    meta.chooseStartBiome(meta.selectedStartBiome + 1);
+  }
+
+  return y + rowH + 12;
 }
 
 /**

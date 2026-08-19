@@ -1,6 +1,5 @@
 import { describe, expect, it } from 'vitest';
 import { HUMAN_ARCHETYPES, BOSS_IDS, type HumanId } from '../entities/human';
-import { ABILITIES } from './abilities';
 import { ACHIEVEMENTS, type LifetimeSnapshot } from './achievements';
 import { BOONS } from './boons';
 import { CURSES } from './curses';
@@ -24,7 +23,6 @@ function expectUniqueIds(items: readonly { id: string }[]): void {
 
 describe('ids are unique', () => {
   it('cards', () => expectUniqueIds(SKILL_CARDS));
-  it('gifts', () => expectUniqueIds(ABILITIES));
   it('mutations', () => expectUniqueIds(MUTATIONS));
   it('boons', () => expectUniqueIds(BOONS));
   it('curses', () => expectUniqueIds(CURSES));
@@ -147,29 +145,6 @@ describe('mutations', () => {
         expect(count).toBeGreaterThanOrEqual(0);
       }
     }
-  });
-});
-
-/**
- * Gifts are the one thing the player aims by hand, and every number on them is
- * promised on the choice screen before it is picked. A gift whose windup outlasts its
- * cooldown, or whose reach is shorter than its own blast, would read as broken rather
- * than as a trade-off.
- */
-describe('gifts of the abyss', () => {
-  it('all last long enough to be cast at least twice', () => {
-    for (const gift of ABILITIES) {
-      expect(gift.cooldown).toBeGreaterThan(0);
-      expect(gift.duration).toBeGreaterThanOrEqual(gift.cooldown * 2);
-    }
-  });
-
-  it('never take longer to land than to recharge', () => {
-    for (const gift of ABILITIES) expect(gift.windup).toBeLessThan(gift.cooldown);
-  });
-
-  it('reach further than they splash', () => {
-    for (const gift of ABILITIES) expect(gift.range).toBeGreaterThan(gift.radius);
   });
 });
 

@@ -18,7 +18,6 @@ export type ActionName =
   | 'left'
   | 'right'
   | 'dash'
-  | 'ability'
   | 'pause'
   | 'stats'
   | 'confirm'
@@ -33,15 +32,7 @@ export type ActionName =
  * driven, and letting those be moved onto a key the menu also uses would leave a
  * player unable to reach the screen that would let them undo it.
  */
-export const REBINDABLE: readonly ActionName[] = [
-  'up',
-  'down',
-  'left',
-  'right',
-  'dash',
-  'ability',
-  'stats',
-];
+export const REBINDABLE: readonly ActionName[] = ['up', 'down', 'left', 'right', 'dash', 'stats'];
 
 export const DEFAULT_BINDINGS: Readonly<Record<string, ActionName>> = {
   KeyW: 'up',
@@ -54,7 +45,6 @@ export const DEFAULT_BINDINGS: Readonly<Record<string, ActionName>> = {
   ArrowRight: 'right',
   Space: 'dash',
   ShiftLeft: 'dash',
-  KeyE: 'ability',
   Escape: 'pause',
   Tab: 'stats',
   Enter: 'confirm',
@@ -121,8 +111,6 @@ export class Input {
   private touchSeen = false;
   private touchEnabled = false;
   private touchMode: TouchMode = 'ui';
-  /** Whether the gift button is part of the layout right now. */
-  private touchHasAbility = false;
   private layout: TouchLayout = touchLayout(0, 0);
 
   /** The touch steering the monster, if any, with where it landed and where it is now. */
@@ -218,7 +206,7 @@ export class Input {
       this.touchSeen = true;
 
       const bounds = this.target.getBoundingClientRect();
-      this.layout = touchLayout(bounds.width, bounds.height, this.touchHasAbility);
+      this.layout = touchLayout(bounds.width, bounds.height);
 
       for (const touch of Array.from(e.changedTouches)) {
         const at = localOf(touch, bounds);
@@ -357,8 +345,7 @@ export class Input {
    * live is a player setting, and whether a touch is steering or clicking depends on
    * which screen is open. This class has no business knowing about either.
    */
-  setTouchContext(enabled: boolean, mode: TouchMode, hasAbility = false): void {
-    this.touchHasAbility = hasAbility;
+  setTouchContext(enabled: boolean, mode: TouchMode): void {
     if (mode !== this.touchMode || (this.touchEnabled && !enabled)) {
       // A finger mid-drag when a menu opens must not keep steering behind it — and,
       // worse, must not still be steering when the menu closes, which would leave the
