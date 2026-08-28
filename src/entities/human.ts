@@ -3,6 +3,7 @@ import { type StatusApplication } from '../combat/status';
 import { angleDelta, clamp, damp, dist2, TAU } from '../core/math';
 import { t } from '../i18n';
 import type { World } from '../world/world';
+import type { Building } from './building';
 import { Combatant, type DeathContext } from './entity';
 
 export type HumanRole = 'civilian' | 'melee' | 'ranged' | 'support' | 'turret' | 'boss';
@@ -289,8 +290,11 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     speed: 0,
     radius: 16,
     damage: [{ type: 'physical', amount: 38 }],
-    attackRange: 620,
-    preferredRange: 620,
+    // Kept within the camera's visible half-extent (see render/renderer.ts) so a
+    // shot never comes from off-screen — a stationary unit that can't be seen
+    // coming reads as unfair, not as a threat worth respecting.
+    attackRange: 440,
+    preferredRange: 440,
     attackCooldown: 3.2,
     windup: 1.2,
     recover: 0.8,
@@ -357,8 +361,10 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     speed: 0,
     radius: 18,
     damage: [{ type: 'physical', amount: 44 }],
-    attackRange: 680,
-    preferredRange: 680,
+    // See ballista's attackRange comment above — same reasoning, tuned slightly
+    // higher since this one is meant to hit harder from the stronger structure.
+    attackRange: 480,
+    preferredRange: 480,
     attackCooldown: 3,
     windup: 1.1,
     recover: 0.7,
@@ -553,6 +559,14 @@ export class Human extends Combatant {
   private specialIndex = 0;
 
   untargetable = false;
+
+  /**
+   * The tower/wall this unit is stationed on, for turrets paired with a watchtower
+   * or stronghold. While it stands, hits meant for this unit are redirected to the
+   * structure instead — break the wall before the archer on it is actually
+   * vulnerable. Cleared automatically once the structure falls (see `Projectile`).
+   */
+  mountedOn: Building | null = null;
 
   constructor(id: HumanId, x: number, y: number, tier: number) {
     super();
@@ -1470,6 +1484,19 @@ export class Human extends Combatant {
 
   // ---- rendering -----------------------------------------------------------
 
+  /**
+   * How far above the ground a wall-mounted defender's platform sits.
+   *
+   * Scaled to the tower's own footprint so the unit visually reaches parapet
+   * height instead of floating a fixed, tower-size-agnostic amount above the
+   * ground next to it — a watchtower and a much taller stronghold shouldn't
+   * raise their defender by the same few pixels.
+   */
+  private wallStandHeight(): number {
+    const towerH = this.mountedOn?.rect.h ?? 0;
+    return clamp(towerH * 0.45, 22, 60);
+  }
+
   override draw(ctx: CanvasRenderingContext2D, world: World): void {
     const a = this.archetype;
     const bob = Math.sin(this.stride) * 2;
@@ -1500,6 +1527,10 @@ export class Human extends Combatant {
       ctx.fill();
       ctx.restore();
     }
+
+    // A defender shielded by its tower stands on the parapet, not the ground —
+    // the shadow above stays put so the platform actually reads as height.
+    if (this.mountedOn?.alive) ctx.translate(0, -this.wallStandHeight());
 
     ctx.translate(0, bob - this.radius * 0.4);
     ctx.rotate(lean);
@@ -1784,6 +1815,7 @@ export class Human extends Combatant {
   private drawOverlays(ctx: CanvasRenderingContext2D, world: World): void {
     const a = this.archetype;
     const isBoss = a.role === 'boss';
+    const mountY = this.y - (this.mountedOn?.alive ? this.wallStandHeight() : 0);
 
     // Health bar, only once wounded (or always for the boss).
     if (this.hp < this.maxHp || isBoss) {
@@ -1792,7 +1824,7 @@ export class Human extends Combatant {
       const y = -this.radius * (isBoss ? 3.4 : 2.4);
 
       ctx.save();
-      ctx.translate(this.x, this.y);
+      ctx.translate(this.x, mountY);
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(-w / 2 - 1, y - 1, w + 2, h + 2);
       ctx.fillStyle = isBoss ? '#c0343c' : '#a8232a';
@@ -1803,7 +1835,7 @@ export class Human extends Combatant {
     // Wind-up telegraph: a growing arc in the attack direction.
     if (this.state === 'windup') {
       ctx.save();
-      ctx.translate(this.x, this.y);
+      ctx.translate(this.x, mountY);
       ctx.rotate(this.facing);
       ctx.globalAlpha = 0.25 + this.windupProgress * 0.5;
       ctx.strokeStyle = a.role === 'support' || isBoss ? '#ffe9a8' : '#ff6b6b';
@@ -1819,7 +1851,7 @@ export class Human extends Combatant {
     // Panic marker so the player can read who is about to break and run.
     if (this.panic > 0.5 && !isBoss) {
       ctx.save();
-      ctx.translate(this.x, this.y - this.radius * 2.9);
+      ctx.translate(this.x, mountY - this.radius * 2.9);
       ctx.globalAlpha = clamp((this.panic - 0.5) * 2, 0, 1);
       ctx.fillStyle = '#e8e2d4';
       ctx.font = 'bold 13px Georgia, serif';

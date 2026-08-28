@@ -578,7 +578,14 @@ export class Game {
     this.world.markSolidsDirty();
 
     for (const spawn of plan.spawns) {
-      this.world.humans.push(new Human(spawn.id, spawn.x, spawn.y, index));
+      const human = new Human(spawn.id, spawn.x, spawn.y, index);
+      // Turrets built with `mountedBuildingIndex` (roomgen.ts) are shielded by that
+      // tower until it falls — the buildings loop above fills `world.buildings` in
+      // the same order as `plan.buildings`, so the index still lines up here.
+      if (spawn.mountedBuildingIndex !== undefined) {
+        human.mountedOn = this.world.buildings[spawn.mountedBuildingIndex] ?? null;
+      }
+      this.world.humans.push(human);
     }
 
     for (const relic of plan.relics) {

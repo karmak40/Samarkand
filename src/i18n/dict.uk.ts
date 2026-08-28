@@ -279,7 +279,7 @@ export const UK: Record<string, string> = {
   'skill.iron-carapace.description': '+30 броні, шипи відбивають 25% отриманої шкоди.',
 
   'skill.razer.name': 'Руйнівник',
-  'skill.razer.description': 'Снаряди зносять будівлі. Кожна зруйнована будівля дає +2% шкоди до кінця забігу.',
+  'skill.razer.description': 'Снаряди зносять будівлі повністю, а не просто тріщать їх. Кожна зруйнована будівля дає +2% шкоди до кінця забігу.',
   'skill.terror-aura.name': 'Аура жаху',
   'skill.terror-aura.description': 'Слабкі вороги поруч із тобою постійно в паніці.',
   'skill.glass-cannon.name': 'Крихка лють',

@@ -33,7 +33,11 @@ export interface ProjectileConfig {
   onHit?: (target: Combatant, world: World, projectile: Projectile) => void;
   /** Runs when the projectile stops for any reason. */
   onExpire?: (world: World, projectile: Projectile) => void;
-  /** Player projectiles that raze structures on contact. */
+  /**
+   * Full structural damage on contact, instead of the reduced baseline every monster
+   * shot does. Granted by the Razer legendary — everyone else still chips at walls,
+   * just slower.
+   */
   damagesBuildings?: boolean;
   /** Buildings do not stop this projectile (ghost shots). */
   ignoresWalls?: boolean;
@@ -44,6 +48,9 @@ export interface ProjectileConfig {
 
 /** How many trail samples a projectile keeps. */
 const TRAIL_LENGTH = 7;
+
+/** Fraction of a hit's damage a plain shot deals to a building, absent Razer. */
+const BASELINE_BUILDING_DAMAGE = 0.5;
 
 /**
  * A moving damage source. One class covers monster spit, arrows, crossbow bolts
@@ -150,6 +157,34 @@ export class Projectile extends Entity {
         if (this.hitIds.has(human.id) || !human.alive) continue;
         const reach = this.radius + human.radius;
         if (dist2(this.x, this.y, human.x, human.y) > reach * reach) continue;
+
+        // A defender still standing on its tower is shielded by it: the hit cracks
+        // the structure instead of the archer, exactly like hitting a plain wall
+        // below. Once the tower falls this stops matching and combat is normal.
+        if (human.mountedOn?.alive) {
+          let total = 0;
+          for (const p of this.packets) total += p.amount;
+          human.mountedOn.takeStructuralDamage(
+            total * (this.config.damagesBuildings ? 1 : BASELINE_BUILDING_DAMAGE),
+            world,
+          );
+          world.particles.emit({
+            count: 4,
+            x: this.x,
+            y: this.y,
+            color: '#c9c2b2',
+            shape: 'shard',
+            speed: [40, 140],
+            size: [1.5, 3.2],
+            life: [0.15, 0.32],
+            angle: this.angle + Math.PI,
+            spread: 1.1,
+          });
+          if (this.faction === 'monster') world.shotOutcomes.hitBuilding++;
+          this.expire(world);
+          return true;
+        }
+
         if (this.hit(human, world)) return true;
       }
     } else {
@@ -168,10 +203,13 @@ export class Projectile extends Entity {
         if (!building.blocksSight) continue;
         if (!circleRectOverlap(this.x, this.y, this.radius, building.rect)) continue;
 
-        if (this.config.damagesBuildings) {
+        // The monster's own shots always crack a wall a little — razing settlements
+        // is the whole point of the run, not a reward locked behind one legendary.
+        // Razer just turns every hit into the real thing instead of a graze.
+        if (this.faction === 'monster') {
           let total = 0;
           for (const p of this.packets) total += p.amount;
-          building.takeStructuralDamage(total, world);
+          building.takeStructuralDamage(total * (this.config.damagesBuildings ? 1 : BASELINE_BUILDING_DAMAGE), world);
         }
         if (this.faction === 'monster') world.shotOutcomes.hitBuilding++;
         this.expire(world);

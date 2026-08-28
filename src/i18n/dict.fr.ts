@@ -279,7 +279,7 @@ export const FR: Record<string, string> = {
   'skill.iron-carapace.description': '+30 d’armure, les épines renvoient 25% des dégâts subis.',
 
   'skill.razer.name': 'Destructeur',
-  'skill.razer.description': 'Les projectiles détruisent les bâtiments. Chacun rasé accorde +2% de dégâts pour le reste de la partie.',
+  'skill.razer.description': "Les projectiles rasent les bâtiments d'un coup au lieu de simplement les fissurer. Chacun détruit accorde +2% de dégâts pour le reste de la partie.",
   'skill.terror-aura.name': 'Aura de terreur',
   'skill.terror-aura.description': 'Les ennemis faibles à proximité restent en panique permanente.',
   'skill.glass-cannon.name': 'Canon de verre',

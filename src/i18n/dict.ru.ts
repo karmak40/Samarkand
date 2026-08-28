@@ -279,7 +279,7 @@ export const RU: Record<string, string> = {
   'skill.iron-carapace.description': '+30 брони, шипы отражают 25% полученного урона.',
 
   'skill.razer.name': 'Разрушитель',
-  'skill.razer.description': 'Снаряды сносят постройки. Каждое разрушенное здание даёт +2% урона до конца забега.',
+  'skill.razer.description': 'Снаряды сносят постройки полностью, а не просто трескают их. Каждое разрушенное здание даёт +2% урона до конца забега.',
   'skill.terror-aura.name': 'Аура ужаса',
   'skill.terror-aura.description': 'Слабые враги рядом с тобой постоянно в панике.',
   'skill.glass-cannon.name': 'Хрупкая ярость',

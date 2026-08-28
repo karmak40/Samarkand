@@ -25,6 +25,8 @@ export interface PlannedSpawn {
   id: HumanId;
   x: number;
   y: number;
+  /** Index into `RoomPlan.buildings`, for a turret shielded by its own tower. */
+  mountedBuildingIndex?: number;
 }
 
 export interface RoomPlan {
@@ -503,18 +505,20 @@ function planSpawns(
   });
 
   // Watchtowers field a ballista each, and a stronghold fields a siege engine —
-  // that's what makes either worth destroying.
-  //
-  // Placement is critical: neither turret can move, so if it ends up in a
-  // building's shadow neither side can ever see the other and the room becomes
-  // uncompletable. It is therefore stood off in open ground with a clear line to
-  // the arena centre.
-  for (const building of buildings) {
+  // shielded by the tower it stands on, so it's the tower that's actually worth
+  // destroying. It's stood right against the wall facing the plaza, which both
+  // sells "on the wall" and guarantees the tower itself can never block its own
+  // sight line. If that spot is somehow blocked (a dense building cluster), fall
+  // back to the old open-ground placement rather than dropping the unit — it
+  // stays shielded by the same tower either way, just visually a step removed.
+  for (let i = 0; i < buildings.length; i++) {
+    const building = buildings[i]!;
     const turretId = building.kind === 'watchtower' ? 'ballista' : building.kind === 'stronghold' ? 'siegeEngine' : null;
     if (!turretId) continue;
-    const spot = placeTurret(building.rect, bounds, buildings, rng);
+    const radius = HUMAN_ARCHETYPES[turretId].radius;
+    const spot = placeOnWall(building.rect, bounds, buildings, radius) ?? placeTurret(building.rect, bounds, buildings, rng);
     if (!spot) continue;
-    spawns.push({ id: turretId, x: spot.x, y: spot.y });
+    spawns.push({ id: turretId, x: spot.x, y: spot.y, mountedBuildingIndex: i });
     budget -= SPAWN_COST[turretId] * 0.5;
   }
 
@@ -594,6 +598,39 @@ function placementFor(
 
   // Fallback: centre of the arena is always valid enough to avoid a failed spawn.
   return { x: bounds.x + bounds.w / 2, y: bounds.y + bounds.h / 2 };
+}
+
+/**
+ * Stand a turret right against its own tower, on the face closest to the plaza.
+ *
+ * Whichever axis points more directly at the arena centre decides which edge —
+ * that's also the edge a rect can never occlude sight to a point sitting on it, so
+ * this alone is enough to guarantee the defender stays reachable without the
+ * spiral search `placeTurret` needs for open-ground placement.
+ */
+function placeOnWall(
+  tower: Rect,
+  bounds: Rect,
+  buildings: PlannedBuilding[],
+  unitRadius: number,
+): Vec2 | null {
+  const cx = bounds.x + bounds.w / 2;
+  const cy = bounds.y + bounds.h / 2;
+  const towerCx = tower.x + tower.w / 2;
+  const towerCy = tower.y + tower.h / 2;
+  const dx = cx - towerCx;
+  const dy = cy - towerCy;
+  const gap = unitRadius + 6;
+
+  const spot =
+    Math.abs(dx) / tower.w > Math.abs(dy) / tower.h
+      ? { x: towerCx + Math.sign(dx || 1) * (tower.w / 2 + gap), y: towerCy }
+      : { x: towerCx, y: towerCy + Math.sign(dy || 1) * (tower.h / 2 + gap) };
+
+  const x = clamp(spot.x, bounds.x + 40, bounds.x + bounds.w - 40);
+  const y = clamp(spot.y, bounds.y + 40, bounds.y + bounds.h - 40);
+  if (insideAnyBuilding(x, y, buildings)) return null;
+  return { x, y };
 }
 
 /**

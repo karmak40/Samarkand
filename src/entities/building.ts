@@ -107,7 +107,9 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   watchtower: {
     kind: 'watchtower',
     get name() { return t('building.watchtower.name'); },
-    hp: 340,
+    // Lower than before: destroying it is now mandatory (it's what shields its
+    // ballista), not optional loot like every other building kind.
+    hp: 200,
     souls: 14,
     occupancy: [1, 2],
     wallColor: '#6a625a',
@@ -119,7 +121,9 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
   stronghold: {
     kind: 'stronghold',
     get name() { return t('building.stronghold.name'); },
-    hp: 620,
+    // Lower than before: destroying it is now mandatory (it's what shields its
+    // siege engine), not optional loot like every other building kind.
+    hp: 420,
     souls: 26,
     occupancy: [1, 3],
     wallColor: '#8a7a5c',
@@ -457,16 +461,20 @@ export class Building extends Entity {
       ctx.stroke();
     }
 
-    if (this.profile.kind === 'stronghold') {
-      // Crenellations along the wall top, and a corner turret rising above the
-      // roofline — what makes this read as a castle rather than a bigger house,
-      // since the siege engine it fields never leaves that turret.
+    if (this.profile.kind === 'stronghold' || this.profile.kind === 'watchtower') {
+      // Crenellations along the wall top — the parapet a shielded defender stands
+      // behind, on both towers. The stronghold gets an extra corner turret below.
       ctx.fillStyle = p.wallColor;
       const merlonW = 10;
       for (let mx = -w / 2 + 4; mx < w / 2 - 4; mx += merlonW * 1.8) {
         ctx.fillRect(mx, -h / 2 - 6, merlonW, 8);
       }
+    }
 
+    if (this.profile.kind === 'stronghold') {
+      // A corner turret rising above the roofline — what makes this read as a
+      // castle rather than a bigger house, since the siege engine it fields never
+      // leaves that turret.
       const turretX = w / 2 - 16;
       const turretTop = -h / 2 - h * 0.62 - 14;
       ctx.fillStyle = p.wallColor;

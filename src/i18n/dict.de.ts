@@ -279,7 +279,7 @@ export const DE: Record<string, string> = {
   'skill.iron-carapace.description': '+30 Rüstung, Dornen reflektieren 25% des erlittenen Schadens.',
 
   'skill.razer.name': 'Zerstörer',
-  'skill.razer.description': 'Geschosse reißen Gebäude nieder. Jedes zerstörte Gebäude gibt +2% Schaden für den Rest des Laufs.',
+  'skill.razer.description': 'Geschosse reißen Gebäude vollständig nieder, statt sie nur anzukratzen. Jedes zerstörte Gebäude gibt +2% Schaden für den Rest des Laufs.',
   'skill.terror-aura.name': 'Aura des Schreckens',
   'skill.terror-aura.description': 'Schwache Feinde in deiner Nähe bleiben dauerhaft in Panik.',
   'skill.glass-cannon.name': 'Gläserne Kanone',

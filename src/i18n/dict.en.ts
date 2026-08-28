@@ -279,7 +279,7 @@ export const EN: Record<string, string> = {
   'skill.iron-carapace.description': '+30 armour, thorns reflect 25% of damage taken.',
 
   'skill.razer.name': 'Razer',
-  'skill.razer.description': 'Projectiles tear down buildings. Each one razed grants +2% damage for the rest of the run.',
+  'skill.razer.description': 'Projectiles raze buildings outright instead of just cracking them. Each one destroyed grants +2% damage for the rest of the run.',
   'skill.terror-aura.name': 'Aura of Terror',
   'skill.terror-aura.description': 'Weak enemies near you stay permanently panicked.',
   'skill.glass-cannon.name': 'Glass Cannon',
