@@ -1,3 +1,4 @@
+import { STATUS_DEFS } from '../balance';
 import { type DamagePacket, type DamageType } from './damage';
 import { t } from '../i18n';
 
@@ -25,93 +26,8 @@ export interface StatusDef {
   readonly maxDuration: number;
   readonly description: string;
 }
-
-export const STATUS_DEFS: Record<StatusId, StatusDef> = {
-  burn: {
-    id: 'burn',
-    get name() { return t('status.burn.name'); },
-    color: '#ff7b31',
-    maxStacks: 10,
-    dotType: 'fire',
-    tickInterval: 0.4,
-    maxDuration: 8,
-    get description() { return t('status.burn.description'); },
-  },
-  poison: {
-    id: 'poison',
-    get name() { return t('status.poison.name'); },
-    color: '#8ed44f',
-    maxStacks: 20,
-    dotType: 'poison',
-    tickInterval: 0.5,
-    maxDuration: 14,
-    get description() { return t('status.poison.description'); },
-  },
-  bleed: {
-    id: 'bleed',
-    get name() { return t('status.bleed.name'); },
-    color: '#c0343c',
-    maxStacks: 8,
-    dotType: 'physical',
-    tickInterval: 0.5,
-    maxDuration: 10,
-    get description() { return t('status.bleed.description'); },
-  },
-  chill: {
-    id: 'chill',
-    get name() { return t('status.chill.name'); },
-    color: '#6fd0ff',
-    maxStacks: 10,
-    tickInterval: 0,
-    maxDuration: 6,
-    get description() { return t('status.chill.description'); },
-  },
-  freeze: {
-    id: 'freeze',
-    get name() { return t('status.freeze.name'); },
-    color: '#a9e8ff',
-    maxStacks: 1,
-    tickInterval: 0,
-    maxDuration: 3,
-    get description() { return t('status.freeze.description'); },
-  },
-  shock: {
-    id: 'shock',
-    get name() { return t('status.shock.name'); },
-    color: '#ffe45c',
-    maxStacks: 5,
-    tickInterval: 0,
-    maxDuration: 5,
-    get description() { return t('status.shock.description'); },
-  },
-  curse: {
-    id: 'curse',
-    get name() { return t('status.curse.name'); },
-    color: '#b06cff',
-    maxStacks: 5,
-    tickInterval: 0,
-    maxDuration: 8,
-    get description() { return t('status.curse.description'); },
-  },
-  fear: {
-    id: 'fear',
-    get name() { return t('status.fear.name'); },
-    color: '#9b8fb0',
-    maxStacks: 1,
-    tickInterval: 0,
-    maxDuration: 5,
-    get description() { return t('status.fear.description'); },
-  },
-  weaken: {
-    id: 'weaken',
-    get name() { return t('status.weaken.name'); },
-    color: '#7d8a99',
-    maxStacks: 5,
-    tickInterval: 0,
-    maxDuration: 8,
-    get description() { return t('status.weaken.description'); },
-  },
-};
+// The actual per-status colours, stack caps and DoT tuning live in ../balance now, re-exporting keeps every existing import of STATUS_DEFS from this file working unchanged.
+export { STATUS_DEFS };
 
 export interface StatusInstance {
   id: StatusId;

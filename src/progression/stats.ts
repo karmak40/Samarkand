@@ -1,3 +1,4 @@
+import { BASE_STATS, STAT_CEILINGS, STAT_FLOORS } from '../balance';
 import { type DamageType, type PlayerDamageType } from '../combat/damage';
 import { t } from '../i18n';
 
@@ -141,102 +142,11 @@ export const PERCENT_STATS = new Set<StatKey>([
 /** Stats where a lower value is an improvement (used for green/red colouring). */
 export const LOWER_IS_BETTER = new Set<StatKey>(['dashCooldown', 'spread']);
 
-export const BASE_STATS: Record<StatKey, number> = {
-  maxHp: 120,
-  hpRegen: 0,
-  lifesteal: 0,
-  armor: 0,
-  dodge: 0,
-  thorns: 0,
-  shieldOnRoom: 0,
-
-  moveSpeed: 210,
-  dashCharges: 1,
-  dashCooldown: 3,
-  dashDistance: 150,
-
-  damage: 16,
-  attackSpeed: 1.7,
-  critChance: 0.05,
-  critDamage: 0.5,
-  armorPen: 0,
-  knockback: 60,
-  executeThreshold: 0,
-
-  projectiles: 1,
-  projectileSpeed: 620,
-  projectileSize: 1,
-  pierce: 0,
-  bounce: 0,
-  range: 420,
-  spread: 0.06,
-
-  areaSize: 1,
-  statusPower: 1,
-  statusDuration: 1,
-  statusChance: 1,
-
-  pickupRadius: 110,
-  soulGain: 1,
-  healingReceived: 1,
-
-  dmgPhysical: 0,
-  dmgFire: 0,
-  dmgPoison: 0,
-  dmgFrost: 0,
-  dmgLightning: 0,
-  dmgUnholy: 0,
-
-  convFire: 0,
-  convPoison: 0,
-  convFrost: 0,
-  convLightning: 0,
-  convUnholy: 0,
-
-  resPhysical: 0,
-  resFire: 0,
-  resPoison: 0,
-  resFrost: 0,
-  resLightning: 0,
-  resUnholy: 0,
-  resHoly: 0,
-};
+// Base values, floors and ceilings for every stat live in `../balance` now --
+// re-exporting keeps every existing `from './stats'` import working unchanged.
+export { BASE_STATS, STAT_FLOORS, STAT_CEILINGS };
 
 const STAT_KEYS = Object.keys(BASE_STATS) as StatKey[];
-
-/** Stats that must never go below these values, whatever the modifiers say. */
-const STAT_FLOORS: Partial<Record<StatKey, number>> = {
-  maxHp: 1,
-  moveSpeed: 40,
-  damage: 1,
-  attackSpeed: 0.2,
-  projectiles: 1,
-  projectileSpeed: 100,
-  projectileSize: 0.3,
-  range: 80,
-  dashCooldown: 0.3,
-  spread: 0,
-  areaSize: 0.2,
-  healingReceived: 0,
-};
-
-/** Hard ceilings on stats that would break the game if stacked without limit. */
-const STAT_CEILINGS: Partial<Record<StatKey, number>> = {
-  dodge: 0.6,
-  critChance: 1,
-  armorPen: 0.9,
-  lifesteal: 0.6,
-  executeThreshold: 0.35,
-  resPhysical: 0.8,
-  resFire: 0.8,
-  resPoison: 0.8,
-  resFrost: 0.8,
-  resLightning: 0.8,
-  resUnholy: 0.8,
-  resHoly: 0.8,
-  attackSpeed: 12,
-  projectiles: 16,
-};
 
 const CONVERSION_KEY: Record<Exclude<PlayerDamageType, 'physical'>, StatKey> = {
   fire: 'convFire',

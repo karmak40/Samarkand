@@ -1,3 +1,4 @@
+import { SPAWN_COST } from '../balance';
 import { type BuildingKind } from '../entities/building';
 import { BOSS_IDS, HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
 import { clamp, type Rect, rectsOverlap, segmentRectHit, TAU, type Vec2 } from '../core/math';
@@ -127,25 +128,6 @@ const KIND_CONFIG: Record<RoomKind, KindConfig> = {
     palisade: true,
     enemyBudgetScale: 1.4,
   },
-};
-
-/** Point cost of each unit when filling the room's spawn budget. */
-const SPAWN_COST: Record<HumanId, number> = {
-  peasant: 1,
-  militia: 2,
-  archer: 3,
-  torchbearer: 3.5,
-  spearman: 4,
-  crossbowman: 5,
-  priest: 6,
-  knight: 9,
-  ballista: 7,
-  rider: 5,
-  siegeEngine: 10,
-  inquisitor: 0,
-  warlord: 0,
-  pyromancer: 0,
-  khagan: 0,
 };
 
 /**
@@ -501,7 +483,7 @@ function planSpawns(
 
   const available = (Object.keys(HUMAN_ARCHETYPES) as HumanId[]).filter((id) => {
     const a = HUMAN_ARCHETYPES[id];
-    return a.spawnWeight > 0 && a.minDepth <= index && (a.minBiome ?? 1) <= biome;
+    return a.enabled && a.spawnWeight > 0 && a.minDepth <= index && (a.minBiome ?? 1) <= biome;
   });
 
   // Watchtowers field a ballista each, and a stronghold fields a siege engine —
@@ -514,7 +496,7 @@ function planSpawns(
   for (let i = 0; i < buildings.length; i++) {
     const building = buildings[i]!;
     const turretId = building.kind === 'watchtower' ? 'ballista' : building.kind === 'stronghold' ? 'siegeEngine' : null;
-    if (!turretId) continue;
+    if (!turretId || !HUMAN_ARCHETYPES[turretId].enabled) continue;
     const radius = HUMAN_ARCHETYPES[turretId].radius;
     const spot = placeOnWall(building.rect, bounds, buildings, radius) ?? placeTurret(building.rect, bounds, buildings, rng);
     if (!spot) continue;

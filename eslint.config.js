@@ -13,10 +13,10 @@ import tseslint from 'typescript-eslint';
  */
 export default tseslint.config(
   {
-    // `android/` is the generated native project — Capacitor's own Java/Gradle files
-    // plus a copy of `dist` it keeps in sync on every `cap sync`. None of it is
-    // source this repo owns.
-    ignores: ['dist/**', 'dev/shots/**', 'node_modules/**', 'android/**'],
+    // `android/` and `ios/` are the generated native projects — Capacitor's own
+    // Java/Gradle and Xcode/Swift files, plus a copy of `dist` each keeps in sync on
+    // every `cap sync`. None of it is source this repo owns.
+    ignores: ['dist/**', 'dev/shots/**', 'node_modules/**', 'android/**', 'ios/**'],
   },
 
   js.configs.recommended,

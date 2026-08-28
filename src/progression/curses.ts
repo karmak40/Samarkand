@@ -1,3 +1,4 @@
+import { CURSES } from '../balance';
 import { RNG } from '../core/rng';
 import { t } from '../i18n';
 import { type RawModifier } from './skills';
@@ -12,69 +13,16 @@ import { type StatSheet } from './stats';
  */
 export interface Curse {
   readonly id: string;
+  /** Balance-file toggle: false removes this curse from the offer pool entirely. */
+  readonly enabled: boolean;
   readonly modifiers: readonly RawModifier[];
   /** Relative chance of being offered. */
   readonly weight: number;
 }
 
-export const CURSES: readonly Curse[] = [
-  {
-    id: 'brittleBones',
-    modifiers: [{ key: 'maxHp', mult: -0.22 }],
-    weight: 12,
-  },
-  {
-    id: 'leadLimbs',
-    modifiers: [{ key: 'moveSpeed', mult: -0.16 }],
-    weight: 12,
-  },
-  {
-    id: 'torpor',
-    modifiers: [{ key: 'attackSpeed', mult: -0.16 }],
-    weight: 12,
-  },
-  {
-    id: 'cloudedEyes',
-    modifiers: [
-      { key: 'critChance', flat: -0.08 },
-      { key: 'range', mult: -0.15 },
-    ],
-    weight: 11,
-  },
-  {
-    id: 'rottingFlesh',
-    modifiers: [
-      { key: 'healingReceived', mult: -0.45 },
-      { key: 'hpRegen', flat: -1.5 },
-    ],
-    weight: 10,
-  },
-  {
-    id: 'peeledScales',
-    modifiers: [{ key: 'armor', flat: -30 }],
-    weight: 11,
-  },
-  {
-    id: 'palsy',
-    modifiers: [{ key: 'spread', mult: 0.8 }],
-    weight: 10,
-  },
-  {
-    id: 'starvedDark',
-    modifiers: [{ key: 'soulGain', mult: -0.28 }],
-    weight: 10,
-  },
-  {
-    id: 'stiffHeart',
-    modifiers: [{ key: 'dashCooldown', mult: 0.6 }],
-    weight: 10,
-  },
-  {
-    id: 'dullSenses',
-    modifiers: [{ key: 'pickupRadius', mult: -0.4 }],
-    weight: 9,
-  },
-];
+// The actual curse roster lives in `../balance` now — re-exporting keeps every
+// existing `from './curses'` import working unchanged.
+export { CURSES };
 
 const CURSES_BY_ID = new Map(CURSES.map((c) => [c.id, c]));
 
@@ -92,8 +40,9 @@ export function curseDescription(curse: Curse): string {
 
 /** Draw curses the player is not already carrying, so every offer bites. */
 export function rollCurses(rng: RNG, taken: ReadonlySet<string>, count: number): Curse[] {
-  const pool = CURSES.filter((c) => !taken.has(c.id));
-  const source = pool.length >= count ? pool : CURSES;
+  const available = CURSES.filter((c) => c.enabled);
+  const pool = available.filter((c) => !taken.has(c.id));
+  const source = pool.length >= count ? pool : available;
   const picked: Curse[] = [];
   const remaining = source.slice();
 

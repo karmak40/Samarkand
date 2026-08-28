@@ -1,6 +1,6 @@
+import { BUILDING_BURN_RATE_PER_SECOND, BUILDING_PROFILES } from '../balance';
 import { clamp, type Rect, TAU } from '../core/math';
 import { cosmeticRng, RNG } from '../core/rng';
-import { t } from '../i18n';
 import type { World } from '../world/world';
 import { Entity } from './entity';
 
@@ -42,157 +42,9 @@ export interface BuildingProfile {
   readonly relicChance: number;
   readonly indestructible?: boolean;
 }
-
-export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
-  hut: {
-    kind: 'hut',
-    get name() { return t('building.hut.name'); },
-    hp: 120,
-    souls: 3,
-    occupancy: [0, 2],
-    wallColor: '#5d4c3a',
-    roofColor: '#7a5c34',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.04,
-  },
-  house: {
-    kind: 'house',
-    get name() { return t('building.house.name'); },
-    hp: 220,
-    souls: 6,
-    occupancy: [1, 3],
-    wallColor: '#6b5741',
-    roofColor: '#8a4a32',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.07,
-  },
-  longhouse: {
-    kind: 'longhouse',
-    get name() { return t('building.longhouse.name'); },
-    hp: 400,
-    souls: 12,
-    occupancy: [2, 5],
-    wallColor: '#71604a',
-    roofColor: '#6d4230',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.14,
-  },
-  granary: {
-    kind: 'granary',
-    get name() { return t('building.granary.name'); },
-    hp: 180,
-    souls: 5,
-    occupancy: [0, 1],
-    wallColor: '#7d6a4c',
-    roofColor: '#9a7b3f',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.1,
-  },
-  chapel: {
-    kind: 'chapel',
-    get name() { return t('building.chapel.name'); },
-    hp: 520,
-    souls: 20,
-    occupancy: [2, 4],
-    wallColor: '#8b8579',
-    roofColor: '#4a4f5c',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.3,
-  },
-  watchtower: {
-    kind: 'watchtower',
-    get name() { return t('building.watchtower.name'); },
-    // Lower than before: destroying it is now mandatory (it's what shields its
-    // ballista), not optional loot like every other building kind.
-    hp: 200,
-    souls: 14,
-    occupancy: [1, 2],
-    wallColor: '#6a625a',
-    roofColor: '#3f3a35',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.12,
-  },
-  stronghold: {
-    kind: 'stronghold',
-    get name() { return t('building.stronghold.name'); },
-    // Lower than before: destroying it is now mandatory (it's what shields its
-    // siege engine), not optional loot like every other building kind.
-    hp: 420,
-    souls: 26,
-    occupancy: [1, 3],
-    wallColor: '#8a7a5c',
-    roofColor: '#5c4c38',
-    hasRoof: true,
-    opaque: true,
-    relicChance: 0.2,
-  },
-  well: {
-    kind: 'well',
-    get name() { return t('building.well.name'); },
-    hp: 160,
-    souls: 2,
-    occupancy: [0, 0],
-    wallColor: '#5f5c58',
-    roofColor: '#4a463f',
-    hasRoof: false,
-    opaque: false,
-    relicChance: 0.02,
-  },
-  wall: {
-    kind: 'wall',
-    get name() { return t('building.wall.name'); },
-    hp: 600,
-    souls: 1,
-    occupancy: [0, 0],
-    wallColor: '#585349',
-    roofColor: '#585349',
-    hasRoof: false,
-    opaque: true,
-    relicChance: 0,
-  },
-  palisade: {
-    kind: 'palisade',
-    get name() { return t('building.palisade.name'); },
-    hp: 260,
-    souls: 1,
-    occupancy: [0, 0],
-    wallColor: '#6a5741',
-    roofColor: '#6a5741',
-    hasRoof: false,
-    opaque: false,
-    relicChance: 0,
-  },
-  cart: {
-    kind: 'cart',
-    get name() { return t('building.cart.name'); },
-    hp: 90,
-    souls: 2,
-    occupancy: [0, 0],
-    wallColor: '#6f5a3e',
-    roofColor: '#5a4830',
-    hasRoof: false,
-    opaque: false,
-    relicChance: 0.03,
-  },
-  stack: {
-    kind: 'stack',
-    get name() { return t('building.stack.name'); },
-    hp: 60,
-    souls: 1,
-    occupancy: [0, 0],
-    wallColor: '#a8913f',
-    roofColor: '#c2a94c',
-    hasRoof: false,
-    opaque: false,
-    relicChance: 0.02,
-  },
-};
+// The actual per-kind numbers live in ../balance now, re-exporting keeps
+// every existing from './building' import working unchanged.
+export { BUILDING_PROFILES };
 
 /**
  * A structure in the settlement. Buildings block movement and line of sight while
@@ -334,8 +186,9 @@ export class Building extends Entity {
 
     if (this.burning > 0 && this.alive) {
       this.burning -= dt;
-      // Fire eats 3% of max HP per second, so a torched village burns down on its own.
-      this.takeStructuralDamage(this.maxHp * 0.03 * dt, world);
+      // Fire eats BUILDING_BURN_RATE_PER_SECOND of max HP per second, so a torched
+      // village burns down on its own.
+      this.takeStructuralDamage(this.maxHp * BUILDING_BURN_RATE_PER_SECOND * dt, world);
 
       if (world.rng.next() < dt * 14) {
         world.particles.emit({

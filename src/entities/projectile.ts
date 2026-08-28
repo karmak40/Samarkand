@@ -1,3 +1,4 @@
+import { BASELINE_BUILDING_DAMAGE } from '../balance';
 import { type DamagePacket } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
 import { angleDelta, circleRectOverlap, dist2, TAU } from '../core/math';
@@ -48,9 +49,6 @@ export interface ProjectileConfig {
 
 /** How many trail samples a projectile keeps. */
 const TRAIL_LENGTH = 7;
-
-/** Fraction of a hit's damage a plain shot deals to a building, absent Razer. */
-const BASELINE_BUILDING_DAMAGE = 0.5;
 
 /**
  * A moving damage source. One class covers monster spit, arrows, crossbow bolts

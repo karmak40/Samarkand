@@ -1,6 +1,7 @@
 import { Ambience } from './audio/ambience';
 import { AudioEngine } from './audio/engine';
 import { SoundBank } from './audio/sfx';
+import { BUILDING_HP_SCALE_PER_ROOM_INDEX } from './balance';
 import { type AdResult, type AdService, SimulatedAdService } from './core/ads';
 import { Camera } from './core/camera';
 import { Input } from './core/input';
@@ -572,7 +573,7 @@ export class Game {
 
     for (const planned of plan.buildings) {
       this.world.buildings.push(
-        new Building(planned.kind, planned.rect, this.world.rng, 1 + index * 0.12),
+        new Building(planned.kind, planned.rect, this.world.rng, 1 + index * BUILDING_HP_SCALE_PER_ROOM_INDEX),
       );
     }
     this.world.markSolidsDirty();

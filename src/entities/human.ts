@@ -1,3 +1,4 @@
+import { ENEMY_TIER_SCALING, HUMAN_ARCHETYPES } from '../balance';
 import { type DamageOptions, type DamagePacket, type DamageResult, type Defenses, type DamageType } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
 import { angleDelta, clamp, damp, dist2, TAU } from '../core/math';
@@ -34,6 +35,8 @@ export interface HumanArchetype {
   readonly id: HumanId;
   readonly name: string;
   readonly role: HumanRole;
+  /** Balance-file toggle: false removes this unit from the random spawn pool. */
+  readonly enabled: boolean;
   readonly hp: number;
   readonly armor: number;
   readonly resist: Partial<Record<DamageType, number>>;
@@ -73,439 +76,10 @@ export interface HumanArchetype {
   readonly courage: number;
 }
 
-const NO_RESIST: Partial<Record<DamageType, number>> = {};
-
-export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
-  peasant: {
-    id: 'peasant',
-    get name() { return t('enemy.peasant.name'); },
-    role: 'civilian',
-    hp: 22,
-    armor: 0,
-    resist: NO_RESIST,
-    speed: 128,
-    radius: 10,
-    damage: [{ type: 'physical', amount: 3 }],
-    attackRange: 26,
-    preferredRange: 26,
-    attackCooldown: 1.6,
-    windup: 0.35,
-    recover: 0.4,
-    souls: 1,
-    knockbackResist: 0.7,
-    tunic: '#9a8460',
-    accent: '#6f5c3f',
-    spawnWeight: 30,
-    minDepth: 0,
-    bloodChance: 0.18,
-    relicChance: 0,
-    courage: 0,
-  },
-  militia: {
-    id: 'militia',
-    get name() { return t('enemy.militia.name'); },
-    role: 'melee',
-    hp: 52,
-    armor: 6,
-    resist: NO_RESIST,
-    speed: 152,
-    radius: 11,
-    damage: [{ type: 'physical', amount: 9 }],
-    attackRange: 34,
-    preferredRange: 34,
-    attackCooldown: 1.1,
-    windup: 0.32,
-    recover: 0.35,
-    souls: 2,
-    knockbackResist: 1,
-    tunic: '#7c6a52',
-    accent: '#b4a583',
-    spawnWeight: 26,
-    minDepth: 0,
-    bloodChance: 0.1,
-    relicChance: 0,
-    courage: 0.5,
-  },
-  archer: {
-    id: 'archer',
-    get name() { return t('enemy.archer.name'); },
-    role: 'ranged',
-    hp: 40,
-    armor: 2,
-    resist: NO_RESIST,
-    speed: 146,
-    radius: 10,
-    damage: [{ type: 'physical', amount: 11 }],
-    attackRange: 400,
-    preferredRange: 280,
-    attackCooldown: 1.7,
-    windup: 0.55,
-    recover: 0.35,
-    souls: 3,
-    knockbackResist: 0.9,
-    tunic: '#5d6b48',
-    accent: '#8a9a68',
-    spawnWeight: 20,
-    minDepth: 0,
-    bloodChance: 0.1,
-    relicChance: 0,
-    courage: 0.35,
-  },
-  spearman: {
-    id: 'spearman',
-    get name() { return t('enemy.spearman.name'); },
-    role: 'melee',
-    hp: 78,
-    armor: 14,
-    resist: NO_RESIST,
-    speed: 138,
-    radius: 12,
-    damage: [{ type: 'physical', amount: 15 }],
-    attackRange: 62,
-    preferredRange: 62,
-    attackCooldown: 1.4,
-    windup: 0.45,
-    recover: 0.45,
-    souls: 4,
-    knockbackResist: 1.4,
-    tunic: '#5a5f6b',
-    accent: '#9aa3b2',
-    spawnWeight: 16,
-    minDepth: 1,
-    bloodChance: 0.12,
-    relicChance: 0.03,
-    courage: 0.7,
-  },
-  crossbowman: {
-    id: 'crossbowman',
-    get name() { return t('enemy.crossbowman.name'); },
-    role: 'ranged',
-    hp: 54,
-    armor: 8,
-    resist: NO_RESIST,
-    speed: 122,
-    radius: 11,
-    damage: [{ type: 'physical', amount: 26 }],
-    attackRange: 460,
-    preferredRange: 330,
-    attackCooldown: 2.6,
-    windup: 0.9,
-    recover: 0.6,
-    souls: 5,
-    knockbackResist: 1.1,
-    tunic: '#4f4a52',
-    accent: '#8d8798',
-    spawnWeight: 12,
-    minDepth: 2,
-    bloodChance: 0.12,
-    relicChance: 0.05,
-    courage: 0.5,
-  },
-  torchbearer: {
-    id: 'torchbearer',
-    get name() { return t('enemy.torchbearer.name'); },
-    role: 'melee',
-    hp: 46,
-    armor: 2,
-    resist: { fire: 0.6 },
-    speed: 168,
-    radius: 10,
-    damage: [
-      { type: 'physical', amount: 5 },
-      { type: 'fire', amount: 10 },
-    ],
-    attackRange: 36,
-    preferredRange: 36,
-    attackCooldown: 1.2,
-    windup: 0.3,
-    recover: 0.3,
-    souls: 4,
-    knockbackResist: 0.8,
-    tunic: '#7a4a2e',
-    accent: '#ff9a3c',
-    onHitStatuses: [{ id: 'burn', duration: 4, stacks: 2, power: 2.5, get sourceLabel() { return t('effect.torch'); } }],
-    spawnWeight: 14,
-    minDepth: 2,
-    bloodChance: 0.1,
-    relicChance: 0.03,
-    courage: 0.6,
-  },
-  priest: {
-    id: 'priest',
-    get name() { return t('enemy.priest.name'); },
-    role: 'support',
-    hp: 66,
-    armor: 4,
-    resist: { unholy: 0.5, holy: 0.9 },
-    speed: 126,
-    radius: 11,
-    damage: [{ type: 'holy', amount: 16 }],
-    attackRange: 320,
-    preferredRange: 300,
-    attackCooldown: 2.2,
-    windup: 0.7,
-    recover: 0.5,
-    souls: 7,
-    knockbackResist: 1,
-    tunic: '#d8d2c0',
-    accent: '#e8c96a',
-    spawnWeight: 10,
-    minDepth: 3,
-    bloodChance: 0.2,
-    relicChance: 0.14,
-    courage: 0.8,
-  },
-  knight: {
-    id: 'knight',
-    get name() { return t('enemy.knight.name'); },
-    role: 'melee',
-    hp: 190,
-    armor: 46,
-    resist: { physical: 0.15 },
-    speed: 132,
-    radius: 14,
-    damage: [{ type: 'physical', amount: 24 }],
-    attackRange: 46,
-    preferredRange: 46,
-    attackCooldown: 1.5,
-    windup: 0.55,
-    recover: 0.55,
-    souls: 12,
-    knockbackResist: 2.6,
-    tunic: '#6b7280',
-    accent: '#c8cdd6',
-    spawnWeight: 8,
-    minDepth: 4,
-    bloodChance: 0.25,
-    relicChance: 0.22,
-    courage: 1,
-  },
-  ballista: {
-    id: 'ballista',
-    get name() { return t('enemy.ballista.name'); },
-    role: 'turret',
-    hp: 120,
-    armor: 20,
-    resist: { poison: 0.9, frost: 0.5 },
-    speed: 0,
-    radius: 16,
-    damage: [{ type: 'physical', amount: 38 }],
-    // Kept within the camera's visible half-extent (see render/renderer.ts) so a
-    // shot never comes from off-screen — a stationary unit that can't be seen
-    // coming reads as unfair, not as a threat worth respecting.
-    attackRange: 440,
-    preferredRange: 440,
-    attackCooldown: 3.2,
-    windup: 1.2,
-    recover: 0.8,
-    souls: 9,
-    knockbackResist: 99,
-    tunic: '#5c4c38',
-    accent: '#8d7a5c',
-    spawnWeight: 0,
-    minDepth: 4,
-    bloodChance: 0,
-    relicChance: 0.08,
-    courage: 1,
-  },
-
-  /**
-   * The Rider: a war-camp charger.
-   *
-   * No new AI — it is a melee unit whose speed alone changes the fight, closing
-   * from far outside the range any infantry could threaten from. Tuned to trip the
-   * stalemate-breaking charge much sooner than anything else in the roster (see
-   * `update()`), so it reads as committing to a run at you rather than shuffling
-   * into position like everyone else.
-   */
-  rider: {
-    id: 'rider',
-    get name() { return t('enemy.rider.name'); },
-    role: 'melee',
-    hp: 70,
-    armor: 8,
-    resist: NO_RESIST,
-    speed: 250,
-    radius: 13,
-    damage: [{ type: 'physical', amount: 22 }],
-    attackRange: 50,
-    preferredRange: 50,
-    attackCooldown: 1.3,
-    windup: 0.35,
-    recover: 0.5,
-    souls: 6,
-    knockbackResist: 1.6,
-    tunic: '#8a5a2e',
-    accent: '#c9a227',
-    spawnWeight: 16,
-    minDepth: 0,
-    minBiome: 2,
-    bloodChance: 0.15,
-    relicChance: 0.08,
-    courage: 0.9,
-  },
-
-  /**
-   * The Siege Engine: a stronger ballista fielded only by a stronghold.
-   *
-   * Placed the same way a watchtower fields its ballista — see `planSpawns` — just
-   * paired with the bigger structure instead, and hitting harder to match.
-   */
-  siegeEngine: {
-    id: 'siegeEngine',
-    get name() { return t('enemy.siegeEngine.name'); },
-    role: 'turret',
-    hp: 160,
-    armor: 26,
-    resist: { poison: 0.9, frost: 0.5 },
-    speed: 0,
-    radius: 18,
-    damage: [{ type: 'physical', amount: 44 }],
-    // See ballista's attackRange comment above — same reasoning, tuned slightly
-    // higher since this one is meant to hit harder from the stronger structure.
-    attackRange: 480,
-    preferredRange: 480,
-    attackCooldown: 3,
-    windup: 1.1,
-    recover: 0.7,
-    souls: 11,
-    knockbackResist: 99,
-    tunic: '#7a5c3a',
-    accent: '#c9a25c',
-    spawnWeight: 0,
-    minDepth: 0,
-    minBiome: 2,
-    bloodChance: 0,
-    relicChance: 0.1,
-    courage: 1,
-  },
-
-  inquisitor: {
-    id: 'inquisitor',
-    get name() { return t('enemy.inquisitor.name'); },
-    role: 'boss',
-    hp: 1400,
-    armor: 40,
-    resist: { holy: 0.9, unholy: 0.35, fire: 0.2 },
-    speed: 118,
-    radius: 22,
-    damage: [{ type: 'holy', amount: 30 }],
-    attackRange: 380,
-    preferredRange: 240,
-    attackCooldown: 1.8,
-    windup: 0.65,
-    recover: 0.5,
-    souls: 80,
-    knockbackResist: 8,
-    tunic: '#efe7d2',
-    accent: '#d4af37',
-    spawnWeight: 0,
-    minDepth: 99,
-    bloodChance: 1,
-    relicChance: 1,
-    courage: 1,
-  },
-
-  /**
-   * The Warlord: a pure bruiser.
-   *
-   * Where the Inquisitor punishes standing still, this one punishes standing
-   * anywhere near it. Heavy armour and physical resistance mean an elemental build
-   * handles it far better than a claws-and-crits one.
-   */
-  warlord: {
-    id: 'warlord',
-    get name() { return t('enemy.warlord.name'); },
-    role: 'boss',
-    hp: 1750,
-    armor: 75,
-    resist: { physical: 0.3, frost: 0.2 },
-    speed: 142,
-    radius: 24,
-    damage: [{ type: 'physical', amount: 34 }],
-    attackRange: 74,
-    preferredRange: 66,
-    attackCooldown: 1.5,
-    windup: 0.6,
-    recover: 0.55,
-    souls: 85,
-    knockbackResist: 12,
-    tunic: '#6b3b2e',
-    accent: '#c8cdd6',
-    onHitStatuses: [{ id: 'bleed', duration: 6, stacks: 3, power: 3, sourceLabel: 'Warlord' }],
-    spawnWeight: 0,
-    minDepth: 99,
-    bloodChance: 1,
-    relicChance: 1,
-    courage: 1,
-  },
-
-  /**
-   * The Pyromancer: fragile, but turns the arena itself against you.
-   *
-   * Low armour and the least health of the three — the difficulty is in the floor
-   * catching fire, not in the health bar.
-   */
-  pyromancer: {
-    id: 'pyromancer',
-    get name() { return t('enemy.pyromancer.name'); },
-    role: 'boss',
-    hp: 1150,
-    armor: 18,
-    resist: { fire: 0.9, poison: 0.3 },
-    speed: 130,
-    radius: 20,
-    damage: [{ type: 'fire', amount: 26 }],
-    attackRange: 430,
-    preferredRange: 300,
-    attackCooldown: 1.5,
-    windup: 0.55,
-    recover: 0.45,
-    souls: 80,
-    knockbackResist: 5,
-    tunic: '#8a3417',
-    accent: '#ff9a3c',
-    onHitStatuses: [{ id: 'burn', duration: 5, stacks: 3, power: 4, sourceLabel: 'Pyromancer' }],
-    spawnWeight: 0,
-    minDepth: 99,
-    bloodChance: 1,
-    relicChance: 1,
-    courage: 1,
-  },
-
-  /**
-   * The Khagan: the war-camp's own warlord, and the run's real ending.
-   *
-   * Mounted like a Rider (see `draw()`), commands them into the fight rather than
-   * relying on its own reach, and closes the fight it can't win by attrition with a
-   * storm that answers standing still with a dust cloud that doesn't miss.
-   */
-  khagan: {
-    id: 'khagan',
-    get name() { return t('enemy.khagan.name'); },
-    role: 'boss',
-    hp: 2100,
-    armor: 55,
-    resist: { physical: 0.15, frost: 0.3 },
-    speed: 150,
-    radius: 26,
-    damage: [{ type: 'physical', amount: 36 }],
-    attackRange: 90,
-    preferredRange: 80,
-    attackCooldown: 1.6,
-    windup: 0.6,
-    recover: 0.55,
-    souls: 95,
-    knockbackResist: 14,
-    tunic: '#8a5a2e',
-    accent: '#d4af37',
-    spawnWeight: 0,
-    minDepth: 99,
-    bloodChance: 1,
-    relicChance: 1,
-    courage: 1,
-  },
-};
+// The actual roster (stats, damage, spawn gating, ...) lives in `../balance` now —
+// re-exporting it keeps every existing `from './human'` / `from '../entities/human'`
+// import working unchanged.
+export { HUMAN_ARCHETYPES };
 
 type AiState = 'idle' | 'approach' | 'windup' | 'recover' | 'reposition' | 'flee' | 'stunned';
 
@@ -578,10 +152,10 @@ export class Human extends Combatant {
     this.faction = 'human';
     this.radius = archetype.radius;
 
-    // Depth scaling: +13% HP and +8% damage per room, compounding. Was 18%/11% —
+    // Depth scaling tuned in ../balance's ENEMY_TIER_SCALING. Was 18%/11% HP/damage —
     // that pace made the mid-run rooms (where the enemy count is also ramping up)
     // spike much harder than the player's own growth could keep up with.
-    const hpScale = Math.pow(1.13, tier);
+    const hpScale = Math.pow(ENEMY_TIER_SCALING.hpPerTier, tier);
     this.maxHp = archetype.hp * hpScale;
     this.hp = this.maxHp;
 
@@ -591,12 +165,12 @@ export class Human extends Combatant {
   }
 
   get damageScale(): number {
-    return Math.pow(1.08, this.tier);
+    return Math.pow(ENEMY_TIER_SCALING.damagePerTier, this.tier);
   }
 
   override defenses(): Defenses {
     return {
-      armor: this.archetype.armor * (1 + this.tier * 0.06),
+      armor: this.archetype.armor * (1 + this.tier * ENEMY_TIER_SCALING.armorPerTier),
       resist: this.archetype.resist,
       dodge: 0,
       vulnerability: 1,
