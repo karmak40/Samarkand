@@ -600,6 +600,89 @@ export function rect(x: number, y: number, w: number, h: number): Rect {
   return { x, y, w, h };
 }
 
+/**
+ * Sizing for `layoutCardSlots`'s two layouts. Every screen that lays out a row of
+ * offer cards (card draft, market, cursed altar) picks its own numbers here —
+ * only the arithmetic and iteration are shared, not the proportions, so each
+ * screen keeps the exact footprint it already had.
+ */
+export interface CardSlotOptions {
+  /** Below this window width, cards stack into one full-width column instead. */
+  stackedBreakpoint: number;
+  grid: {
+    /** Width floor/ceiling; the number in between is (ui.width - sideMargin) / count - gap. */
+    minW: number;
+    maxW: number;
+    sideMargin: number;
+    /** Height floor/ceiling; the number in between is ui.height - heightMargin. */
+    minH: number;
+    maxH: number;
+    heightMargin: number;
+    gap: number;
+    /** Extra y-offset from the vertical centre of the window. */
+    centerOffset: number;
+  };
+  stacked: {
+    margin: number;
+    gap: number;
+    /** Fixed y where the first row starts. */
+    top: number;
+    /** Row-height floor/ceiling; the number in between fills the space down to `bottomMargin`. */
+    minRowH: number;
+    maxRowH: number;
+    /** Space reserved below the last row (e.g. for a leave button). */
+    bottomMargin: number;
+  };
+}
+
+export interface CardSlot {
+  bounds: Rect;
+}
+
+export interface CardSlotLayout {
+  slots: CardSlot[];
+  /** True when slots stacked into a single column instead of a row. */
+  stacked: boolean;
+  /** y just past the last slot, for placing whatever comes next (a button, a total). */
+  bottom: number;
+}
+
+/**
+ * Lay out `count` offer slots as a row of cards, or — below `stackedBreakpoint` —
+ * a single full-width column. Every screen offering a row of cards (card draft,
+ * market, cursed altar) used to hand-derive this same width/height/gap arithmetic
+ * three times over; this only returns bounds, so each screen still owns its own
+ * panel styling, hover states and content.
+ */
+export function layoutCardSlots(ui: Ui, count: number, opts: CardSlotOptions): CardSlotLayout {
+  const stacked = ui.width < opts.stackedBreakpoint;
+  const slots: CardSlot[] = [];
+
+  if (!stacked) {
+    const g = opts.grid;
+    const cardW = clamp((ui.width - g.sideMargin) / Math.max(1, count) - g.gap, g.minW, g.maxW);
+    const cardH = clamp(ui.height - g.heightMargin, g.minH, g.maxH);
+    const totalW = count * cardW + (count - 1) * g.gap;
+    const startX = (ui.width - totalW) / 2;
+    const y = ui.height / 2 - cardH / 2 + g.centerOffset;
+
+    for (let i = 0; i < count; i++) {
+      slots.push({ bounds: rect(startX + i * (cardW + g.gap), y, cardW, cardH) });
+    }
+    return { slots, stacked, bottom: y + cardH };
+  }
+
+  const s = opts.stacked;
+  const w = ui.width - s.margin * 2;
+  const n = Math.max(1, count);
+  const rowH = clamp((ui.height - s.bottomMargin - s.top - s.gap * (n - 1)) / n, s.minRowH, s.maxRowH);
+
+  for (let i = 0; i < count; i++) {
+    slots.push({ bounds: rect(s.margin, s.top + i * (rowH + s.gap), w, rowH) });
+  }
+  return { slots, stacked, bottom: s.top + n * rowH + (n - 1) * s.gap };
+}
+
 /** Seconds -> "M:SS". */
 export function formatTime(seconds: number): string {
   const m = Math.floor(seconds / 60);

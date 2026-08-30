@@ -1,8 +1,16 @@
-import { ENEMY_TIER_SCALING, HUMAN_ARCHETYPES } from '../balance';
-import { type DamageOptions, type DamagePacket, type DamageResult, type Defenses, type DamageType } from '../combat/damage';
+import {
+  ENEMY_TIER_SCALING,
+  HUMAN_ARCHETYPES,
+  INQUISITOR_ABILITIES,
+  KHAGAN_ABILITIES,
+  PYROMANCER_ABILITIES,
+  WARLORD_ABILITIES,
+} from '../balance';
+import { type DamagePacket, type DamageResult, type Defenses, type DamageType } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
 import { angleDelta, clamp, damp, dist2, TAU } from '../core/math';
 import { t } from '../i18n';
+import { drawGroundShadow } from '../render/shadow';
 import type { World } from '../world/world';
 import type { Building } from './building';
 import { Combatant, type DeathContext } from './entity';
@@ -229,10 +237,13 @@ export class Human extends Combatant {
     if (a.role === 'boss') world.camera.shake(16);
 
     // Nearby survivors witness the kill and lose their nerve.
-    for (const other of world.humansInRadius(this.x, this.y, 190)) {
+    const witnesses = world.acquireHumanBuffer();
+    world.humansInRadiusInto(this.x, this.y, 190, witnesses);
+    for (const other of witnesses) {
       if (other === this || !other.alive) continue;
       other.witnessDeath(1 - other.archetype.courage);
     }
+    world.releaseHumanBuffer(witnesses);
 
     world.onHumanKilled?.(this, ctx);
   }
@@ -368,6 +379,26 @@ export class Human extends Combatant {
     this.advanceAttack(dt, world, distance);
   }
 
+  /** Angle from this unit straight to the monster — every AI branch steers by it. */
+  private angleToMonster(world: World): number {
+    const monster = world.monster;
+    return Math.atan2(monster.y - this.y, monster.x - this.x);
+  }
+
+  /**
+   * Gate for starting a new swing: cooldown ready and in range, plus whichever of
+   * the two extra checks the caller needs. Both default on, since that's what
+   * most roles want; `updateSupport` turns `requireIdle` off (it always has, and
+   * that's a real behaviour difference from the other roles, not an oversight
+   * this is fixing), and `updateBoss` leaves `hasLos` at its default `true`
+   * (never actually checked) since bosses have never required a sightline.
+   */
+  private canBeginAttack(distance: number, options: { requireIdle?: boolean; hasLos?: boolean } = {}): boolean {
+    const { requireIdle = true, hasLos = true } = options;
+    if (requireIdle && (this.state === 'windup' || this.state === 'recover')) return false;
+    return this.attackCooldown <= 0 && distance <= this.archetype.attackRange && hasLos;
+  }
+
   private updateFighter(dt: number, world: World, distance: number): void {
     const monster = world.monster;
     const a = this.archetype;
@@ -383,13 +414,13 @@ export class Human extends Combatant {
     }
 
     const hasLos = world.hasLineOfSight(this.x, this.y, monster.x, monster.y);
-    const toMonster = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const toMonster = this.angleToMonster(world);
 
     // While charging, everything else is suspended: close the distance.
     if (this.charging > 0 && this.state !== 'windup' && this.state !== 'recover') {
       this.moveToward(toMonster, dt, 1.15);
       this.facing = damp(this.facing, toMonster, 10, dt);
-      if (this.attackCooldown <= 0 && distance <= a.attackRange && (a.role !== 'ranged' || hasLos)) {
+      if (this.canBeginAttack(distance, { hasLos: a.role !== 'ranged' || hasLos })) {
         this.beginAttack(world);
       }
       this.advanceAttack(dt, world, distance);
@@ -439,14 +470,7 @@ export class Human extends Combatant {
       }
     }
 
-    const canAttack =
-      this.state !== 'windup' &&
-      this.state !== 'recover' &&
-      this.attackCooldown <= 0 &&
-      distance <= a.attackRange &&
-      (a.role !== 'ranged' || hasLos);
-
-    if (canAttack) this.beginAttack(world);
+    if (this.canBeginAttack(distance, { hasLos: a.role !== 'ranged' || hasLos })) this.beginAttack(world);
     this.advanceAttack(dt, world, distance);
 
     this.facing = damp(this.facing, toMonster, 10, dt);
@@ -478,16 +502,13 @@ export class Human extends Combatant {
       return;
     }
 
-    const toMonster = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const toMonster = this.angleToMonster(world);
     if (distance < a.preferredRange * 0.7) this.moveToward(toMonster + Math.PI, dt, 1);
     else if (distance > a.preferredRange * 1.2) this.moveToward(toMonster, dt, 0.9);
     else this.decelerate(dt);
 
-    if (
-      this.attackCooldown <= 0 &&
-      distance <= a.attackRange &&
-      world.hasLineOfSight(this.x, this.y, monster.x, monster.y)
-    ) {
+    const hasLos = world.hasLineOfSight(this.x, this.y, monster.x, monster.y);
+    if (this.canBeginAttack(distance, { requireIdle: false, hasLos })) {
       this.beginAttack(world);
     }
     this.advanceAttack(dt, world, distance);
@@ -495,7 +516,6 @@ export class Human extends Combatant {
   }
 
   private updateBoss(dt: number, world: World, distance: number): void {
-    const monster = world.monster;
     const a = this.archetype;
     this.alerted = true;
 
@@ -506,7 +526,7 @@ export class Human extends Combatant {
       return;
     }
 
-    const toMonster = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const toMonster = this.angleToMonster(world);
 
     if (this.state === 'windup' || this.state === 'recover') {
       this.decelerate(dt, 5);
@@ -518,9 +538,7 @@ export class Human extends Combatant {
       this.moveToward(toMonster + Math.PI / 2, dt, 0.6);
     }
 
-    if (this.state !== 'windup' && this.state !== 'recover' && this.attackCooldown <= 0) {
-      if (distance <= a.attackRange) this.beginAttack(world);
-    }
+    if (this.canBeginAttack(distance)) this.beginAttack(world);
     this.advanceAttack(dt, world, distance);
     this.facing = damp(this.facing, toMonster, 7, dt);
   }
@@ -557,11 +575,12 @@ export class Human extends Combatant {
     switch (this.specialIndex) {
       case 0: {
         // Telegraphed leap. The landing is what hurts, so it can be walked out of.
+        const cfg = WARLORD_ABILITIES.leap;
         const tx = monster.x;
         const ty = monster.y;
-        world.particles.ring(tx, ty, '#e0655f', 120, 0.75, true);
-        world.sound.enemyWindup(this, 0.7);
-        world.scheduleDelayed?.(0.75, (w) => {
+        world.particles.ring(tx, ty, '#e0655f', 120, cfg.telegraphSeconds, true);
+        world.sound.enemyWindup(this, cfg.windupSoundSeconds);
+        world.scheduleDelayed?.(cfg.telegraphSeconds, (w) => {
           if (!this.alive) return;
           this.x = tx;
           this.y = ty;
@@ -569,45 +588,51 @@ export class Human extends Combatant {
           w.explode(
             tx,
             ty,
-            130,
-            [{ type: 'physical', amount: 46 * this.damageScale }],
+            cfg.radius,
+            [{ type: 'physical', amount: cfg.damage * this.damageScale }],
             t('effect.warlordLeap'),
-            { color: '#e0655f', knockback: 320, shake: 11 },
+            { color: '#e0655f', knockback: cfg.knockback, shake: cfg.shake },
           );
         });
         break;
       }
       case 1: {
         // Shockwave: a ring of low projectiles racing outward along the ground.
-        const count = 18;
-        for (let i = 0; i < count; i++) {
-          const a = (i / count) * TAU;
+        const cfg = WARLORD_ABILITIES.shockwave;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = (i / cfg.count) * TAU;
           world.spawnProjectile({
-            x: this.x + Math.cos(a) * 30,
-            y: this.y + Math.sin(a) * 30,
+            x: this.x + Math.cos(a) * cfg.spawnRadius,
+            y: this.y + Math.sin(a) * cfg.spawnRadius,
             angle: a,
-            speed: 300,
-            packets: [{ type: 'physical', amount: 20 * this.damageScale }],
+            speed: cfg.speed,
+            packets: [{ type: 'physical', amount: cfg.damage * this.damageScale }],
             faction: 'human',
             sourceLabel: t('effect.shockwave'),
-            radius: 9,
-            range: 700,
+            radius: cfg.projectileRadius,
+            range: cfg.range,
             color: '#c8a08a',
             glow: '#f0d8c0',
             shape: 'rock',
             owner: this,
-            knockback: 90,
+            knockback: cfg.knockback,
             ignoresWalls: true,
           });
         }
-        world.camera.shake(9);
+        world.camera.shake(cfg.shake);
         break;
       }
       default: {
         // Bodyguards, not a swarm: two knights are a real problem on their own.
-        for (let i = 0; i < 2; i++) {
-          const a = angle + Math.PI + (i - 0.5) * 0.9;
-          world.spawnHuman?.('knight', this.x + Math.cos(a) * 80, this.y + Math.sin(a) * 80, this.tier);
+        const cfg = WARLORD_ABILITIES.rally;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = angle + Math.PI + (i - 0.5) * cfg.angleSpread;
+          world.spawnHuman?.(
+            'knight',
+            this.x + Math.cos(a) * cfg.spawnRadius,
+            this.y + Math.sin(a) * cfg.spawnRadius,
+            this.tier,
+          );
         }
         world.texts.add(this.x, this.y - 40, t('text.warlordRally'), '#e0655f', 18);
         break;
@@ -624,21 +649,28 @@ export class Human extends Combatant {
     switch (this.specialIndex) {
       case 0: {
         // A trail of fire pools walking toward the player, cutting the arena in two.
-        for (let i = 1; i <= 5; i++) {
-          const distance = i * 110;
+        const cfg = PYROMANCER_ABILITIES.firewall;
+        for (let i = 1; i <= cfg.poolCount; i++) {
+          const distance = i * cfg.spacing;
           const x = this.x + Math.cos(angle) * distance;
           const y = this.y + Math.sin(angle) * distance;
-          world.scheduleDelayed?.(i * 0.14, (w) => {
+          world.scheduleDelayed?.(i * cfg.staggerSeconds, (w) => {
             w.addGroundHazard({
               x,
               y,
-              radius: 74,
-              life: 6,
-              dps: 26 * power,
+              radius: cfg.hazardRadius,
+              life: cfg.life,
+              dps: cfg.dps * power,
               type: 'fire',
               color: '#ff7b31',
               sourceLabel: t('effect.firewall'),
-              status: { id: 'burn', duration: 4, stacks: 2, power: 4 * power, sourceLabel: t('effect.firewall') },
+              status: {
+                id: 'burn',
+                duration: cfg.burnDuration,
+                stacks: cfg.burnStacks,
+                power: cfg.burnPower * power,
+                sourceLabel: t('effect.firewall'),
+              },
             });
           });
         }
@@ -646,36 +678,40 @@ export class Human extends Combatant {
       }
       case 1: {
         // Fan of bolts: dodgeable sideways, punishing if you back straight up.
-        for (let i = -3; i <= 3; i++) {
+        const cfg = PYROMANCER_ABILITIES.emberFan;
+        for (let i = -cfg.halfSpread; i <= cfg.halfSpread; i++) {
           world.spawnProjectile({
-            x: this.x + Math.cos(angle) * 24,
-            y: this.y + Math.sin(angle) * 24,
-            angle: angle + i * 0.17,
-            speed: 380,
-            packets: [{ type: 'fire', amount: 18 * power }],
+            x: this.x + Math.cos(angle) * cfg.spawnRadius,
+            y: this.y + Math.sin(angle) * cfg.spawnRadius,
+            angle: angle + i * cfg.angleStep,
+            speed: cfg.speed,
+            packets: [{ type: 'fire', amount: cfg.damage * power }],
             faction: 'human',
             sourceLabel: t('effect.emberFan'),
-            radius: 7,
-            range: 800,
+            radius: cfg.projectileRadius,
+            range: cfg.range,
             color: '#ff7b31',
             glow: '#ffd27a',
             shape: 'spit',
             owner: this,
-            statuses: [{ id: 'burn', duration: 4, stacks: 1, power: 3 * power, sourceLabel: t('effect.emberFan') }],
+            statuses: [
+              { id: 'burn', duration: cfg.burnDuration, stacks: 1, power: cfg.burnPower * power, sourceLabel: t('effect.emberFan') },
+            ],
           });
         }
         break;
       }
       default: {
         // Ring of fire around itself — you cannot simply stand on top of it.
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * TAU;
+        const cfg = PYROMANCER_ABILITIES.pyreRing;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = (i / cfg.count) * TAU;
           world.addGroundHazard({
-            x: this.x + Math.cos(a) * 110,
-            y: this.y + Math.sin(a) * 110,
-            radius: 70,
-            life: 7,
-            dps: 22 * power,
+            x: this.x + Math.cos(a) * cfg.ringRadius,
+            y: this.y + Math.sin(a) * cfg.ringRadius,
+            radius: cfg.hazardRadius,
+            life: cfg.life,
+            dps: cfg.dps * power,
             type: 'fire',
             color: '#ff7b31',
             sourceLabel: t('effect.pyreRing'),
@@ -694,21 +730,21 @@ export class Human extends Combatant {
     switch (this.specialIndex) {
       case 0: {
         // Ring of holy bolts, with a gap the player can dash through.
-        const count = 14;
-        const gap = world.rng.int(0, count - 1);
-        for (let i = 0; i < count; i++) {
-          if (i === gap || i === (gap + 1) % count) continue;
-          const angle = (i / count) * TAU;
+        const cfg = INQUISITOR_ABILITIES.divineJudgment;
+        const gap = world.rng.int(0, cfg.count - 1);
+        for (let i = 0; i < cfg.count; i++) {
+          if (i === gap || i === (gap + 1) % cfg.count) continue;
+          const angle = (i / cfg.count) * TAU;
           world.spawnProjectile({
-            x: this.x + Math.cos(angle) * 26,
-            y: this.y + Math.sin(angle) * 26,
+            x: this.x + Math.cos(angle) * cfg.spawnRadius,
+            y: this.y + Math.sin(angle) * cfg.spawnRadius,
             angle,
-            speed: 210,
-            packets: [{ type: 'holy', amount: 22 * this.damageScale }],
+            speed: cfg.speed,
+            packets: [{ type: 'holy', amount: cfg.damage * this.damageScale }],
             faction: 'human',
             sourceLabel: t('effect.divineJudgment'),
-            radius: 7,
-            range: 900,
+            radius: cfg.projectileRadius,
+            range: cfg.range,
             color: '#ffe9a8',
             glow: '#fffdf0',
             shape: 'orb',
@@ -716,34 +752,36 @@ export class Human extends Combatant {
           });
         }
         world.particles.ring(this.x, this.y, '#ffe9a8', 60, 0.5);
-        world.camera.shake(5);
+        world.camera.shake(cfg.shake);
         break;
       }
       case 1: {
         // Consecrated ground under the player's feet, forcing them to move.
+        const cfg = INQUISITOR_ABILITIES.consecration;
         const tx = monster.x;
         const ty = monster.y;
-        world.particles.ring(tx, ty, '#ffd98a', 90, 0.9, true);
-        world.scheduleDelayed?.(0.9, (w) => {
+        world.particles.ring(tx, ty, '#ffd98a', 90, cfg.telegraphSeconds, true);
+        world.scheduleDelayed?.(cfg.telegraphSeconds, (w) => {
           w.explode(
             tx,
             ty,
-            110,
-            [{ type: 'holy', amount: 40 * this.damageScale }],
+            cfg.radius,
+            [{ type: 'holy', amount: cfg.damage * this.damageScale }],
             t('effect.consecration'),
-            { color: '#ffe9a8', hurtsBuildings: false, shake: 7 },
+            { color: '#ffe9a8', hurtsBuildings: false, shake: cfg.shake },
           );
         });
         break;
       }
       default: {
         // Call the faithful.
-        for (let i = 0; i < 4; i++) {
-          const angle = (i / 4) * TAU + world.rng.next();
+        const cfg = INQUISITOR_ABILITIES.callFaithful;
+        for (let i = 0; i < cfg.count; i++) {
+          const angle = (i / cfg.count) * TAU + world.rng.next();
           world.spawnHuman?.(
             world.rng.bool(0.5) ? 'militia' : 'archer',
-            this.x + Math.cos(angle) * 90,
-            this.y + Math.sin(angle) * 90,
+            this.x + Math.cos(angle) * cfg.spawnRadius,
+            this.y + Math.sin(angle) * cfg.spawnRadius,
             this.tier,
           );
         }
@@ -762,9 +800,10 @@ export class Human extends Combatant {
     switch (this.specialIndex) {
       case 0: {
         // Riders answer the horn rather than the Khagan closing the distance itself.
-        for (let i = 0; i < 2; i++) {
-          const a = angle + Math.PI + (i - 0.5) * 1.1;
-          world.spawnHuman?.('rider', this.x + Math.cos(a) * 90, this.y + Math.sin(a) * 90, this.tier);
+        const cfg = KHAGAN_ABILITIES.hordeCall;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = angle + Math.PI + (i - 0.5) * cfg.angleSpread;
+          world.spawnHuman?.('rider', this.x + Math.cos(a) * cfg.spawnRadius, this.y + Math.sin(a) * cfg.spawnRadius, this.tier);
         }
         world.texts.add(this.x, this.y - 40, t('text.khaganHorde'), '#d4af37', 18);
         break;
@@ -772,22 +811,23 @@ export class Human extends Combatant {
       case 1: {
         // A fan of javelins — dodgeable sideways, like the Pyromancer's bolts, but
         // hitting harder and flying faster to fit a mounted throw.
-        for (let i = -3; i <= 3; i++) {
+        const cfg = KHAGAN_ABILITIES.javelinVolley;
+        for (let i = -cfg.halfSpread; i <= cfg.halfSpread; i++) {
           world.spawnProjectile({
-            x: this.x + Math.cos(angle) * 26,
-            y: this.y + Math.sin(angle) * 26,
-            angle: angle + i * 0.15,
-            speed: 460,
-            packets: [{ type: 'physical', amount: 24 * power }],
+            x: this.x + Math.cos(angle) * cfg.spawnRadius,
+            y: this.y + Math.sin(angle) * cfg.spawnRadius,
+            angle: angle + i * cfg.angleStep,
+            speed: cfg.speed,
+            packets: [{ type: 'physical', amount: cfg.damage * power }],
             faction: 'human',
             sourceLabel: t('effect.javelinVolley'),
-            radius: 6,
-            range: 850,
+            radius: cfg.projectileRadius,
+            range: cfg.range,
             color: '#c9a25c',
             glow: '#f0d8a0',
             shape: 'bolt',
             owner: this,
-            knockback: 60,
+            knockback: cfg.knockback,
           });
         }
         break;
@@ -795,21 +835,22 @@ export class Human extends Combatant {
       default: {
         // A ring of blinding dust that doesn't care where you're standing when it
         // lands — the one answer the Khagan has to a player who just kites forever.
-        for (let i = 0; i < 8; i++) {
-          const a = (i / 8) * TAU;
+        const cfg = KHAGAN_ABILITIES.sandstorm;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = (i / cfg.count) * TAU;
           world.addGroundHazard({
-            x: this.x + Math.cos(a) * 120,
-            y: this.y + Math.sin(a) * 120,
-            radius: 76,
-            life: 6,
-            dps: 20 * power,
+            x: this.x + Math.cos(a) * cfg.ringRadius,
+            y: this.y + Math.sin(a) * cfg.ringRadius,
+            radius: cfg.hazardRadius,
+            life: cfg.life,
+            dps: cfg.dps * power,
             type: 'physical',
             color: '#c9a25c',
             sourceLabel: t('effect.sandstorm'),
           });
         }
         world.particles.ring(this.x, this.y, '#c9a25c', 160, 0.8);
-        world.camera.shake(8);
+        world.camera.shake(cfg.shake);
         world.texts.add(this.x, this.y - 40, t('text.sandstormRises'), '#e8d4a0', 18);
         break;
       }
@@ -996,7 +1037,9 @@ export class Human extends Combatant {
     // Soft separation so units form a crowd rather than a single stacked blob.
     let pushX = 0;
     let pushY = 0;
-    for (const other of world.humansInRadius(this.x, this.y, this.radius * 2.4)) {
+    const neighbors = world.acquireHumanBuffer();
+    world.humansInRadiusInto(this.x, this.y, this.radius * 2.4, neighbors);
+    for (const other of neighbors) {
       if (other === this || !other.alive) continue;
       const dx = this.x - other.x;
       const dy = this.y - other.y;
@@ -1008,6 +1051,7 @@ export class Human extends Combatant {
         pushY += (dy / d) * overlap;
       }
     }
+    world.releaseHumanBuffer(neighbors);
     this.x += pushX * 120 * dt;
     this.y += pushY * 120 * dt;
 
@@ -1082,10 +1126,7 @@ export class Human extends Combatant {
     ctx.translate(this.x, this.y);
 
     // Shadow.
-    ctx.fillStyle = 'rgba(0,0,0,0.35)';
-    ctx.beginPath();
-    ctx.ellipse(0, this.radius * 0.6, this.radius * 0.95, this.radius * 0.36, 0, 0, TAU);
-    ctx.fill();
+    drawGroundShadow(ctx, 0, this.radius * 0.6, this.radius * 0.95, this.radius * 0.36);
 
     // The boss gets a halo so it never gets lost in a crowd of its own soldiers.
     if (isBoss) {
@@ -1238,152 +1279,182 @@ export class Human extends Combatant {
 
     switch (a.id) {
       case 'spearman':
-        ctx.strokeStyle = '#6b5334';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(-6, 0);
-        ctx.lineTo(this.radius * 2.6, 0);
-        ctx.stroke();
-        ctx.fillStyle = a.accent;
-        ctx.beginPath();
-        ctx.moveTo(this.radius * 2.6, 0);
-        ctx.lineTo(this.radius * 2.1, -3.5);
-        ctx.lineTo(this.radius * 2.1, 3.5);
-        ctx.closePath();
-        ctx.fill();
+        this.drawSpear(ctx);
         break;
-
       case 'archer':
-        ctx.strokeStyle = '#6b5334';
-        ctx.lineWidth = 2;
-        ctx.beginPath();
-        ctx.arc(2, 0, this.radius * 0.85, -1.2, 1.2);
-        ctx.stroke();
+        this.drawBow(ctx);
         break;
-
       case 'crossbowman':
       case 'ballista':
       case 'siegeEngine':
-        ctx.fillStyle = '#5c4c38';
-        ctx.fillRect(-2, -2, this.radius * 1.6, 4);
-        ctx.fillRect(this.radius * 0.5, -this.radius * 0.7, 3, this.radius * 1.4);
+        this.drawCrossbow(ctx);
         break;
-
       case 'rider':
-        // A lance, held level rather than swept in an arc — a charge doesn't wind up.
-        ctx.strokeStyle = '#6b5334';
-        ctx.lineWidth = 2.8;
-        ctx.beginPath();
-        ctx.moveTo(-10, 0);
-        ctx.lineTo(this.radius * 2.8, 0);
-        ctx.stroke();
-        ctx.fillStyle = a.accent;
-        ctx.beginPath();
-        ctx.arc(this.radius * 2.8, 0, 3, 0, TAU);
-        ctx.fill();
+        this.drawLance(ctx);
         break;
-
-      case 'torchbearer': {
-        ctx.strokeStyle = '#5b4229';
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(0, 0);
-        ctx.lineTo(this.radius * 1.1, 0);
-        ctx.stroke();
-        ctx.globalCompositeOperation = 'lighter';
-        const flame = ctx.createRadialGradient(this.radius * 1.2, 0, 0, this.radius * 1.2, 0, 9);
-        flame.addColorStop(0, '#fff0b0');
-        flame.addColorStop(0.4, '#ff9a3c');
-        flame.addColorStop(1, 'rgba(255,120,40,0)');
-        ctx.fillStyle = flame;
-        ctx.beginPath();
-        ctx.arc(this.radius * 1.2, 0, 9, 0, TAU);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
+      case 'torchbearer':
+        this.drawTorch(ctx);
         break;
-      }
-
       case 'priest':
-      case 'inquisitor': {
-        ctx.strokeStyle = a.accent;
-        ctx.lineWidth = 2.5;
-        ctx.beginPath();
-        ctx.moveTo(0, -this.radius * 0.4);
-        ctx.lineTo(0, this.radius * 1.2);
-        ctx.moveTo(-4, this.radius * 0.1);
-        ctx.lineTo(4, this.radius * 0.1);
-        ctx.stroke();
+      case 'inquisitor':
+        this.drawHolySymbol(ctx);
         break;
-      }
-
-      case 'warlord': {
-        // A two-handed maul: a long haft with a heavy head.
-        ctx.strokeStyle = '#4a3a2c';
-        ctx.lineWidth = 3.5;
-        ctx.beginPath();
-        ctx.moveTo(-8, 0);
-        ctx.lineTo(this.radius * 1.9, 0);
-        ctx.stroke();
-        ctx.fillStyle = a.accent;
-        ctx.fillRect(this.radius * 1.7, -7, 12, 14);
+      case 'warlord':
+        this.drawMaul(ctx);
         break;
-      }
-
-      case 'pyromancer': {
-        // A burning brand held out front.
-        ctx.strokeStyle = '#3a2a1e';
-        ctx.lineWidth = 3;
-        ctx.beginPath();
-        ctx.moveTo(-6, 0);
-        ctx.lineTo(this.radius * 1.4, 0);
-        ctx.stroke();
-        ctx.globalCompositeOperation = 'lighter';
-        const fire = ctx.createRadialGradient(this.radius * 1.6, 0, 0, this.radius * 1.6, 0, 16);
-        fire.addColorStop(0, '#fff0b0');
-        fire.addColorStop(0.4, '#ff7b31');
-        fire.addColorStop(1, 'rgba(255,120,40,0)');
-        ctx.fillStyle = fire;
-        ctx.beginPath();
-        ctx.arc(this.radius * 1.6, 0, 16, 0, TAU);
-        ctx.fill();
-        ctx.globalCompositeOperation = 'source-over';
+      case 'pyromancer':
+        this.drawFireBrand(ctx);
         break;
-      }
-
       case 'knight':
-        ctx.fillStyle = a.accent;
-        ctx.fillRect(-2, -2.5, this.radius * 1.7, 5);
-        // Shield on the off hand.
-        ctx.rotate(-1.6);
-        ctx.fillStyle = '#8d939e';
-        ctx.beginPath();
-        ctx.ellipse(this.radius * 0.5, 0, this.radius * 0.4, this.radius * 0.75, 0, 0, TAU);
-        ctx.fill();
+        this.drawSwordAndShield(ctx);
         break;
-
-      case 'khagan': {
-        // A curved sabre, held forward.
-        ctx.strokeStyle = a.accent;
-        ctx.lineWidth = 4;
-        ctx.lineCap = 'round';
-        ctx.beginPath();
-        ctx.moveTo(-6, 2);
-        ctx.quadraticCurveTo(this.radius * 1.2, -6, this.radius * 2.1, 0);
-        ctx.stroke();
+      case 'khagan':
+        this.drawSabre(ctx);
         break;
-      }
-
       case 'militia':
-        ctx.fillStyle = '#b4a583';
-        ctx.fillRect(-2, -2, this.radius * 1.3, 4);
+        this.drawClub(ctx);
         break;
-
       default:
         // Civilians carry nothing worth drawing.
         break;
     }
 
     ctx.restore();
+  }
+
+  private drawSpear(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#6b5334';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(this.radius * 2.6, 0);
+    ctx.stroke();
+    ctx.fillStyle = this.archetype.accent;
+    ctx.beginPath();
+    ctx.moveTo(this.radius * 2.6, 0);
+    ctx.lineTo(this.radius * 2.1, -3.5);
+    ctx.lineTo(this.radius * 2.1, 3.5);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  private drawBow(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#6b5334';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(2, 0, this.radius * 0.85, -1.2, 1.2);
+    ctx.stroke();
+  }
+
+  /** Shared by every archetype that fires a bolt: crossbowman, ballista, siege engine. */
+  private drawCrossbow(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#5c4c38';
+    ctx.fillRect(-2, -2, this.radius * 1.6, 4);
+    ctx.fillRect(this.radius * 0.5, -this.radius * 0.7, 3, this.radius * 1.4);
+  }
+
+  /** A lance, held level rather than swept in an arc — a charge doesn't wind up. */
+  private drawLance(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#6b5334';
+    ctx.lineWidth = 2.8;
+    ctx.beginPath();
+    ctx.moveTo(-10, 0);
+    ctx.lineTo(this.radius * 2.8, 0);
+    ctx.stroke();
+    ctx.fillStyle = this.archetype.accent;
+    ctx.beginPath();
+    ctx.arc(this.radius * 2.8, 0, 3, 0, TAU);
+    ctx.fill();
+  }
+
+  private drawTorch(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#5b4229';
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(0, 0);
+    ctx.lineTo(this.radius * 1.1, 0);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    const flame = ctx.createRadialGradient(this.radius * 1.2, 0, 0, this.radius * 1.2, 0, 9);
+    flame.addColorStop(0, '#fff0b0');
+    flame.addColorStop(0.4, '#ff9a3c');
+    flame.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = flame;
+    ctx.beginPath();
+    ctx.arc(this.radius * 1.2, 0, 9, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /** Shared by priest and inquisitor. */
+  private drawHolySymbol(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = this.archetype.accent;
+    ctx.lineWidth = 2.5;
+    ctx.beginPath();
+    ctx.moveTo(0, -this.radius * 0.4);
+    ctx.lineTo(0, this.radius * 1.2);
+    ctx.moveTo(-4, this.radius * 0.1);
+    ctx.lineTo(4, this.radius * 0.1);
+    ctx.stroke();
+  }
+
+  /** A two-handed maul: a long haft with a heavy head. */
+  private drawMaul(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#4a3a2c';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(this.radius * 1.9, 0);
+    ctx.stroke();
+    ctx.fillStyle = this.archetype.accent;
+    ctx.fillRect(this.radius * 1.7, -7, 12, 14);
+  }
+
+  /** A burning brand held out front. */
+  private drawFireBrand(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = '#3a2a1e';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-6, 0);
+    ctx.lineTo(this.radius * 1.4, 0);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'lighter';
+    const fire = ctx.createRadialGradient(this.radius * 1.6, 0, 0, this.radius * 1.6, 0, 16);
+    fire.addColorStop(0, '#fff0b0');
+    fire.addColorStop(0.4, '#ff7b31');
+    fire.addColorStop(1, 'rgba(255,120,40,0)');
+    ctx.fillStyle = fire;
+    ctx.beginPath();
+    ctx.arc(this.radius * 1.6, 0, 16, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  private drawSwordAndShield(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = this.archetype.accent;
+    ctx.fillRect(-2, -2.5, this.radius * 1.7, 5);
+    // Shield on the off hand.
+    ctx.rotate(-1.6);
+    ctx.fillStyle = '#8d939e';
+    ctx.beginPath();
+    ctx.ellipse(this.radius * 0.5, 0, this.radius * 0.4, this.radius * 0.75, 0, 0, TAU);
+    ctx.fill();
+  }
+
+  /** A curved sabre, held forward. */
+  private drawSabre(ctx: CanvasRenderingContext2D): void {
+    ctx.strokeStyle = this.archetype.accent;
+    ctx.lineWidth = 4;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-6, 2);
+    ctx.quadraticCurveTo(this.radius * 1.2, -6, this.radius * 2.1, 0);
+    ctx.stroke();
+  }
+
+  private drawClub(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = '#b4a583';
+    ctx.fillRect(-2, -2, this.radius * 1.3, 4);
   }
 
   private drawOverlays(ctx: CanvasRenderingContext2D, world: World): void {
@@ -1441,7 +1512,9 @@ export class Human extends Combatant {
   private findWoundedAlly(world: World): Human | null {
     let best: Human | null = null;
     let worstFraction = 0.85;
-    for (const other of world.humansInRadius(this.x, this.y, 260)) {
+    const nearby = world.acquireHumanBuffer();
+    world.humansInRadiusInto(this.x, this.y, 260, nearby);
+    for (const other of nearby) {
       if (other === this || !other.alive) continue;
       const fraction = other.healthFraction;
       if (fraction < worstFraction) {
@@ -1449,31 +1522,7 @@ export class Human extends Combatant {
         best = other;
       }
     }
+    world.releaseHumanBuffer(nearby);
     return best;
   }
-}
-
-/** Damage options helper used by the monster's melee sweep. */
-export function meleeOptions(
-  packets: DamagePacket[],
-  label: string,
-  dirX: number,
-  dirY: number,
-  knockback: number,
-  crit: boolean,
-  lifesteal: number,
-  armorPen: number,
-): DamageOptions {
-  return {
-    packets,
-    sourceLabel: label,
-    kind: 'attack',
-    crit,
-    lifesteal,
-    armorPen,
-    knockback,
-    dirX,
-    dirY,
-    dodgeable: true,
-  };
 }

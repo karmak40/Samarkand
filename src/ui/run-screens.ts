@@ -1,12 +1,12 @@
 import type { Input } from '../core/input';
-import { clamp, TAU } from '../core/math';
+import { TAU } from '../core/math';
 import { RNG } from '../core/rng';
 import { t } from '../i18n';
 import { type Curse, curseDescription, curseName } from '../progression/curses';
 import { RARITY, type SkillCard } from '../progression/skills';
 import { type MapNode, type NodeKind, type RunMap } from '../world/runmap';
 import { hexAlpha } from '../render/monster-render';
-import { PALETTE, rect, type Ui } from './widgets';
+import { layoutCardSlots, PALETTE, rect, type Ui } from './widgets';
 
 interface NodeStyle {
   readonly color: string;
@@ -792,22 +792,17 @@ export function drawMarket(
 
   // Same overflow as the card draft below this width, same fix: stack instead of
   // forcing a floor width that would run three offers off both edges.
-  const stacked = ui.width < 620;
-  let offersBottom: number;
+  const layout = layoutCardSlots(ui, offers.length, {
+    stackedBreakpoint: 620,
+    grid: { minW: 150, maxW: 250, sideMargin: 140, minH: 190, maxH: 280, heightMargin: 340, gap: 22, centerOffset: 30 },
+    stacked: { margin: 20, gap: 10, top: 148, minRowH: 78, maxRowH: 120, bottomMargin: 90 },
+  });
+  const offersBottom = layout.bottom;
 
-  if (!stacked) {
-    const cardW = Math.max(150, Math.min(250, (ui.width - 140) / Math.max(1, offers.length) - 22));
-    const cardH = Math.max(190, Math.min(280, ui.height - 340));
-    const gap = 22;
-    const totalW = offers.length * cardW + (offers.length - 1) * gap;
-    const startX = (ui.width - totalW) / 2;
-    const y = ui.height / 2 - cardH / 2 + 30;
-    offersBottom = y + cardH;
-
+  if (!layout.stacked) {
     offers.forEach((offer, i) => {
-      const x = startX + i * (cardW + gap);
       const affordable = !offer.sold && souls >= offer.price;
-      const bounds = rect(x, y, cardW, cardH);
+      const bounds = layout.slots[i]!.bounds;
       const zone = offer.sold ? { hovered: false, clicked: false } : ui.hitZone(bounds);
 
       ui.panel(bounds, {
@@ -877,18 +872,9 @@ export function drawMarket(
       if (zone.clicked && affordable) result.bought = i;
     });
   } else {
-    const margin = 20;
-    const w = ui.width - margin * 2;
-    const gap = 10;
-    const n = Math.max(1, offers.length);
-    const top = 148;
-    const rowH = clamp((ui.height - 90 - top - gap * (n - 1)) / n, 78, 120);
-    offersBottom = top + n * rowH + (n - 1) * gap;
-
     offers.forEach((offer, i) => {
-      const y2 = top + i * (rowH + gap);
       const affordable = !offer.sold && souls >= offer.price;
-      const bounds = rect(margin, y2, w, rowH);
+      const bounds = layout.slots[i]!.bounds;
       const zone = offer.sold ? { hovered: false, clicked: false } : ui.hitZone(bounds);
       const dim = offer.sold || !affordable;
 
@@ -1017,21 +1003,16 @@ export function drawCursedAltar(
 
   // Two stacked halves per card already ask for real width; below this a floor
   // width would run the row off both edges rather than just feeling snug.
-  const stacked = ui.width < 640;
-  let cardsBottom: number;
+  const layout = layoutCardSlots(ui, offers.length, {
+    stackedBreakpoint: 640,
+    grid: { minW: 200, maxW: 340, sideMargin: 160, minH: 240, maxH: 360, heightMargin: 300, gap: 30, centerOffset: 24 },
+    stacked: { margin: 20, gap: 12, top: 130, minRowH: 130, maxRowH: 220, bottomMargin: 90 },
+  });
+  const cardsBottom = layout.bottom;
 
-  if (!stacked) {
-    const cardW = Math.max(200, Math.min(340, (ui.width - 160) / Math.max(1, offers.length) - 24));
-    const cardH = Math.max(240, Math.min(360, ui.height - 300));
-    const gap = 30;
-    const totalW = offers.length * cardW + (offers.length - 1) * gap;
-    const startX = (ui.width - totalW) / 2;
-    const y = ui.height / 2 - cardH / 2 + 24;
-    cardsBottom = y + cardH;
-
+  if (!layout.stacked) {
     offers.forEach((offer, i) => {
-      const x = startX + i * (cardW + gap);
-      const bounds = rect(x, y, cardW, cardH);
+      const bounds = layout.slots[i]!.bounds;
       const zone = ui.hitZone(bounds);
       const rarity = RARITY[offer.card.rarity];
 
@@ -1091,17 +1072,8 @@ export function drawCursedAltar(
       if (zone.clicked) result.taken = i;
     });
   } else {
-    const margin = 20;
-    const w = ui.width - margin * 2;
-    const gap = 12;
-    const n = Math.max(1, offers.length);
-    const top = 130;
-    const rowH = clamp((ui.height - 90 - top - gap * (n - 1)) / n, 130, 220);
-    cardsBottom = top + n * rowH + (n - 1) * gap;
-
     offers.forEach((offer, i) => {
-      const y2 = top + i * (rowH + gap);
-      const bounds = rect(margin, y2, w, rowH);
+      const bounds = layout.slots[i]!.bounds;
       const zone = ui.hitZone(bounds);
       const rarity = RARITY[offer.card.rarity];
 

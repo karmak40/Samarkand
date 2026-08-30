@@ -1,6 +1,6 @@
 import { DAMAGE_INFO, DAMAGE_TYPES } from '../combat/damage';
 import type { Input } from '../core/input';
-import { clamp, TAU } from '../core/math';
+import { clamp, type Rect, TAU } from '../core/math';
 import { HUMAN_ARCHETYPES } from '../entities/human';
 import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
@@ -16,7 +16,7 @@ import { RARITY, tagLabel, type SkillCard } from '../progression/skills';
 import { formatStat, LOWER_IS_BETTER, statLabel, type StatKey } from '../progression/stats';
 import type { RunStats } from '../stats/tracker';
 import { drawCurseList } from './run-screens';
-import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
+import { type CardSlot, formatNumber, formatTime, layoutCardSlots, PALETTE, rect, type Ui } from './widgets';
 
 /** Cards the player can pick from, plus a reroll. */
 export interface CardChoiceResult {
@@ -60,29 +60,41 @@ export function drawCardSelect(
   // Below this, three cards can't hold a floor width wide enough to read a
   // description in without the row running off both edges of the screen — they
   // stack into one column instead, each full width.
-  const stacked = ui.width < 640;
-  let cardsBottom: number;
+  const layout = layoutCardSlots(ui, cards.length, {
+    stackedBreakpoint: 640,
+    grid: {
+      // Floors keep the layout sane on very small windows instead of producing
+      // negative-sized panels.
+      minW: 120,
+      maxW: 280,
+      sideMargin: 120,
+      minH: 200,
+      maxH: 380,
+      heightMargin: 300,
+      gap: 26,
+      centerOffset: 20,
+    },
+    stacked: {
+      margin: 20,
+      gap: 10,
+      top: 140,
+      minRowH: 76,
+      maxRowH: 128,
+      bottomMargin: context.canReroll ? 110 : 50,
+    },
+  });
+  const cardsBottom = layout.bottom;
 
-  if (!stacked) {
-    // Floors keep the layout sane on very small windows instead of producing
-    // negative-sized panels.
-    const cardW = Math.max(120, Math.min(280, (ui.width - 120) / Math.max(1, cards.length) - 24));
-    const cardH = Math.max(200, Math.min(380, ui.height - 300));
-    const gap = 26;
-    const totalW = cards.length * cardW + (cards.length - 1) * gap;
-    const startX = (ui.width - totalW) / 2;
-    const cardY = ui.height / 2 - cardH / 2 + 20;
-    cardsBottom = cardY + cardH;
-
+  if (!layout.stacked) {
     cards.forEach((card, i) => {
-      const x = startX + i * (cardW + gap);
-      const zone = ui.hitZone(rect(x, cardY, cardW, cardH));
+      const slotBounds = layout.slots[i]!.bounds;
+      const zone = ui.hitZone(slotBounds);
       const hovered = zone.hovered;
       const style = RARITY[card.rarity];
 
       // Hovered card lifts slightly — cheap, readable affordance.
       const lift = hovered ? 8 : 0;
-      const bounds = rect(x, cardY - lift, cardW, cardH);
+      const bounds = rect(slotBounds.x, slotBounds.y - lift, slotBounds.w, slotBounds.h);
 
       ui.panel(bounds, {
         fill: hovered ? 'rgba(30,26,32,0.97)' : 'rgba(16,15,19,0.95)',
@@ -160,7 +172,7 @@ export function drawCardSelect(
       if (zone.clicked) result.picked = i;
     });
   } else {
-    cardsBottom = drawStackedCards(ui, cards, 140, ui.height - (context.canReroll ? 110 : 50), (i, clicked) => {
+    drawStackedCards(ui, cards, layout.slots, (i, clicked) => {
       if (clicked) result.picked = i;
     });
   }
@@ -192,29 +204,17 @@ export function drawCardSelect(
  * Cards stacked full-width, for windows too narrow to hold three side by side.
  *
  * Same information as the wide layout — sigil, rarity, name, description, index —
- * in a row instead of a card, sized to fit whatever vertical room is actually
- * available rather than a fixed height that would either overflow a short window or
- * waste a tall one.
- *
- * Returns the y just past the last row, so the caller can place what comes next
- * (the reroll button) without duplicating this layout's numbers.
+ * in a row instead of a card. Sizing itself comes from `layoutCardSlots` (see the
+ * caller); this only draws each row's content.
  */
 function drawStackedCards(
   ui: Ui,
   cards: readonly SkillCard[],
-  top: number,
-  bottom: number,
+  slots: readonly CardSlot[],
   onCard: (index: number, clicked: boolean) => void,
-): number {
-  const margin = 20;
-  const w = ui.width - margin * 2;
-  const gap = 10;
-  const n = Math.max(1, cards.length);
-  const rowH = clamp((bottom - top - gap * (n - 1)) / n, 76, 128);
-
+): void {
   cards.forEach((card, i) => {
-    const y = top + i * (rowH + gap);
-    const bounds = rect(margin, y, w, rowH);
+    const bounds = slots[i]!.bounds;
     const zone = ui.hitZone(bounds);
     const hovered = zone.hovered;
     const style = RARITY[card.rarity];
@@ -261,8 +261,6 @@ function drawStackedCards(
 
     onCard(i, zone.clicked);
   });
-
-  return top + n * rowH + (n - 1) * gap;
 }
 
 /** A generated glyph for each card, so cards are distinguishable at a glance. */
@@ -347,17 +345,15 @@ export function drawMutationSelect(
 
   // Same overflow as the card draft, same fix: below this width three cards can't
   // stay wide enough to read, so they stack into one column instead.
-  if (ui.width < 640) {
-    const margin = 20;
-    const w = ui.width - margin * 2;
-    const gap = 10;
-    const n = Math.max(1, mutations.length);
-    const top = 150;
-    const rowH = clamp((ui.height - 50 - top - gap * (n - 1)) / n, 84, 150);
+  const layout = layoutCardSlots(ui, mutations.length, {
+    stackedBreakpoint: 640,
+    grid: { minW: 140, maxW: 300, sideMargin: 140, minH: 180, maxH: 300, heightMargin: 320, gap: 28, centerOffset: 20 },
+    stacked: { margin: 20, gap: 10, top: 150, minRowH: 84, maxRowH: 150, bottomMargin: 50 },
+  });
 
+  if (layout.stacked) {
     mutations.forEach((mutation, i) => {
-      const y = top + i * (rowH + gap);
-      const bounds = rect(margin, y, w, rowH);
+      const bounds = layout.slots[i]!.bounds;
       const zone = ui.hitZone(bounds);
       const hovered = zone.hovered;
 
@@ -392,18 +388,11 @@ export function drawMutationSelect(
       if (zone.clicked) picked = i;
     });
   } else {
-    const cardW = Math.max(140, Math.min(300, (ui.width - 140) / Math.max(1, mutations.length) - 24));
-    const cardH = Math.max(180, Math.min(300, ui.height - 320));
-    const gap = 28;
-    const totalW = mutations.length * cardW + (mutations.length - 1) * gap;
-    const startX = (ui.width - totalW) / 2;
-    const y = ui.height / 2 - cardH / 2 + 20;
-
     mutations.forEach((mutation, i) => {
-      const x = startX + i * (cardW + gap);
-      const zone = ui.hitZone(rect(x, y, cardW, cardH));
+      const slotBounds = layout.slots[i]!.bounds;
+      const zone = ui.hitZone(slotBounds);
       const hovered = zone.hovered;
-      const bounds = rect(x, y - (hovered ? 8 : 0), cardW, cardH);
+      const bounds = rect(slotBounds.x, slotBounds.y - (hovered ? 8 : 0), slotBounds.w, slotBounds.h);
 
       ui.panel(bounds, {
         fill: hovered ? 'rgba(34,24,42,0.97)' : 'rgba(18,14,22,0.95)',
@@ -1386,11 +1375,23 @@ export function drawBuildSheet(
   const top = 84;
   const height = ui.height - top - 70;
 
-  // Left: stats.
-  ui.panel(rect(margin, top, columnW, height), { fill: 'rgba(12,11,15,0.9)' });
-  const x = margin + 24;
-  const w = columnW - 48;
-  let y = top + 30;
+  drawBuildSheetStats(ui, monster, tracker, rect(margin, top, columnW, height));
+  drawBuildSheetSkills(ui, monster, tracker, skills, rect(margin + columnW + 40, top, columnW, height));
+
+  ui.text(t('buildSheet.close'), ui.width / 2, ui.height - 34, {
+    size: 12,
+    color: PALETTE.dim,
+    align: 'center',
+    baseline: 'middle',
+  });
+}
+
+/** Left column: live stats, elemental conversions, form (mutations), curses, traits. */
+function drawBuildSheetStats(ui: Ui, monster: Monster, tracker: RunStats, panel: Rect): void {
+  ui.panel(panel, { fill: 'rgba(12,11,15,0.9)' });
+  const x = panel.x + 24;
+  const w = panel.w - 48;
+  let y = panel.y + 30;
 
   ui.heading(t('heading.stats'), x, y, w);
   y += 26;
@@ -1497,13 +1498,20 @@ export function drawBuildSheet(
       lineHeight: 18,
     });
   }
+}
 
-  // Right: skills and live run numbers.
-  const rx = margin + columnW + 40;
-  ui.panel(rect(rx, top, columnW, height), { fill: 'rgba(12,11,15,0.9)' });
-  const rxi = rx + 24;
-  const rw = columnW - 48;
-  let ry = top + 30;
+/** Right column: taken skills, this-run live numbers, damage-by-type bar. */
+function drawBuildSheetSkills(
+  ui: Ui,
+  monster: Monster,
+  tracker: RunStats,
+  skills: Array<{ card: SkillCard; stacks: number }>,
+  panel: Rect,
+): void {
+  ui.panel(panel, { fill: 'rgba(12,11,15,0.9)' });
+  const rxi = panel.x + 24;
+  const rw = panel.w - 48;
+  let ry = panel.y + 30;
 
   ui.heading(t('heading.skills'), rxi, ry, rw);
   ry += 26;
@@ -1565,13 +1573,6 @@ export function drawBuildSheet(
     color: DAMAGE_INFO[t].color,
   }));
   ui.stackedBar(rect(rxi, ry, rw, 10), segments);
-
-  ui.text(t('buildSheet.close'), ui.width / 2, ui.height - 34, {
-    size: 12,
-    color: PALETTE.dim,
-    align: 'center',
-    baseline: 'middle',
-  });
 }
 
 function behaviorLabel(flag: string): string {

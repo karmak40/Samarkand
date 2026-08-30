@@ -151,39 +151,45 @@ export class Projectile extends Entity {
   /** Returns true when the projectile was consumed. */
   private checkCollisions(world: World): boolean {
     if (this.faction === 'monster') {
-      for (const human of world.humansInRadius(this.x, this.y, this.radius + 26)) {
-        if (this.hitIds.has(human.id) || !human.alive) continue;
-        const reach = this.radius + human.radius;
-        if (dist2(this.x, this.y, human.x, human.y) > reach * reach) continue;
+      const nearby = world.acquireHumanBuffer();
+      world.humansInRadiusInto(this.x, this.y, this.radius + 26, nearby);
+      try {
+        for (const human of nearby) {
+          if (this.hitIds.has(human.id) || !human.alive) continue;
+          const reach = this.radius + human.radius;
+          if (dist2(this.x, this.y, human.x, human.y) > reach * reach) continue;
 
-        // A defender still standing on its tower is shielded by it: the hit cracks
-        // the structure instead of the archer, exactly like hitting a plain wall
-        // below. Once the tower falls this stops matching and combat is normal.
-        if (human.mountedOn?.alive) {
-          let total = 0;
-          for (const p of this.packets) total += p.amount;
-          human.mountedOn.takeStructuralDamage(
-            total * (this.config.damagesBuildings ? 1 : BASELINE_BUILDING_DAMAGE),
-            world,
-          );
-          world.particles.emit({
-            count: 4,
-            x: this.x,
-            y: this.y,
-            color: '#c9c2b2',
-            shape: 'shard',
-            speed: [40, 140],
-            size: [1.5, 3.2],
-            life: [0.15, 0.32],
-            angle: this.angle + Math.PI,
-            spread: 1.1,
-          });
-          if (this.faction === 'monster') world.shotOutcomes.hitBuilding++;
-          this.expire(world);
-          return true;
+          // A defender still standing on its tower is shielded by it: the hit cracks
+          // the structure instead of the archer, exactly like hitting a plain wall
+          // below. Once the tower falls this stops matching and combat is normal.
+          if (human.mountedOn?.alive) {
+            let total = 0;
+            for (const p of this.packets) total += p.amount;
+            human.mountedOn.takeStructuralDamage(
+              total * (this.config.damagesBuildings ? 1 : BASELINE_BUILDING_DAMAGE),
+              world,
+            );
+            world.particles.emit({
+              count: 4,
+              x: this.x,
+              y: this.y,
+              color: '#c9c2b2',
+              shape: 'shard',
+              speed: [40, 140],
+              size: [1.5, 3.2],
+              life: [0.15, 0.32],
+              angle: this.angle + Math.PI,
+              spread: 1.1,
+            });
+            if (this.faction === 'monster') world.shotOutcomes.hitBuilding++;
+            this.expire(world);
+            return true;
+          }
+
+          if (this.hit(human, world)) return true;
         }
-
-        if (this.hit(human, world)) return true;
+      } finally {
+        world.releaseHumanBuffer(nearby);
       }
     } else {
       const monster = world.monster;
@@ -284,7 +290,9 @@ export class Projectile extends Entity {
   private findBounceTarget(world: World): Combatant | null {
     let best: Combatant | null = null;
     let bestD2 = 320 * 320;
-    for (const human of world.humansInRadius(this.x, this.y, 320)) {
+    const nearby = world.acquireHumanBuffer();
+    world.humansInRadiusInto(this.x, this.y, 320, nearby);
+    for (const human of nearby) {
       if (this.hitIds.has(human.id) || !human.alive) continue;
       const d2 = dist2(this.x, this.y, human.x, human.y);
       if (d2 < bestD2) {
@@ -292,6 +300,7 @@ export class Projectile extends Entity {
         best = human;
       }
     }
+    world.releaseHumanBuffer(nearby);
     return best;
   }
 

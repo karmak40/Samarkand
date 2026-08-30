@@ -226,21 +226,6 @@ export function mitigate(
   return result;
 }
 
-/** Scale every packet in place-free fashion. */
-export function scalePackets(packets: readonly DamagePacket[], factor: number): DamagePacket[] {
-  return packets.map((p) => ({ type: p.type, amount: p.amount * factor }));
-}
-
-/** Merge packets of the same type so floating text stays readable. */
-export function mergePackets(packets: readonly DamagePacket[]): DamagePacket[] {
-  const acc = new Map<DamageType, number>();
-  for (const p of packets) {
-    if (p.amount <= 0) continue;
-    acc.set(p.type, (acc.get(p.type) ?? 0) + p.amount);
-  }
-  return [...acc].map(([type, amount]) => ({ type, amount }));
-}
-
 /** The type that contributed the most damage — drives hit-flash colour. */
 export function dominantType(byType: Partial<Record<DamageType, number>>): DamageType {
   let best: DamageType = 'physical';

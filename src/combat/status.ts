@@ -133,7 +133,19 @@ export class StatusContainer {
     this.tickBuffer.length = 0;
     if (this.active.size === 0) return this.tickBuffer;
 
-    for (const status of [...this.active.values()]) {
+    // Walk exactly the entries that existed when this call started, without
+    // copying them into a new array first. A status expiring can `apply()` a
+    // replacement (freeze -> chill) that inserts a *new* map entry — Map
+    // iteration order is insertion order, so a fresh entry always lands after
+    // every entry that existed at the start, meaning capping the loop at the
+    // starting size visits precisely the original entries and never the new one,
+    // same as the snapshot array this replaced.
+    const originalCount = this.active.size;
+    const iter = this.active.values();
+    for (let i = 0; i < originalCount; i++) {
+      const next = iter.next();
+      if (next.done) break;
+      const status = next.value;
       const def = STATUS_DEFS[status.id];
       status.remaining -= dt;
 

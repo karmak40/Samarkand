@@ -2,6 +2,7 @@ import { clamp, TAU } from '../core/math';
 import type { Monster } from '../entities/monster';
 import type { MonsterBody } from '../progression/evolution';
 import type { World } from '../world/world';
+import { drawGroundShadow } from './shadow';
 
 /**
  * Draws the monster entirely from its `MonsterBody` description.
@@ -32,10 +33,7 @@ export function drawMonster(ctx: CanvasRenderingContext2D, monster: Monster, wor
   if (body.alpha < 1) ctx.globalAlpha = body.alpha;
 
   // --- ground shadow --------------------------------------------------------
-  ctx.fillStyle = 'rgba(0,0,0,0.45)';
-  ctx.beginPath();
-  ctx.ellipse(monster.x, monster.y + r * 0.75, r * 1.05, r * 0.4, 0, 0, TAU);
-  ctx.fill();
+  drawGroundShadow(ctx, monster.x, monster.y + r * 0.75, r * 1.05, r * 0.4, 0.45);
 
   // --- aura -----------------------------------------------------------------
   if (body.aura !== 'none' || body.glowStrength > 0.6) {

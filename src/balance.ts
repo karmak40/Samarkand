@@ -17,7 +17,7 @@
 
 import { type DamagePacket, type DamageType } from './combat/damage';
 import { type StatusApplication, type StatusDef, type StatusId } from './combat/status';
-import { type HumanArchetype, type HumanId } from './entities/human';
+import { type BossId, type HumanArchetype, type HumanId } from './entities/human';
 import { type BuildingProfile, type BuildingKind } from './entities/building';
 import { type StatKey } from './progression/stats';
 import { type Species } from './progression/species';
@@ -26,6 +26,8 @@ import { type Mutation } from './progression/evolution';
 import { type BoonDef } from './progression/boons';
 import { type Curse } from './progression/curses';
 import { type SkillCard, type RarityStyle, type Rarity, type RawModifier } from './progression/skills';
+import { type RoomKind } from './world/roomgen';
+import { type NodeKind } from './world/runmap';
 import { t } from './i18n';
 
 const NO_RESIST: Partial<Record<DamageType, number>> = {};
@@ -2026,6 +2028,460 @@ export const STATUS_DEFS: Record<StatusId, StatusDef> = {
     maxDuration: 8,
     get description() { return t('status.weaken.description'); },
   },
+};
+
+// ===========================================================================
+// Levels — room flavour, run-map shape, spawn budget and boss selection
+// ===========================================================================
+
+/** Rooms per biome/map — how deep each biome's own run goes (world/roomgen.ts). */
+export const BIOME_ROOM_COUNT = 12;
+
+/** Lanes on the run-map graph; 3 keeps every branch choice readable at a glance. */
+export const RUN_MAP_LANES = 3;
+
+/** Depth of the boulder/masonry band drawn around every arena. */
+export const ARENA_WALL_THICKNESS = 46;
+
+/**
+ * What a non-entry, non-boss run-map node becomes (world/runmap.ts's `assignKinds`).
+ * `battle` is the always-eligible fallback; the others need `minDepth` and compete
+ * on `weight` within their layer — `elite`'s weight also scales up with how far
+ * through the run the layer sits (see `ELITE_WEIGHT_DEPTH_BONUS_BASE`).
+ */
+export const NODE_KIND_WEIGHTS: Record<Exclude<NodeKind, 'boss'>, { weight: number; minDepth: number }> = {
+  battle: { weight: 100, minDepth: 0 },
+  elite: { weight: 34, minDepth: 3 },
+  market: { weight: 30, minDepth: 2 },
+  cursed: { weight: 26, minDepth: 2 },
+};
+
+/** `elite`'s weight multiplier is `base + depth / totalDepths` — this is `base`. */
+export const ELITE_WEIGHT_DEPTH_BONUS_BASE = 0.4;
+
+/** The run map is guaranteed at least this many of each special node kind. */
+export const MIN_SPECIAL_NODES_PER_RUN = 2;
+
+/** Rules deciding what an ordinary `battle` node's room *flavour* is (roomKindForDepth). */
+export const ROOM_KIND_ROLL = {
+  /** Every `shrineInterval`th room (index % interval === offset) is always a shrine. */
+  shrineInterval: 4,
+  shrineOffset: 3,
+  /** `fortified` can only roll once the run reaches this depth. */
+  fortifiedMinDepth: 6,
+  fortifiedChance: 0.45,
+  /** Below `fortifiedMinDepth`, or when the fortified roll misses: hamlet vs village. */
+  hamletChance: 0.3,
+};
+
+export interface RoomKindConfig {
+  /** Arena size in world units at depth 0; grows with `ROOM_SIZE_GROWTH_PER_DEPTH`. */
+  size: [number, number];
+  buildingCount: [number, number];
+  /** Extra weight for these building kinds (repeats bias the random draw toward it). */
+  palette: BuildingKind[];
+  palisade: boolean;
+  /** Multiplies the enemy spawn budget formula for rooms of this flavour. */
+  enemyBudgetScale: number;
+}
+
+/** Per-room-flavour layout and difficulty config. */
+export const ROOM_KIND_CONFIG: Record<RoomKind, RoomKindConfig> = {
+  hamlet: {
+    size: [1180, 900],
+    buildingCount: [5, 9],
+    palette: ['hut', 'hut', 'house', 'stack', 'cart', 'well'],
+    palisade: false,
+    enemyBudgetScale: 0.85,
+  },
+  village: {
+    size: [1360, 1050],
+    buildingCount: [9, 15],
+    palette: ['house', 'house', 'hut', 'granary', 'longhouse', 'well', 'cart', 'stack'],
+    palisade: false,
+    enemyBudgetScale: 1,
+  },
+  fortified: {
+    size: [1450, 1120],
+    buildingCount: [10, 16],
+    palette: ['house', 'longhouse', 'watchtower', 'granary', 'watchtower', 'well'],
+    palisade: true,
+    enemyBudgetScale: 1.25,
+  },
+  shrine: {
+    size: [1280, 1020],
+    buildingCount: [7, 11],
+    palette: ['chapel', 'house', 'hut', 'well', 'chapel'],
+    palisade: false,
+    enemyBudgetScale: 1.1,
+  },
+  elite: {
+    // Deliberately tight: an elite is a stand-and-fight, not a chase. Fewer
+    // buildings also means fewer places for the player to break line of sight.
+    size: [1180, 940],
+    buildingCount: [5, 8],
+    palette: ['watchtower', 'longhouse', 'house', 'well', 'cart'],
+    palisade: true,
+    enemyBudgetScale: 1.15,
+  },
+  boss: {
+    size: [1560, 1240],
+    buildingCount: [6, 10],
+    palette: ['chapel', 'watchtower', 'longhouse', 'wall'],
+    palisade: true,
+    enemyBudgetScale: 1.4,
+  },
+};
+
+/**
+ * War-camp (biome 2) fields this many strongholds in place of open palette slots on
+ * fortified/elite/boss rooms — each fields a siege engine the same way a watchtower
+ * fields a ballista.
+ */
+export const WARCAMP_STRONGHOLD_COUNT = 2;
+
+/** Arena size growth per room index, compounding. */
+export const ROOM_SIZE_GROWTH_PER_DEPTH = 0.012;
+
+/** Extra buildings crammed into a room every N rooms of depth (`Math.floor(index / N)`). */
+export const EXTRA_BUILDINGS_PER_DEPTH_DIVISOR = 3;
+
+/** Enemy spawn budget: `(base + index * perDepth) * roomKind.enemyBudgetScale`. */
+export const ENEMY_BUDGET_BASE = 11;
+export const ENEMY_BUDGET_PER_DEPTH = 5;
+
+/** Civilian spawn weight decays with depth: `max(floor, 1 - index * perDepth)`. */
+export const CIVILIAN_FALLOFF_PER_DEPTH = 0.12;
+export const CIVILIAN_FALLOFF_FLOOR = 0.15;
+
+/** Guaranteed ranged/support defenders: `base + Math.floor(index / perDepthDivisor)`. */
+export const GUARANTEED_RANGED_BASE = 1;
+export const GUARANTEED_RANGED_PER_DEPTH_DIVISOR = 3;
+
+/** Fraction of a mounted turret's `SPAWN_COST` charged against the room's budget. */
+export const TURRET_BUDGET_FRACTION = 0.5;
+
+/** Fixed champion garrison for an `elite` room, below vs at-or-above the threshold depth. */
+export const ELITE_CHAMPIONS_EARLY: readonly HumanId[] = ['knight', 'priest'];
+export const ELITE_CHAMPIONS_LATE: readonly HumanId[] = ['knight', 'knight', 'priest'];
+export const ELITE_CHAMPIONS_LATE_MIN_DEPTH = 6;
+
+/** Relics placed per room: fixed for elite/boss, a base + depth bonus for a plain battle. */
+export const RELIC_COUNT = {
+  boss: 3,
+  elite: 2,
+  battleBase: 1,
+  battleBonusMinDepth: 4,
+};
+
+/**
+ * Biome 1's finale is drawn (weighted, uniform by default) from this pool. Biome 2
+ * always ends on `WARCAMP_BOSS_ID` — the Khagan is the run's real ending, not one of
+ * several interchangeable finales the way the first biome's boss is, so it isn't a
+ * pool at all rather than a pool of one.
+ */
+export const BIOME_1_BOSS_WEIGHTS: Record<BossId, number> = {
+  inquisitor: 1,
+  warlord: 1,
+  pyromancer: 1,
+};
+export const WARCAMP_BOSS_ID: HumanId = 'khagan';
+
+// ===========================================================================
+// Boss special abilities (Human.castWarlord/castPyromancer/castInquisitor/castKhagan)
+// ===========================================================================
+//
+// Each boss cycles through three abilities round-robin (`specialIndex`). Every
+// damage/dps number here is a *base* value the caster still multiplies by its own
+// `damageScale` (tier-scaled) at the call site — this file only holds the base.
+
+export const WARLORD_ABILITIES = {
+  /** A telegraphed leap; the landing is what hurts, so it can be walked out of. */
+  leap: {
+    telegraphSeconds: 0.75,
+    /** The audio cue's own windup duration — independent of `telegraphSeconds`. */
+    windupSoundSeconds: 0.7,
+    radius: 130,
+    damage: 46,
+    knockback: 320,
+    shake: 11,
+  },
+  /** A ring of low projectiles racing outward along the ground. */
+  shockwave: {
+    count: 18,
+    spawnRadius: 30,
+    speed: 300,
+    damage: 20,
+    projectileRadius: 9,
+    range: 700,
+    knockback: 90,
+    shake: 9,
+  },
+  /** Two knight bodyguards summoned behind the boss. */
+  rally: {
+    count: 2,
+    spawnRadius: 80,
+    angleSpread: 0.9,
+  },
+};
+
+export const PYROMANCER_ABILITIES = {
+  /** A trail of fire pools walking toward the player, cutting the arena in two. */
+  firewall: {
+    poolCount: 5,
+    spacing: 110,
+    staggerSeconds: 0.14,
+    hazardRadius: 74,
+    life: 6,
+    dps: 26,
+    burnDuration: 4,
+    burnStacks: 2,
+    burnPower: 4,
+  },
+  /** A fan of bolts, dodgeable sideways, punishing if you back straight up. */
+  emberFan: {
+    /** Bolts fan out from `-halfSpread` to `+halfSpread` (7 total at spread 3). */
+    halfSpread: 3,
+    spawnRadius: 24,
+    speed: 380,
+    damage: 18,
+    angleStep: 0.17,
+    projectileRadius: 7,
+    range: 800,
+    burnDuration: 4,
+    burnPower: 3,
+  },
+  /** A ring of fire around the boss itself — you cannot simply stand on top of it. */
+  pyreRing: {
+    count: 8,
+    ringRadius: 110,
+    hazardRadius: 70,
+    life: 7,
+    dps: 22,
+  },
+};
+
+export const INQUISITOR_ABILITIES = {
+  /** A ring of holy bolts, with a gap the player can dash through. */
+  divineJudgment: {
+    count: 14,
+    spawnRadius: 26,
+    speed: 210,
+    damage: 22,
+    projectileRadius: 7,
+    range: 900,
+    shake: 5,
+  },
+  /** Consecrated ground under the player's feet, forcing them to move. */
+  consecration: {
+    telegraphSeconds: 0.9,
+    radius: 110,
+    damage: 40,
+    shake: 7,
+  },
+  /** Two militia or archers called in to reinforce. */
+  callFaithful: {
+    count: 4,
+    spawnRadius: 90,
+  },
+};
+
+export const KHAGAN_ABILITIES = {
+  /** Riders answer the horn rather than the Khagan closing the distance itself. */
+  hordeCall: {
+    count: 2,
+    spawnRadius: 90,
+    angleSpread: 1.1,
+  },
+  /** A fan of javelins — like the Pyromancer's bolts, but harder and faster. */
+  javelinVolley: {
+    halfSpread: 3,
+    spawnRadius: 26,
+    speed: 460,
+    damage: 24,
+    angleStep: 0.15,
+    projectileRadius: 6,
+    range: 850,
+    knockback: 60,
+  },
+  /** A ring of blinding dust that doesn't care where you're standing when it lands. */
+  sandstorm: {
+    count: 8,
+    ringRadius: 120,
+    hazardRadius: 76,
+    life: 6,
+    dps: 20,
+    shake: 8,
+  },
+};
+
+// ===========================================================================
+// On-kill skill effects (Game.applyOnKillEffects)
+// ===========================================================================
+
+export const ON_KILL_EFFECTS = {
+  explodeOnKill: {
+    /** Explosion power = damage * (baseFraction + perStack * behaviorStacks). */
+    baseFraction: 0.7,
+    perStackFraction: 0.35,
+    radius: 90,
+    knockback: 140,
+  },
+  poisonCloud: {
+    radius: 62,
+    life: 5,
+    dpsFraction: 0.3,
+    statusDuration: 5,
+    statusStacks: 2,
+    statusPowerFraction: 0.06,
+  },
+  fearOnKill: {
+    radius: 200,
+    duration: 2.5,
+  },
+  deathBlossom: {
+    shards: 8,
+    damageFraction: 0.4,
+    speed: 460,
+    projectileRadius: 5,
+    range: 260,
+  },
+  devourCorpses: {
+    /** Blood pickup value = baseAmount + current room index. */
+    baseAmount: 5,
+  },
+};
+
+// ===========================================================================
+// Player physics & combat feel (entities/monster.ts)
+// ===========================================================================
+//
+// Purely cosmetic numbers (particle VFX, camera shake, gait/wing animation rates)
+// stay inline in monster.ts — this section is only the numbers that change how
+// the player character actually plays.
+
+export const MONSTER_AIM_TUNING = {
+  /** After standing still this long, shots tighten to their full accuracy. */
+  steadyTime: 0.25,
+  /** Extra spread applied while running, relative to the standing-still baseline. */
+  movingSpreadPenalty: 2.1,
+  /** How fast the aim direction turns to face a target. */
+  aimDampRate: 12,
+  /** How fast the aim turns to face the travel heading when there's no target. */
+  wanderAimDampRate: 6,
+};
+
+/**
+ * XP needed to go from `level` to the next: `base + coefficient * level^exponent`.
+ * Calibrated against the soul economy — see `xpRequirement`'s own doc comment.
+ */
+export const MONSTER_XP_CURVE = {
+  base: 5,
+  coefficient: 3,
+  exponent: 1.5,
+};
+
+export const MONSTER_DASH_TUNING = {
+  activeSeconds: 0.18,
+  /** Velocity kept once the dash ends, so it doesn't fling you into a wall. */
+  postDashVelocityRetention: 0.35,
+  /** damp() rate while an input axis is held vs. released. */
+  movingAccelRate: 18,
+  idleAccelRate: 12,
+};
+
+/** The frostNova behavior's burst, triggered on every dash. */
+export const MONSTER_FROST_NOVA = {
+  damageFraction: 0.8,
+  radius: 130,
+  knockback: 40,
+  chillDurationMult: 4,
+  chillStacks: 4,
+};
+
+export const MONSTER_COMBAT_TUNING = {
+  /** Brief invulnerability after being hit, so a crowd can't chain-stun. */
+  hitImmunitySeconds: 0.25,
+  /** Second Wind's revive health fraction. */
+  secondWindHealthFraction: 0.25,
+  /** Fraction of max HP mended at the start of a room past the first. */
+  roomStartHealFraction: 0.14,
+  /** Permanent damage-multiplier gain per building razed (Razer legendary). */
+  razeBonusPerBuilding: 0.02,
+};
+
+/** Shared choreography for both the second-wind proc and the ad-revive offer. */
+export const MONSTER_REVIVE_TUNING = {
+  invulnerableSeconds: 1.4,
+  crowdRadius: 200,
+  crowdKnockback: 420,
+  fearDuration: 2.5,
+};
+
+export const MONSTER_FRENZY_TUNING = {
+  powerCap: 1.2,
+  gainPerPower: 0.5,
+  minTimerSeconds: 3,
+  /** Outgoing-damage multiplier is `1 + frenzyPower * this`, while frenzied. */
+  damageMultPerPower: 0.25,
+};
+
+/** The `rageAtLowHp` behavior: more damage the closer to death, diminishing per stack. */
+export const MONSTER_RAGE_AT_LOW_HP = {
+  maxBonus: 0.8,
+  perStackScale: 0.75,
+  perStackBase: 0.25,
+};
+
+/** The `orbitingSpawn` behavior: familiars that circle the monster and bite on contact. */
+export const MONSTER_ORBITAL_TUNING = {
+  countPerStack: 2,
+  distance: 62,
+  damageFraction: 0.45,
+  contactRadius: 20,
+  hitCooldown: 0.4,
+  knockback: 30,
+  /** Radians/second the ring of orbitals sweeps around the monster. */
+  phaseSpeed: 2.2,
+};
+
+/** Statuses applied by the `bleedOnCrit`/`curseOnHit` behaviors. */
+export const MONSTER_ON_HIT_STATUS_TUNING = {
+  bleedOnCrit: { durationMult: 5, stacks: 2, powerFraction: 0.12 },
+  curseOnHit: { durationMult: 5, stacks: 1 },
+};
+
+export const MONSTER_SHOT_TUNING = {
+  /** Turn rate (rad/s) per stack of the `homing` behavior. */
+  homingTurnRatePerStack: 3,
+  chainLightningRange: 220,
+  projectileBaseRadius: 6,
+};
+
+/** The `burningGround` behavior: a fire patch left where a shot expires. */
+export const MONSTER_BURNING_GROUND = {
+  radius: 42,
+  life: 4,
+  dpsFraction: 0.25,
+  burnDuration: 3,
+  burnPowerFraction: 0.08,
+};
+
+/** Status applied per element when a conversion lands a hit — see `statusFor`. */
+export const MONSTER_ELEMENTAL_STATUS_TUNING = {
+  fire: { durationMult: 4, stacks: 1, powerFraction: 0.35 },
+  poison: { durationMult: 7, stacks: 2, powerFraction: 0.22 },
+  frost: { durationMult: 3, stacks: 2 },
+  lightning: { durationMult: 4, stacks: 1 },
+  unholy: { durationMult: 5, stacks: 1 },
+};
+
+export const MONSTER_AURA_TUNING = {
+  tickInterval: 0.5,
+  terrorAuraRadius: 170,
+  terrorAuraDuration: 1.2,
+  /** Units this brave or braver hold the line instead of breaking. */
+  terrorAuraCourageThreshold: 0.9,
 };
 
 // Re-exported so a consumer that only needs the raw modifier shape doesn't have to

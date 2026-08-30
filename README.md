@@ -240,7 +240,7 @@ src/
 никогда не обращаются друг к другу напрямую — только через `World`, поэтому весь учёт
 урона и телеметрия собраны в одном месте.
 
-Комнаты генерируются из сида: `generateRoom(index, total, rng)` полностью описывает
+Комнаты генерируются из сида: `generateRoom(index, rng)` полностью описывает
 планировку, поэтому забег воспроизводим. Косметическая случайность (частицы, тряска)
 идёт из отдельного генератора, чтобы отрисовка не влияла на симуляцию.
 
@@ -313,11 +313,49 @@ APK окажется в `android\app\build\outputs\apk\debug\app-debug.apk`.
   клавиатуры нет; при активном сенсорном управлении они не рисуются
   (`touchActive` в [`hud.ts`](src/ui/hud.ts) и [`screens.ts`](src/ui/screens.ts)).
 
+**Иконка и splash больше не заглушки Capacitor.** Источники — в
+[`assets/`](assets/) (`icon-foreground.svg`, `icon-background.svg`, `icon-only.svg`,
+`splash.svg`), тот же силуэт, что и инлайновый favicon в [`index.html`](index.html).
+Растеризованы через `@capacitor/assets` в Custom Mode во все плотности
+`android/app/src/main/res/mipmap-*` и `drawable-{port,land}-*`. Эти PNG — обычные
+бинарные ассеты и закоммичены как есть; сама генерация — разовая операция
+(`npx @capacitor/assets generate --android` при исходниках в `assets/`), инструмент
+после неё можно снести — он тянет уязвимые транзитивные зависимости и иначе
+портит `npm audit` в CI. Если пересобирать иконку, `npm install -D
+@capacitor/assets`, прогнать генератор и `npm uninstall @capacitor/assets`.
+
+**Release-сборка подписывается настоящим ключом**, не debug-сертификатом.
+[`android/app/build.gradle`](android/app/build.gradle) читает путь и пароли из
+`android/keystore.properties` — файла нет в репозитории (`android/.gitignore`
+исключает его вместе с `*.jks`/`*.keystore`), у каждой машины и CI свой. Без
+файла `assembleRelease`/`bundleRelease` всё равно соберутся, только не подписанными
+— гейт только на публикацию, не на билд. Сам ключ создаётся один раз:
+
+```powershell
+$env:JAVA_HOME = "C:\Program Files\Android\Android Studio\jbr"
+keytool -genkeypair -v -keystore android/samarkand-release.jks -alias samarkand-release `
+  -keyalg RSA -keysize 2048 -validity 10000 -storepass "<пароль>" `
+  -dname "CN=Samarkand, O=Samarkand, C=CH"
+```
+
+и рядом кладётся `android/keystore.properties`:
+
+```properties
+storeFile=samarkand-release.jks
+storePassword=<пароль>
+keyAlias=samarkand-release
+keyPassword=<тот же пароль — PKCS12 не различает store- и key-пароль>
+```
+
+Дальше `assembleRelease`/`bundleRelease` (та же PowerShell-обвязка, что и выше)
+подписывают билд автоматически. **Файл ключа и пароли нужно унести в отдельное
+хранилище (менеджер паролей, секреты CI) сразу после создания** — потеря ключа
+не убивает приложение навсегда (Play App Signing позволяет сбросить upload-ключ
+через поддержку Google), но без бэкапа это лишний повод писать в поддержку.
+
 Перед публикацией в Play Store остаётся: сменить `appId` в
 `capacitor.config.ts` с заглушки `com.samarkand.game` (после первого релиза он
-уже не меняется), подписать release-сборку своим keystore (не debug-APK),
-нарисовать иконку и splash вместо заглушек Capacitor, завести аккаунт Google
-Play Console.
+уже не меняется) и завести аккаунт Google Play Console.
 
 ## Что дальше
 
@@ -337,6 +375,15 @@ Card. Атрибут `lang` выставляется при загрузке и 
 
 Иконка вкладки тоже процедурная и встроенная: SVG прямо в `data:` URI, так что правило
 «ни одного файла ассетов» остаётся в силе, и запросов на один меньше.
+
+## Приватность
+
+Игра не имеет сервера и аккаунтов: весь прогресс лежит в `localStorage` браузера
+(на Android — в локальном хранилище приложения) и никуда не отправляется, аналитики
+и рекламных SDK тоже нет. Текст политики — [PRIVACY.md](PRIVACY.md), это исходник;
+рабочая ссылка для Play Console / App Store Connect —
+<https://onyx-systems.ch/privacy/samarkand>, страница должна совпадать с файлом.
+Меняя, чем игра распоряжается данными, — обновлять оба сразу.
 
 ## Лицензия
 

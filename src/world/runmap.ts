@@ -1,3 +1,9 @@
+import {
+  ELITE_WEIGHT_DEPTH_BONUS_BASE,
+  MIN_SPECIAL_NODES_PER_RUN,
+  NODE_KIND_WEIGHTS,
+  RUN_MAP_LANES,
+} from '../balance';
 import { RNG } from '../core/rng';
 
 export type NodeKind = 'battle' | 'elite' | 'market' | 'cursed' | 'boss';
@@ -22,9 +28,6 @@ export interface RunMap {
   readonly lanes: number;
 }
 
-/** Lanes available for layout. Three keeps every choice readable at a glance. */
-const LANES = 3;
-
 interface KindWeight {
   kind: NodeKind;
   /** Base weight, before the depth curve. */
@@ -33,12 +36,12 @@ interface KindWeight {
   minDepth: number;
 }
 
-const KIND_WEIGHTS: readonly KindWeight[] = [
-  { kind: 'battle', weight: 100, minDepth: 0 },
-  { kind: 'elite', weight: 34, minDepth: 3 },
-  { kind: 'market', weight: 30, minDepth: 2 },
-  { kind: 'cursed', weight: 26, minDepth: 2 },
-];
+// The actual weights/gates live in `../balance`'s NODE_KIND_WEIGHTS (a Record, for
+// easy editing); flattened here into the array shape this file's logic wants.
+const KIND_WEIGHTS: readonly KindWeight[] = Object.entries(NODE_KIND_WEIGHTS).map(([kind, cfg]) => ({
+  kind: kind as NodeKind,
+  ...cfg,
+}));
 
 /**
  * Build the run's map.
@@ -120,7 +123,7 @@ export function generateRunMap(depths: number, rng: RNG): RunMap {
 
   assignKinds(nodes, byDepth, depths, rng);
 
-  return { nodes, byDepth, depths, lanes: LANES };
+  return { nodes, byDepth, depths, lanes: RUN_MAP_LANES };
 }
 
 function connect(nodes: MapNode[], from: MapNode, to: MapNode): void {
@@ -156,7 +159,7 @@ function assignKinds(nodes: MapNode[], byDepth: number[][], depths: number, rng:
       );
 
       const chosen = rng.pickWeighted(pool, (entry) => {
-        if (entry.kind === 'elite') return entry.weight * (0.4 + depth / depths);
+        if (entry.kind === 'elite') return entry.weight * (ELITE_WEIGHT_DEPTH_BONUS_BASE + depth / depths);
         return entry.weight;
       });
 
@@ -165,8 +168,8 @@ function assignKinds(nodes: MapNode[], byDepth: number[][], depths: number, rng:
     }
   }
 
-  ensureMinimum(nodes, byDepth, depths, 'market', 2, rng);
-  ensureMinimum(nodes, byDepth, depths, 'elite', 2, rng);
+  ensureMinimum(nodes, byDepth, depths, 'market', MIN_SPECIAL_NODES_PER_RUN, rng);
+  ensureMinimum(nodes, byDepth, depths, 'elite', MIN_SPECIAL_NODES_PER_RUN, rng);
 }
 
 /** Convert plain fights into `kind` until the map holds at least `wanted` of them. */

@@ -4,10 +4,8 @@ import {
   DAMAGE_TYPES,
   type DamageOptions,
   type Defenses,
-  mergePackets,
   mitigate,
   rawTotal,
-  scalePackets,
 } from './damage';
 
 /** Defences with nothing on them, so each test can set only what it is about. */
@@ -154,25 +152,6 @@ describe('packet helpers', () => {
         { type: 'fire', amount: 5 },
       ]),
     ).toBe(15);
-  });
-
-  it('scales without mutating the input', () => {
-    const packets = [{ type: 'physical' as const, amount: 10 }];
-    const scaled = scalePackets(packets, 2);
-
-    expect(scaled[0]!.amount).toBe(20);
-    expect(packets[0]!.amount).toBe(10);
-  });
-
-  it('merges packets of the same element', () => {
-    const merged = mergePackets([
-      { type: 'fire', amount: 10 },
-      { type: 'fire', amount: 5 },
-      { type: 'frost', amount: 3 },
-    ]);
-
-    expect(merged).toHaveLength(2);
-    expect(merged.find((p) => p.type === 'fire')!.amount).toBe(15);
   });
 });
 

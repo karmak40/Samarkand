@@ -83,6 +83,13 @@ export class World {
   private grid = new Map<number, Human[]>();
   private gridCols = 0;
 
+  /** Broad-phase grid for `solids`, rebuilt whenever they change (buildings don't move). */
+  private solidGrid = new Map<number, Rect[]>();
+  private solidGridCols = 0;
+
+  /** Reusable `Human[]` buffers for `humansInRadius`, see `acquireHumanBuffer`. */
+  private readonly humanBufferPool: Human[][] = [];
+
   /** Queued lightning arcs to draw this frame: [x1,y1,x2,y2,age]. */
   readonly arcs: Array<{ x1: number; y1: number; x2: number; y2: number; life: number }> = [];
 
@@ -141,6 +148,31 @@ export class World {
       if (b.blocksSight) this.sightBlockers.push(b.rect);
     }
     this.solidsDirty = false;
+    this.rebuildSolidGrid();
+  }
+
+  /**
+   * Bucket every solid rect into the cells it overlaps. Buildings never move, so
+   * this only needs to run when `solids` itself changes (a building collapses),
+   * not every frame — unlike the human grid in `rebuildGrid`.
+   */
+  private rebuildSolidGrid(): void {
+    this.solidGrid.clear();
+    this.solidGridCols = Math.max(1, Math.ceil(this.bounds.w / GRID_CELL));
+    for (const rect of this.solids) {
+      const minCx = Math.floor((rect.x - this.bounds.x) / GRID_CELL);
+      const maxCx = Math.floor((rect.x + rect.w - this.bounds.x) / GRID_CELL);
+      const minCy = Math.floor((rect.y - this.bounds.y) / GRID_CELL);
+      const maxCy = Math.floor((rect.y + rect.h - this.bounds.y) / GRID_CELL);
+      for (let cy = minCy; cy <= maxCy; cy++) {
+        for (let cx = minCx; cx <= maxCx; cx++) {
+          const key = cy * this.solidGridCols + cx;
+          const cell = this.solidGrid.get(key);
+          if (cell) cell.push(rect);
+          else this.solidGrid.set(key, [rect]);
+        }
+      }
+    }
   }
 
   get solidRects(): readonly Rect[] {
@@ -175,9 +207,19 @@ export class World {
     return cy * this.gridCols + cx;
   }
 
-  /** Every living human within `radius` of a point. Allocates one array per call. */
+  /**
+   * Every living human within `radius` of a point. Allocates a fresh array every
+   * call — fine for cold paths (once per explosion, once per lightning jump), but
+   * avoid it on anything that runs every frame per entity. Use
+   * `humansInRadiusInto` with a buffer from `acquireHumanBuffer` there instead.
+   */
   humansInRadius(x: number, y: number, radius: number): Human[] {
-    const out: Human[] = [];
+    return this.humansInRadiusInto(x, y, radius, []);
+  }
+
+  /** Same query, writing into a caller-owned (cleared) array instead of allocating. */
+  humansInRadiusInto(x: number, y: number, radius: number, out: Human[]): Human[] {
+    out.length = 0;
     const r2 = radius * radius;
     const cells = Math.ceil(radius / GRID_CELL);
     const baseCx = Math.floor((x - this.bounds.x) / GRID_CELL);
@@ -197,8 +239,31 @@ export class World {
   }
 
   /**
+   * Borrow a scratch `Human[]` for a `humansInRadiusInto` call; return it with
+   * `releaseHumanBuffer` once done with the results. Safe under reentrancy — e.g.
+   * a kill triggered from inside a loop over one buffer (an on-kill skill effect,
+   * chain lightning) that itself queries `humansInRadius` gets its own buffer
+   * from the pool rather than clobbering the caller's. Forgetting to release just
+   * means that buffer goes back to being garbage-collected, not a correctness bug.
+   */
+  acquireHumanBuffer(): Human[] {
+    return this.humanBufferPool.pop() ?? [];
+  }
+
+  releaseHumanBuffer(buf: Human[]): void {
+    buf.length = 0;
+    this.humanBufferPool.push(buf);
+  }
+
+  /**
    * Closest living human to a point, optionally requiring line of sight.
    * This is the auto-aim query, so it runs every frame and avoids allocation.
+   *
+   * Walks the broad-phase grid outward in square rings from the query point
+   * instead of scanning every human — a room with dozens of defenders spread
+   * across a large arena only visits the handful actually nearby. Rings stop
+   * once the closest a further ring could possibly be already loses to the best
+   * candidate found so far.
    */
   nearestHuman(
     x: number,
@@ -210,20 +275,52 @@ export class World {
     let best: Human | null = null;
     let bestD2 = maxRange * maxRange;
 
-    for (const human of this.humans) {
-      if (!human.alive || human === exclude) continue;
-      if (human.untargetable) continue;
-      const d2 = dist2(x, y, human.x, human.y);
-      if (d2 >= bestD2) continue;
-      if (requireLineOfSight && !this.hasLineOfSight(x, y, human.x, human.y)) continue;
-      best = human;
-      bestD2 = d2;
+    const maxRing = Math.ceil(maxRange / GRID_CELL);
+    const baseCx = Math.floor((x - this.bounds.x) / GRID_CELL);
+    const baseCy = Math.floor((y - this.bounds.y) / GRID_CELL);
+
+    for (let ring = 0; ring <= maxRing; ring++) {
+      if (ring > 0) {
+        // Any point in a cell `ring` cells away is at least `(ring - 1) * GRID_CELL`
+        // from the query point — a conservative bound, but enough to stop early
+        // once nothing farther out could beat the current best.
+        const nearestPossible = (ring - 1) * GRID_CELL;
+        if (nearestPossible * nearestPossible > bestD2) break;
+      }
+
+      for (let dy = -ring; dy <= ring; dy++) {
+        for (let dx = -ring; dx <= ring; dx++) {
+          // Only the ring's boundary is new; its interior was covered by earlier rings.
+          if (Math.max(Math.abs(dx), Math.abs(dy)) !== ring) continue;
+
+          const cell = this.grid.get((baseCy + dy) * this.gridCols + (baseCx + dx));
+          if (!cell) continue;
+
+          for (const human of cell) {
+            if (!human.alive || human === exclude || human.untargetable) continue;
+            const d2 = dist2(x, y, human.x, human.y);
+            if (d2 >= bestD2) continue;
+            if (requireLineOfSight && !this.hasLineOfSight(x, y, human.x, human.y)) continue;
+            best = human;
+            bestD2 = d2;
+          }
+        }
+      }
     }
+
     return best;
   }
 
   hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
+    // Cheap bounding-box reject before the real (and pricier) segment/rect test —
+    // most buildings in a room aren't anywhere near a given sightline.
+    const minX = Math.min(ax, bx);
+    const maxX = Math.max(ax, bx);
+    const minY = Math.min(ay, by);
+    const maxY = Math.max(ay, by);
+
     for (const rect of this.sightRects) {
+      if (rect.x + rect.w < minX || rect.x > maxX || rect.y + rect.h < minY || rect.y > maxY) continue;
       if (segmentRectHit(ax, ay, bx, by, rect)) return false;
     }
     return true;
@@ -231,15 +328,29 @@ export class World {
 
   /** Push a circle out of every solid and the arena walls. Returns true if moved. */
   collideWithWorld(entity: { x: number; y: number; radius: number }): boolean {
+    if (this.solidsDirty) this.rebuildSolids();
     let moved = false;
 
-    for (const rect of this.solidRects) {
-      if (!circleRectOverlap(entity.x, entity.y, entity.radius, rect)) continue;
-      const fixed = resolveCircleRect(entity.x, entity.y, entity.radius, rect);
-      if (fixed) {
-        entity.x = fixed.x;
-        entity.y = fixed.y;
-        moved = true;
+    const cells = Math.ceil(entity.radius / GRID_CELL) + 1;
+    const baseCx = Math.floor((entity.x - this.bounds.x) / GRID_CELL);
+    const baseCy = Math.floor((entity.y - this.bounds.y) / GRID_CELL);
+
+    for (let dy = -cells; dy <= cells; dy++) {
+      for (let dx = -cells; dx <= cells; dx++) {
+        const cell = this.solidGrid.get((baseCy + dy) * this.solidGridCols + (baseCx + dx));
+        if (!cell) continue;
+        for (const rect of cell) {
+          // A rect spanning several cells is bucketed into each of them, so the
+          // same rect can turn up again from an adjacent cell — harmless, since
+          // by then it's already resolved and this overlap check just skips it.
+          if (!circleRectOverlap(entity.x, entity.y, entity.radius, rect)) continue;
+          const fixed = resolveCircleRect(entity.x, entity.y, entity.radius, rect);
+          if (fixed) {
+            entity.x = fixed.x;
+            entity.y = fixed.y;
+            moved = true;
+          }
+        }
       }
     }
 
@@ -358,7 +469,9 @@ export class World {
     this.camera.shake(shake);
     this.sound.explosion({ x, y }, radius / 160);
 
-    for (const human of this.humansInRadius(x, y, radius)) {
+    const nearby = this.acquireHumanBuffer();
+    this.humansInRadiusInto(x, y, radius, nearby);
+    for (const human of nearby) {
       const d = Math.hypot(human.x - x, human.y - y);
       const falloff = falloffMin + (1 - falloffMin) * (1 - Math.min(1, d / radius));
       const scaled = packets.map((p) => ({ type: p.type, amount: p.amount * falloff }));
@@ -381,6 +494,7 @@ export class World {
 
       for (const status of statuses) human.statuses.apply(status);
     }
+    this.releaseHumanBuffer(nearby);
 
     if (hurtsBuildings) {
       for (const building of this.buildings) {
@@ -412,11 +526,17 @@ export class World {
     const struck = new Set<number>([from.id]);
     let current = packets;
 
+    // Reused across jumps — each jump fully consumes the candidates it finds into
+    // `next` before `takeDamage` runs, so nothing here overlaps with a nested
+    // `humansInRadius` a kill-triggered effect might make mid-jump.
+    const nearby = this.acquireHumanBuffer();
+
     for (let i = 0; i < jumps; i++) {
       let next: Human | null = null;
       let bestD2 = range * range;
 
-      for (const candidate of this.humansInRadius(source.x, source.y, range)) {
+      this.humansInRadiusInto(source.x, source.y, range, nearby);
+      for (const candidate of nearby) {
         if (struck.has(candidate.id) || !candidate.alive) continue;
         const d2 = dist2(source.x, source.y, candidate.x, candidate.y);
         if (d2 < bestD2) {
@@ -440,6 +560,8 @@ export class World {
       struck.add(next.id);
       source = next;
     }
+
+    this.releaseHumanBuffer(nearby);
   }
 
   /** Run a callback after `delay` seconds of simulated time. */
@@ -467,6 +589,10 @@ export class World {
   }
 
   private updateHazards(dt: number): void {
+    // Reused across every hazard this call — each hazard's use is fully consumed
+    // (looped over and discarded) before the next one refills it.
+    const nearby = this.acquireHumanBuffer();
+
     for (let i = this.hazards.length - 1; i >= 0; i--) {
       const hazard = this.hazards[i]!;
       hazard.life -= dt;
@@ -481,7 +607,8 @@ export class World {
       if (hazard.tickTimer > 0) continue;
       hazard.tickTimer = 0.25;
 
-      for (const human of this.humansInRadius(hazard.x, hazard.y, hazard.radius)) {
+      this.humansInRadiusInto(hazard.x, hazard.y, hazard.radius, nearby);
+      for (const human of nearby) {
         human.takeDamage(
           {
             packets: [{ type: hazard.type, amount: hazard.dps * 0.25 }],
@@ -510,6 +637,8 @@ export class World {
         });
       }
     }
+
+    this.releaseHumanBuffer(nearby);
   }
 
   drawHazards(ctx: CanvasRenderingContext2D): void {
@@ -708,9 +837,16 @@ export class World {
     return n;
   }
 
-  /** All entities that need y-sorted rendering. */
+  private readonly drawablesBuffer: Entity[] = [];
+
+  /**
+   * All entities that need y-sorted rendering. Reuses the same array every call —
+   * safe because the caller (the renderer) only ever sorts and iterates it once
+   * per frame before the next call overwrites it, and never holds onto it.
+   */
   drawables(): Entity[] {
-    const list: Entity[] = [];
+    const list = this.drawablesBuffer;
+    list.length = 0;
     for (const b of this.buildings) list.push(b);
     for (const h of this.humans) list.push(h);
     for (const p of this.pickups) list.push(p);

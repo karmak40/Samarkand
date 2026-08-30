@@ -1,7 +1,7 @@
 import { Ambience } from './audio/ambience';
 import { AudioEngine } from './audio/engine';
 import { SoundBank } from './audio/sfx';
-import { BUILDING_HP_SCALE_PER_ROOM_INDEX } from './balance';
+import { BUILDING_HP_SCALE_PER_ROOM_INDEX, ON_KILL_EFFECTS } from './balance';
 import { type AdResult, type AdService, SimulatedAdService } from './core/ads';
 import { Camera } from './core/camera';
 import { Input } from './core/input';
@@ -99,6 +99,8 @@ export class Game {
   private readonly ambience = new Ambience(this.audio);
   /** Recent damage taken, decaying — one of the inputs to the ambience mix. */
   private heat = 0;
+  /** Whether a boss is alive in the current room, refreshed once per `step()`. */
+  private bossAlive = false;
 
   /**
    * Rewarded-video revive.
@@ -368,7 +370,7 @@ export class Game {
       const request = node.kind === 'boss' ? 'boss' : node.kind === 'elite' ? 'elite' : 'battle';
       this.plansByNode.set(
         node.id,
-        generateRoom(difficultyBase + node.depth, totalRunRooms, planRng, request, biome),
+        generateRoom(difficultyBase + node.depth, planRng, request, biome),
       );
     }
 
@@ -489,62 +491,68 @@ export class Game {
     const areaSize = stats.get('areaSize');
 
     if (stats.has('explodeOnKill')) {
-      const power = stats.get('damage') * (0.7 + 0.35 * stats.count('explodeOnKill'));
+      const cfg = ON_KILL_EFFECTS.explodeOnKill;
+      const power = stats.get('damage') * (cfg.baseFraction + cfg.perStackFraction * stats.count('explodeOnKill'));
       world.explode(
         human.x,
         human.y,
-        90 * areaSize,
+        cfg.radius * areaSize,
         [{ type: 'physical', amount: power * stats.damageMultiplierFor('physical') }],
         t('skill.flesh-burst.name'),
-        { color: '#c0343c', knockback: 140 },
+        { color: '#c0343c', knockback: cfg.knockback },
       );
     }
 
     if (stats.has('poisonCloud')) {
+      const cfg = ON_KILL_EFFECTS.poisonCloud;
       world.addGroundHazard({
         x: human.x,
         y: human.y,
-        radius: 62 * areaSize,
-        life: 5,
-        dps: stats.get('damage') * 0.3 * stats.damageMultiplierFor('poison'),
+        radius: cfg.radius * areaSize,
+        life: cfg.life,
+        dps: stats.get('damage') * cfg.dpsFraction * stats.damageMultiplierFor('poison'),
         type: 'poison',
         color: '#8ed44f',
         sourceLabel: t('effect.plagueCloud'),
         status: {
           id: 'poison',
-          duration: 5,
-          stacks: 2,
-          power: stats.get('damage') * 0.06,
+          duration: cfg.statusDuration,
+          stacks: cfg.statusStacks,
+          power: stats.get('damage') * cfg.statusPowerFraction,
           sourceLabel: t('effect.plagueCloud'),
         },
       });
     }
 
     if (stats.has('fearOnKill')) {
-      for (const other of world.humansInRadius(human.x, human.y, 200 * areaSize)) {
+      const cfg = ON_KILL_EFFECTS.fearOnKill;
+      const nearby = world.acquireHumanBuffer();
+      world.humansInRadiusInto(human.x, human.y, cfg.radius * areaSize, nearby);
+      for (const other of nearby) {
         if (other.archetype.role === 'boss') continue;
-        other.statuses.apply({ id: 'fear', duration: 2.5, sourceLabel: t('skill.dread-roar.name') });
+        other.statuses.apply({ id: 'fear', duration: cfg.duration, sourceLabel: t('skill.dread-roar.name') });
       }
+      world.releaseHumanBuffer(nearby);
     }
 
     if (stats.has('deathBlossom')) {
+      const cfg = ON_KILL_EFFECTS.deathBlossom;
       const crit = false;
       const { packets, statuses } = this.monster.buildAttack(crit);
-      const shards = 8;
-      const scaled = packets.map((p) => ({ type: p.type, amount: p.amount * 0.4 }));
+      const scaled = packets.map((p) => ({ type: p.type, amount: p.amount * cfg.damageFraction }));
 
-      for (let i = 0; i < shards; i++) {
-        const angle = (i / shards) * TAU;
+      for (let i = 0; i < cfg.shards; i++) {
+        const angle = (i / cfg.shards) * TAU;
         world.spawnProjectile({
           x: human.x,
           y: human.y,
           angle,
-          speed: 460,
+          speed: cfg.speed,
           packets: scaled,
           faction: 'monster',
           sourceLabel: t('skill.death-blossom.name'),
-          radius: 5,
-          range: 260,
+          radius: cfg.projectileRadius,
+          range: cfg.range,
           color: this.monster.body.glowColor,
           glow: '#ffffff',
           shape: 'shard',
@@ -556,7 +564,7 @@ export class Game {
     }
 
     if (stats.has('devourCorpses')) {
-      world.spawnPickup('blood', human.x, human.y, 5 + this.roomIndex);
+      world.spawnPickup('blood', human.x, human.y, ON_KILL_EFFECTS.devourCorpses.baseAmount + this.roomIndex);
     }
 
     void sourceLabel;
@@ -991,7 +999,7 @@ export class Game {
     const crowd = Math.min(1, alive / 8);
     const tension = this.exitReady ? 0.05 : Math.min(1, crowd * 0.8 + this.heat * 0.4);
     const danger = this.monster.alive ? Math.max(0, 1 - this.monster.healthFraction / 0.35) : 0;
-    const boss = !this.exitReady && this.world.humans.some((h) => h.alive && h.archetype.role === 'boss');
+    const boss = !this.exitReady && this.bossAlive;
 
     this.ambience.update(tension, danger, boss);
   }
@@ -1051,6 +1059,11 @@ export class Game {
     if (!this.exitReady && this.checkStalledRoom(simDt)) {
       for (const human of world.humans) human.alive = false;
     }
+
+    // Cached once per simulation step rather than rescanned every render frame in
+    // `updateAudio` — boss presence only ever changes here (spawn/death/stall-kill),
+    // never between one fixed step and the next.
+    this.bossAlive = world.humans.some((h) => h.alive && h.archetype.role === 'boss');
 
     this.checkRoomProgress();
   }

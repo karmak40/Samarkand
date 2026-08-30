@@ -1,6 +1,29 @@
-import { SPAWN_COST } from '../balance';
+import {
+  ARENA_WALL_THICKNESS,
+  BIOME_1_BOSS_WEIGHTS,
+  BIOME_ROOM_COUNT,
+  CIVILIAN_FALLOFF_FLOOR,
+  CIVILIAN_FALLOFF_PER_DEPTH,
+  ELITE_CHAMPIONS_EARLY,
+  ELITE_CHAMPIONS_LATE,
+  ELITE_CHAMPIONS_LATE_MIN_DEPTH,
+  ENEMY_BUDGET_BASE,
+  ENEMY_BUDGET_PER_DEPTH,
+  EXTRA_BUILDINGS_PER_DEPTH_DIVISOR,
+  GUARANTEED_RANGED_BASE,
+  GUARANTEED_RANGED_PER_DEPTH_DIVISOR,
+  RELIC_COUNT,
+  ROOM_KIND_CONFIG,
+  type RoomKindConfig,
+  ROOM_KIND_ROLL,
+  ROOM_SIZE_GROWTH_PER_DEPTH,
+  SPAWN_COST,
+  TURRET_BUDGET_FRACTION,
+  WARCAMP_BOSS_ID,
+  WARCAMP_STRONGHOLD_COUNT,
+} from '../balance';
 import { type BuildingKind } from '../entities/building';
-import { BOSS_IDS, HUMAN_ARCHETYPES, type HumanId } from '../entities/human';
+import { HUMAN_ARCHETYPES, type BossId, type HumanId } from '../entities/human';
 import { clamp, type Rect, rectsOverlap, segmentRectHit, TAU, type Vec2 } from '../core/math';
 import { RNG } from '../core/rng';
 import { roomNameBossSuffix, roomNamePrefixes, roomNameRoots } from '../i18n';
@@ -13,9 +36,11 @@ export type ArenaRequest = 'battle' | 'elite' | 'boss';
 /**
  * Rooms per biome/map. The run generates one biome's worth of map at a time — see
  * `Game.generateBiome` — so this is also the single source of truth both sides
- * share for how deep each biome's own map goes.
+ * share for how deep each biome's own map goes. The actual count lives in
+ * `../balance`'s `BIOME_ROOM_COUNT`; re-exported under this name since every call
+ * site already imports `BIOME_ROOMS` from here.
  */
-export const BIOME_ROOMS = 12;
+export const BIOME_ROOMS = BIOME_ROOM_COUNT;
 
 export interface PlannedBuilding {
   kind: BuildingKind;
@@ -62,73 +87,21 @@ export interface RoomPlan {
  * The run map decides *what kind of stop* a node is; this only picks how a plain
  * settlement looks, so consecutive battles don't feel identical.
  */
-export function roomKindForDepth(index: number, totalRooms: number, rng: RNG): RoomKind {
-  void totalRooms;
+export function roomKindForDepth(index: number, rng: RNG): RoomKind {
+  const roll = ROOM_KIND_ROLL;
   if (index === 0) return 'hamlet';
-  if (index % 4 === 3) return 'shrine';
-  if (index >= 6 && rng.bool(0.45)) return 'fortified';
-  return rng.bool(0.3) ? 'hamlet' : 'village';
+  if (index % roll.shrineInterval === roll.shrineOffset) return 'shrine';
+  if (index >= roll.fortifiedMinDepth && rng.bool(roll.fortifiedChance)) return 'fortified';
+  return rng.bool(roll.hamletChance) ? 'hamlet' : 'village';
 }
 
 /** Depth of the boulder/masonry band drawn around every arena. */
-const WALL_THICKNESS = 46;
+const WALL_THICKNESS = ARENA_WALL_THICKNESS;
 
-interface KindConfig {
-  /** Arena size in world units at depth 0; grows with depth. */
-  size: [number, number];
-  buildingCount: [number, number];
-  /** Extra weight for these building kinds. */
-  palette: BuildingKind[];
-  palisade: boolean;
-  enemyBudgetScale: number;
-}
-
-const KIND_CONFIG: Record<RoomKind, KindConfig> = {
-  hamlet: {
-    size: [1180, 900],
-    buildingCount: [5, 9],
-    palette: ['hut', 'hut', 'house', 'stack', 'cart', 'well'],
-    palisade: false,
-    enemyBudgetScale: 0.85,
-  },
-  village: {
-    size: [1360, 1050],
-    buildingCount: [9, 15],
-    palette: ['house', 'house', 'hut', 'granary', 'longhouse', 'well', 'cart', 'stack'],
-    palisade: false,
-    enemyBudgetScale: 1,
-  },
-  fortified: {
-    size: [1450, 1120],
-    buildingCount: [10, 16],
-    palette: ['house', 'longhouse', 'watchtower', 'granary', 'watchtower', 'well'],
-    palisade: true,
-    enemyBudgetScale: 1.25,
-  },
-  shrine: {
-    size: [1280, 1020],
-    buildingCount: [7, 11],
-    palette: ['chapel', 'house', 'hut', 'well', 'chapel'],
-    palisade: false,
-    enemyBudgetScale: 1.1,
-  },
-  elite: {
-    // Deliberately tight: an elite is a stand-and-fight, not a chase. Fewer
-    // buildings also means fewer places for the player to break line of sight.
-    size: [1180, 940],
-    buildingCount: [5, 8],
-    palette: ['watchtower', 'longhouse', 'house', 'well', 'cart'],
-    palisade: true,
-    enemyBudgetScale: 1.15,
-  },
-  boss: {
-    size: [1560, 1240],
-    buildingCount: [6, 10],
-    palette: ['chapel', 'watchtower', 'longhouse', 'wall'],
-    palisade: true,
-    enemyBudgetScale: 1.4,
-  },
-};
+// The actual per-flavour layout/difficulty numbers live in ../balance's
+// ROOM_KIND_CONFIG now -- this alias keeps every local reference working.
+const KIND_CONFIG = ROOM_KIND_CONFIG;
+type KindConfig = RoomKindConfig;
 
 /**
  * Builds a settlement.
@@ -146,25 +119,24 @@ const KIND_CONFIG: Record<RoomKind, KindConfig> = {
  */
 export function generateRoom(
   index: number,
-  totalRooms: number,
   rng: RNG,
   request: ArenaRequest = 'battle',
   biome: 1 | 2 = 1,
 ): RoomPlan {
   const kind: RoomKind =
-    request === 'boss' ? 'boss' : request === 'elite' ? 'elite' : roomKindForDepth(index, totalRooms, rng);
+    request === 'boss' ? 'boss' : request === 'elite' ? 'elite' : roomKindForDepth(index, rng);
   const config = KIND_CONFIG[kind];
   // The war-camp fields a stronghold or two wherever it would otherwise field a
   // watchtower — the building `planSpawns` pairs a siege engine with, the same way
   // a watchtower is paired with a ballista.
   const palette =
     biome === 2 && (kind === 'fortified' || kind === 'elite' || kind === 'boss')
-      ? [...config.palette, 'stronghold' as const, 'stronghold' as const]
+      ? [...config.palette, ...Array<BuildingKind>(WARCAMP_STRONGHOLD_COUNT).fill('stronghold')]
       : config.palette;
 
   // Arenas grow only slightly with depth. Earlier tuning at 3% per room reached
   // four screens across by the finale, which turned late fights into long walks.
-  const growth = 1 + index * 0.012;
+  const growth = 1 + index * ROOM_SIZE_GROWTH_PER_DEPTH;
   const width = Math.round(config.size[0] * growth * rng.range(0.94, 1.08));
   const height = Math.round(config.size[1] * growth * rng.range(0.94, 1.08));
   const bounds: Rect = { x: 0, y: 0, w: width, h: height };
@@ -192,7 +164,9 @@ export function generateRoom(
   }
 
   // --- houses --------------------------------------------------------------
-  const target = rng.int(config.buildingCount[0], config.buildingCount[1]) + Math.floor(index / 3);
+  const target =
+    rng.int(config.buildingCount[0], config.buildingCount[1]) +
+    Math.floor(index / EXTRA_BUILDINGS_PER_DEPTH_DIVISOR);
   let attempts = 0;
 
   while (buildings.length < target && attempts < target * 40) {
@@ -248,7 +222,15 @@ export function generateRoom(
   // on a daily seed faces the same one. The war-camp's boss is fixed rather than
   // rolled — the Khagan is the run's real ending, not one of three interchangeable
   // finales the way the first biome's boss is.
-  const bossId: HumanId | null = kind === 'boss' ? (biome === 2 ? 'khagan' : rng.pick(BOSS_IDS)) : null;
+  const bossId: HumanId | null =
+    kind === 'boss'
+      ? biome === 2
+        ? WARCAMP_BOSS_ID
+        : rng.pickWeighted(
+            Object.keys(BIOME_1_BOSS_WEIGHTS) as BossId[],
+            (id) => BIOME_1_BOSS_WEIGHTS[id],
+          )
+      : null;
   const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId, biome);
 
   const name =
@@ -388,7 +370,12 @@ function placeRelics(
 ): Vec2[] {
   // Elites promise a relic and must deliver two, since they are the reason to pick
   // the harder branch at all.
-  const count = kind === 'boss' ? 3 : kind === 'elite' ? 2 : 1 + (index >= 4 ? 1 : 0);
+  const count =
+    kind === 'boss'
+      ? RELIC_COUNT.boss
+      : kind === 'elite'
+        ? RELIC_COUNT.elite
+        : RELIC_COUNT.battleBase + (index >= RELIC_COUNT.battleBonusMinDepth ? 1 : 0);
   const placed: Vec2[] = [];
   const minFromEntry = 420;
   const minApart = 300;
@@ -466,7 +453,7 @@ function planSpawns(
   // An elite garrison is defined by *who* holds it, not by how many. Champions are
   // seeded first so the fight has a shape even before the budget is spent.
   if (kind === 'elite') {
-    const champions: HumanId[] = index >= 6 ? ['knight', 'knight', 'priest'] : ['knight', 'priest'];
+    const champions = index >= ELITE_CHAMPIONS_LATE_MIN_DEPTH ? ELITE_CHAMPIONS_LATE : ELITE_CHAMPIONS_EARLY;
     for (const id of champions) {
       const point = placementFor(id, bounds, buildings, monsterStart, rng);
       spawns.push({ id, x: point.x, y: point.y });
@@ -479,7 +466,7 @@ function planSpawns(
 
   // Raised from 8 to cover the guaranteed ranged defender, which otherwise ate
   // most of a first room's budget on its own.
-  let budget = (11 + index * 5) * config.enemyBudgetScale;
+  let budget = (ENEMY_BUDGET_BASE + index * ENEMY_BUDGET_PER_DEPTH) * config.enemyBudgetScale;
 
   const available = (Object.keys(HUMAN_ARCHETYPES) as HumanId[]).filter((id) => {
     const a = HUMAN_ARCHETYPES[id];
@@ -501,7 +488,7 @@ function planSpawns(
     const spot = placeOnWall(building.rect, bounds, buildings, radius) ?? placeTurret(building.rect, bounds, buildings, rng);
     if (!spot) continue;
     spawns.push({ id: turretId, x: spot.x, y: spot.y, mountedBuildingIndex: i });
-    budget -= SPAWN_COST[turretId] * 0.5;
+    budget -= SPAWN_COST[turretId] * TURRET_BUDGET_FRACTION;
   }
 
   // Guarantee a ranged presence from the very first room. A settlement defended
@@ -511,7 +498,7 @@ function planSpawns(
     return role === 'ranged' || role === 'support';
   });
   if (rangedPool.length > 0) {
-    const guaranteed = 1 + Math.floor(index / 3);
+    const guaranteed = GUARANTEED_RANGED_BASE + Math.floor(index / GUARANTEED_RANGED_PER_DEPTH_DIVISOR);
     for (let i = 0; i < guaranteed && budget > 0; i++) {
       const id = rng.pick(rangedPool);
       budget -= SPAWN_COST[id];
@@ -525,7 +512,8 @@ function planSpawns(
     const id = rng.pickWeighted(available, (candidate) => {
       const a = HUMAN_ARCHETYPES[candidate];
       // Later rooms shift the mix away from civilians toward real soldiers.
-      const civilianFalloff = a.role === 'civilian' ? Math.max(0.15, 1 - index * 0.12) : 1;
+      const civilianFalloff =
+        a.role === 'civilian' ? Math.max(CIVILIAN_FALLOFF_FLOOR, 1 - index * CIVILIAN_FALLOFF_PER_DEPTH) : 1;
       return a.spawnWeight * civilianFalloff;
     });
 
