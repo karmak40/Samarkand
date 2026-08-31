@@ -1,3 +1,6 @@
+import type { PluginListenerHandle } from '@capacitor/core';
+import type { AdMobPlugin } from '@capacitor-community/admob';
+
 /**
  * Rewarded video, kept behind an interface for one reason: the game does not yet know
  * where it ships. A portal (CrazyGames, Poki) hands you its own SDK and its own ad
@@ -212,4 +215,155 @@ export class PokiAdService implements AdService {
   notifyGameplayStop(): void {
     this.sdk?.gameplayStop();
   }
+}
+
+// ---- AdMob (Android, via Capacitor) ---------------------------------------------
+
+/**
+ * Google's published test ad unit — always fills, and requests against it can never
+ * turn into disallowed clicks on a real account. Real placements exist in the AdMob
+ * console per app; there is no "default" one to fall back to like a portal's shared
+ * inventory, so shipping without an override here means shipping test creatives.
+ */
+const TEST_REWARDED_AD_UNIT_ID = 'ca-app-pub-3940256099942544/5224354917';
+
+/**
+ * Real rewarded ads for the Android build. The Google Mobile Ads SDK glue is behind a
+ * dynamic `import()` rather than a static one — a plain web or portal build never
+ * constructs this class, and shouldn't pay bundle size for code it will never call,
+ * the same reasoning `loadScript` keeps the CrazyGames/Poki SDKs out until their own
+ * build actually wants them.
+ *
+ * Consent is requested through Google's UMP flow before any ad loads. Play policy
+ * requires this for EEA/UK players; the call is one line either way, so it is not
+ * worth special-casing by region.
+ *
+ * The ad unit ID defaults to Google's test ID above; override with
+ * `VITE_ADMOB_REWARDED_UNIT_ID` once a real AdMob ad unit exists. The AdMob *app* ID
+ * is a separate, build-time native setting — the `<meta-data>` in
+ * `android/app/src/main/AndroidManifest.xml` — and needs to be swapped there too.
+ *
+ * Once a real ad unit is in play, this stops serving test creatives to everyone —
+ * including whoever is holding the phone to check the revive flow still works.
+ * `VITE_ADMOB_TEST_DEVICE_IDS` (comma-separated) opts specific devices back into test
+ * ads on an otherwise-real build, so testing a release build never means watching, or
+ * risking an accidental tap on, a real ad. Personal to whoever's device it is, so it
+ * belongs in a git-ignored `.env.local`, not the committed `.env.production` — see
+ * the "Реклама" section in README.md for how to find a device's ID.
+ */
+export class AdMobAdService implements AdService {
+  private plugin: AdMobPlugin | null = null;
+  private events: typeof import('@capacitor-community/admob') | null = null;
+  private loaded = false;
+
+  private readonly adUnitId = import.meta.env.VITE_ADMOB_REWARDED_UNIT_ID ?? TEST_REWARDED_AD_UNIT_ID;
+  private readonly isTesting = !import.meta.env.VITE_ADMOB_REWARDED_UNIT_ID;
+  private readonly testingDevices = (import.meta.env.VITE_ADMOB_TEST_DEVICE_IDS ?? '')
+    .split(',')
+    .map((id) => id.trim())
+    .filter((id) => id.length > 0);
+
+  async init(): Promise<void> {
+    const mod = await import('@capacitor-community/admob');
+    this.events = mod;
+    this.plugin = mod.AdMob;
+
+    // A consent step that fails outright (no GDPR/US message configured yet in the
+    // AdMob console, a network hiccup) shouldn't take rewarded ads down with it — most
+    // players aren't in a region that requires it anyway. Swallowed here rather than
+    // left to the caller, since by the time `main.ts` sees an exception it can only
+    // discard this whole service, not retry just the one step.
+    try {
+      const consent = await mod.AdMob.requestConsentInfo();
+      if (consent.isConsentFormAvailable && consent.status === mod.AdmobConsentStatus.REQUIRED) {
+        await mod.AdMob.showConsentForm();
+      }
+    } catch (error) {
+      console.warn('[samarkand] AdMob consent step failed, continuing without it:', error);
+    }
+
+    // Not child-directed and not a general-audience ad slate: the game itself is a
+    // violent horror roguelite, so requesting kid-safe creatives would be the wrong
+    // default even before consent enters into it.
+    await mod.AdMob.initialize({
+      tagForChildDirectedTreatment: false,
+      tagForUnderAgeOfConsent: false,
+      maxAdContentRating: mod.MaxAdContentRating.Teen,
+      ...(this.testingDevices.length > 0
+        ? { initializeForTesting: true, testingDevices: this.testingDevices }
+        : {}),
+    });
+
+    await mod.AdMob.addListener(mod.RewardAdPluginEvents.Loaded, () => {
+      this.loaded = true;
+    });
+    await mod.AdMob.addListener(mod.RewardAdPluginEvents.FailedToLoad, () => {
+      this.loaded = false;
+    });
+
+    await this.preload();
+  }
+
+  /** Fetches the next ad ahead of time so a dying player never waits on a network call. */
+  private async preload(): Promise<void> {
+    if (!this.plugin) return;
+    try {
+      await this.plugin.prepareRewardVideoAd({ adId: this.adUnitId, isTesting: this.isTesting });
+    } catch (error) {
+      console.warn('[samarkand] rewarded ad failed to preload:', error);
+    }
+  }
+
+  isRewardedAdAvailable(): boolean {
+    return this.loaded;
+  }
+
+  /**
+   * `showRewardVideoAd()`'s own promise settles on the SDK's terms, which vary by
+   * platform in exactly when they fire relative to dismissal. The three events below
+   * are what every platform fires reliably, so `declined` vs `completed` is read off
+   * `Dismissed` (gated on whether `Rewarded` already landed) rather than off the call's
+   * return value.
+   */
+  showRewardedAd(): Promise<AdResult> {
+    const plugin = this.plugin;
+    const events = this.events;
+    if (!plugin || !events || !this.loaded) return Promise.resolve('unavailable');
+
+    return new Promise((resolve) => {
+      let earned = false;
+      let settled = false;
+      const handles: Promise<PluginListenerHandle>[] = [];
+
+      const settle = (result: AdResult): void => {
+        if (settled) return;
+        settled = true;
+        void Promise.all(handles).then((list) => list.forEach((handle) => void handle.remove()));
+        resolve(result);
+        void this.preload();
+      };
+
+      handles.push(
+        plugin.addListener(events.RewardAdPluginEvents.Rewarded, () => {
+          earned = true;
+        }),
+      );
+      handles.push(
+        plugin.addListener(events.RewardAdPluginEvents.Dismissed, () => {
+          settle(earned ? 'completed' : 'declined');
+        }),
+      );
+      handles.push(
+        plugin.addListener(events.RewardAdPluginEvents.FailedToShow, () => {
+          settle('unavailable');
+        }),
+      );
+
+      plugin.showRewardVideoAd().catch(() => settle('unavailable'));
+    });
+  }
+
+  notifyLoadingFinished(): void {}
+  notifyGameplayStart(): void {}
+  notifyGameplayStop(): void {}
 }

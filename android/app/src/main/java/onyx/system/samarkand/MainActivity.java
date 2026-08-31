@@ -1,4 +1,4 @@
-package com.samarkand.game;
+package onyx.system.samarkand;
 
 import com.getcapacitor.BridgeActivity;
 

@@ -2150,6 +2150,31 @@ export const EXTRA_BUILDINGS_PER_DEPTH_DIVISOR = 3;
 export const ENEMY_BUDGET_BASE = 11;
 export const ENEMY_BUDGET_PER_DEPTH = 5;
 
+/**
+ * Extra difficulty layered onto rooms 1-4 specifically, fading to +0% by room 5.
+ *
+ * Player levels 2-4 land in these rooms (level 2 needs only 8 cumulative XP, level 4
+ * only 42 — see `MONSTER_XP_CURVE`), but player power comes entirely from picked
+ * skill cards, not from level itself, and card rarity odds are keyed to room depth.
+ * `ENEMY_TIER_SCALING`/`ENEMY_BUDGET_PER_DEPTH` above already correctly tune room 5+,
+ * so this is a separate, additive, front-loaded bonus rather than a change to that
+ * global rate (which would re-harden the late game too).
+ */
+export const EARLY_ROOM_DIFFICULTY = {
+  startRoomIndex: 1,
+  endRoomIndex: 5,
+  hpBonus: 0.15,
+  damageBonus: 0.1,
+  budgetBonus: 0.25,
+};
+
+/** Linear taper from the full `EARLY_ROOM_DIFFICULTY` bonus down to 0 at `endRoomIndex`. */
+export function earlyRoomDifficultyFraction(index: number): number {
+  const { startRoomIndex, endRoomIndex } = EARLY_ROOM_DIFFICULTY;
+  if (index < startRoomIndex || index >= endRoomIndex) return 0;
+  return 1 - (index - startRoomIndex) / (endRoomIndex - startRoomIndex);
+}
+
 /** Civilian spawn weight decays with depth: `max(floor, 1 - index * perDepth)`. */
 export const CIVILIAN_FALLOFF_PER_DEPTH = 0.12;
 export const CIVILIAN_FALLOFF_FLOOR = 0.15;

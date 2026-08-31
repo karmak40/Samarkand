@@ -41,6 +41,8 @@ import {
   drawCursedAltar,
   drawMarket,
   drawRunMap,
+  initMapViewState,
+  type MapViewState,
   type MarketOffer,
 } from './ui/run-screens';
 import { drawAchievements } from './ui/achievements';
@@ -173,8 +175,6 @@ export class Game {
 
   private pendingCards: SkillCard[] = [];
   private pendingMutations: Mutation[] = [];
-  /** Queued after a mutation choice, so evolution rooms still offer a card. */
-  private cardAfterMutation = false;
 
   private hurtFlash = 0;
   private lastHp = 0;
@@ -185,6 +185,8 @@ export class Game {
     scroll: 0,
   };
   private readonly trialsView = { scroll: 0 };
+  /** Pan/drag state for the run map — persists across screen visits within a run. */
+  private readonly mapView: MapViewState = initMapViewState();
   private readonly settingsView: SettingsView = newSettingsView();
   private readonly resultsView: ResultsView = newResultsView();
   /** Where 'back' returns to: the title screen, or the paused run it was opened from. */
@@ -322,8 +324,8 @@ export class Game {
 
     this.pendingCards = [];
     this.pendingMutations = [];
-    this.cardAfterMutation = false;
     this.cardsReturnState = null;
+    Object.assign(this.mapView, initMapViewState());
     this.hurtFlash = 0;
     this.reviveAdUsed = false;
     this.reviveView.phase = 'offer';
@@ -635,7 +637,6 @@ export class Game {
         this.meta,
       );
       if (this.pendingMutations.length > 0) {
-        this.cardAfterMutation = false;
         this.state = 'mutation';
         return;
       }
@@ -960,22 +961,11 @@ export class Game {
       this.accumulator -= FIXED_STEP;
       steps++;
       this.step(FIXED_STEP);
-      // A level lands the instant the soul is absorbed; stop simulating so the
-      // draft opens on that exact frame rather than a few ticks later.
-      if (this.monster.pendingLevels > 0) break;
       if (this.state !== 'playing') break;
     }
 
     // If we fell too far behind, drop the backlog rather than spiral.
     if (this.accumulator > FIXED_STEP * MAX_STEPS_PER_FRAME) this.accumulator = 0;
-
-    // Levelling interrupts play immediately — the reward should land while the kill
-    // that earned it is still on screen, not wait to be claimed.
-    if (this.state === 'playing' && this.monster.pendingLevels > 0) {
-      // Drop the backlog too, or the frames owed would replay after the draft.
-      this.accumulator = 0;
-      if (this.offerCards()) return;
-    }
 
     this.camera.update(delta);
     if (this.hurtFlash > 0) this.hurtFlash = Math.max(0, this.hurtFlash - delta * 2.2);
@@ -1125,6 +1115,8 @@ export class Game {
     const distance = Math.hypot(this.monster.x - exit.x, this.monster.y - exit.y);
     if (distance < 46) {
       this.sound.portal(this.monster);
+      // Levels banked during the fight are spent here, at the door out — not mid-fight.
+      if (this.offerCards()) return;
       this.completeRoom();
     }
   }
@@ -1346,7 +1338,7 @@ export class Game {
           return;
         }
 
-        const mapResult = drawRunMap(this.ui, this.input, this.runMap, {
+        const mapResult = drawRunMap(this.ui, this.input, this.runMap, this.mapView, {
           currentNodeId: this.currentNodeId,
           reachable,
           visited: this.visitedNodes,
@@ -1436,7 +1428,9 @@ export class Game {
     this.monster.pendingLevels = Math.max(0, this.monster.pendingLevels - 1);
     // Several levels can be banked at once; keep drafting until they are spent.
     if (this.monster.pendingLevels > 0 && this.offerCards()) return;
-    this.state = 'playing';
+    // Reached only via the portal-entry hook now — resume the room-completion
+    // sequence rather than the fight, which is already over by this point.
+    this.completeRoom();
   }
 
   private drawMutationScreen(): void {
@@ -1448,11 +1442,6 @@ export class Game {
 
     this.monster.applyMutation(mutation, this.world);
     this.pendingMutations = [];
-
-    if (this.cardAfterMutation) {
-      this.cardAfterMutation = false;
-      if (this.offerCards()) return;
-    }
     this.returnToMap();
   }
 
@@ -1664,7 +1653,6 @@ export class Game {
       3,
       this.meta,
     );
-    this.cardAfterMutation = false;
     if (this.pendingMutations.length > 0) this.state = 'mutation';
   }
 

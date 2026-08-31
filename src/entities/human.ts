@@ -1,4 +1,6 @@
 import {
+  EARLY_ROOM_DIFFICULTY,
+  earlyRoomDifficultyFraction,
   ENEMY_TIER_SCALING,
   HUMAN_ARCHETYPES,
   INQUISITOR_ABILITIES,
@@ -163,7 +165,9 @@ export class Human extends Combatant {
     // Depth scaling tuned in ../balance's ENEMY_TIER_SCALING. Was 18%/11% HP/damage —
     // that pace made the mid-run rooms (where the enemy count is also ramping up)
     // spike much harder than the player's own growth could keep up with.
-    const hpScale = Math.pow(ENEMY_TIER_SCALING.hpPerTier, tier);
+    const hpScale =
+      Math.pow(ENEMY_TIER_SCALING.hpPerTier, tier) *
+      (1 + EARLY_ROOM_DIFFICULTY.hpBonus * earlyRoomDifficultyFraction(tier));
     this.maxHp = archetype.hp * hpScale;
     this.hp = this.maxHp;
 
@@ -173,7 +177,10 @@ export class Human extends Combatant {
   }
 
   get damageScale(): number {
-    return Math.pow(ENEMY_TIER_SCALING.damagePerTier, this.tier);
+    return (
+      Math.pow(ENEMY_TIER_SCALING.damagePerTier, this.tier) *
+      (1 + EARLY_ROOM_DIFFICULTY.damageBonus * earlyRoomDifficultyFraction(this.tier))
+    );
   }
 
   override defenses(): Defenses {

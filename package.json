@@ -16,6 +16,7 @@
     "test:e2e": "playwright test",
     "android:sync": "npm run build && npx cap sync android",
     "android:open": "npx cap open android",
+    "android:bundle": "npm run android:sync && cd android && set \"JAVA_HOME=C:\\Program Files\\Android\\Android Studio\\jbr\" && .\\gradlew.bat bundleRelease",
     "ios:sync": "npm run build && npx cap sync ios",
     "ios:open": "npx cap open ios"
   },
@@ -33,6 +34,7 @@
     "vitest": "^3.2.7"
   },
   "dependencies": {
+    "@capacitor-community/admob": "^8.1.0",
     "@capacitor/android": "^8.5.0",
     "@capacitor/app": "^8.1.1",
     "@capacitor/core": "^8.5.0",

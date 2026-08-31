@@ -11,10 +11,10 @@ if (keystorePropertiesFile.exists()) {
 }
 
 android {
-    namespace = "com.samarkand.game"
+    namespace = "onyx.system.samarkand"
     compileSdk = rootProject.ext.compileSdkVersion
     defaultConfig {
-        applicationId "com.samarkand.game"
+        applicationId "onyx.system.samarkand"
         minSdkVersion rootProject.ext.minSdkVersion
         targetSdkVersion rootProject.ext.targetSdkVersion
         versionCode 1

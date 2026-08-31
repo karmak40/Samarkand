@@ -1,6 +1,6 @@
 import { App } from '@capacitor/app';
 import { Capacitor } from '@capacitor/core';
-import { type AdService, CrazyGamesAdService, NoAdsService, PokiAdService, SimulatedAdService } from './core/ads';
+import { AdMobAdService, type AdService, CrazyGamesAdService, NoAdsService, PokiAdService, SimulatedAdService } from './core/ads';
 import { Game } from './game';
 
 /**
@@ -30,16 +30,22 @@ function watchAndroidBackButton(game: Game): void {
 }
 
 /**
- * Which ad service to hand `Game`, chosen once at boot by `VITE_AD_PLATFORM`.
+ * Which ad service to hand `Game`, chosen once at boot: AdMob on a native Android
+ * build, otherwise whichever portal `VITE_AD_PLATFORM` names.
  *
- * Never left to throw past this point: a portal's script can fail to load for
- * reasons that have nothing to do with this game — an ad blocker, a network hiccup,
- * or simply running the build outside the portal it was meant for while testing. None
- * of that should stop the game from booting; it only means no rewarded revive this
- * session.
+ * Never left to throw past this point: a portal's script can fail to load, or the
+ * AdMob SDK can fail to init, for reasons that have nothing to do with this game — an
+ * ad blocker, a network hiccup, missing consent, or simply running the build outside
+ * the context it was meant for while testing. None of that should stop the game from
+ * booting; it only means no rewarded revive this session.
  */
 async function resolveAdService(): Promise<AdService> {
   try {
+    if (Capacitor.getPlatform() === 'android') {
+      const service = new AdMobAdService();
+      await service.init();
+      return service;
+    }
     if (import.meta.env.VITE_AD_PLATFORM === 'crazygames') {
       const service = new CrazyGamesAdService();
       await service.init();

@@ -353,9 +353,29 @@ keyPassword=<тот же пароль — PKCS12 не различает store- 
 не убивает приложение навсегда (Play App Signing позволяет сбросить upload-ключ
 через поддержку Google), но без бэкапа это лишний повод писать в поддержку.
 
-Перед публикацией в Play Store остаётся: сменить `appId` в
-`capacitor.config.ts` с заглушки `com.samarkand.game` (после первого релиза он
-уже не меняется) и завести аккаунт Google Play Console.
+**`.aab` для Play одной командой:**
+
+```bash
+npm run android:bundle
+```
+
+Пересобирает веб-бандл, синкает его в нативный проект и гонит `bundleRelease` —
+результат в `android\app\build\outputs\bundle\release\app-release.aab`. Работает
+что из PowerShell, что из Git Bash (сам скрипт всегда выполняется через `cmd.exe`,
+это поведение самого npm на Windows, а не терминала, из которого его запустили).
+Внутри — та же связка `JAVA_HOME` + `gradlew.bat`, что и выше, с одной
+дополнительной деталью: вызов именно `.\gradlew.bat`, а не голый `gradlew.bat`, —
+на машинах, где выставлена системная переменная
+`NoDefaultCurrentDirectoryInExePath`, `cmd.exe` не ищет исполняемые файлы в
+текущей директории без явного `.\`, и без этой точки команда падает с
+`'gradlew.bat' is not recognized`, хотя файл лежит там же. Собрать `.apk`
+вместо `.aab` — `android/gradlew.bat assembleRelease` тем же способом.
+
+`appId` — `onyx.system.samarkand` (Android `applicationId`/`namespace` в
+[`build.gradle`](android/app/build.gradle), пакет `MainActivity` и
+[`capacitor.config.ts`](capacitor.config.ts) заведены под него). После первого
+релиза в Play его сменить будет нельзя. Перед публикацией остаётся завести
+аккаунт Google Play Console.
 
 ## Что дальше
 
@@ -376,12 +396,93 @@ Card. Атрибут `lang` выставляется при загрузке и 
 Иконка вкладки тоже процедурная и встроенная: SVG прямо в `data:` URI, так что правило
 «ни одного файла ассетов» остаётся в силе, и запросов на один меньше.
 
+## Реклама
+
+Rewarded-видео за возрождение спрятано за интерфейсом `AdService`
+([ads.ts](src/core/ads.ts)) — `Game` и UI никогда не обращаются к рекламному SDK
+напрямую, только к `isRewardedAdAvailable()`/`showRewardedAd()`. Какая реализация
+подставляется, решает `resolveAdService()` в [main.ts](src/main.ts:41): на нативном
+Android — `AdMobAdService`, на вебе — портал из `VITE_AD_PLATFORM` (`crazygames` /
+`poki`) или, если билд без портала, `NoAdsService`/`SimulatedAdService` (в dev).
+
+Android использует `@capacitor-community/admob`, подключён так же лениво, как
+портальные SDK — динамическим `import()` внутри `AdMobAdService`, чтобы веб- и
+портальные сборки не платили размером бандла за код, который им не нужен.
+Перед первой реальной загрузкой в Google Mobile Ads SDK сервис проходит
+UMP-флоу (`requestConsentInfo` → `showConsentForm`), это требование Play для
+игроков из EEA/UK, и вызывается независимо от региона — дешевле, чем определять
+регион самому.
+
+Оба ID реальные, из консоли AdMob (приложение Samarkand):
+
+- **App ID** — `ca-app-pub-1918664364236470~1009155836`, лежит в
+  `admob_app_id` в
+  [values/strings.xml](android/app/src/main/res/values/strings.xml) и
+  подставляется в `<meta-data>` манифеста. Это нативная настройка на этапе
+  сборки Android, а не JS-рантайм — `VITE_`-переменные её не касаются, менять
+  нужно саму строку. Приложение в AdMob создано без привязки к листингу в Play
+  (его там ещё нет) — привязать можно будет позже из настроек приложения в
+  AdMob, без смены App ID.
+- **Ad unit** (rewarded) — `ca-app-pub-1918664364236470/8943486173`, лежит в
+  [`.env.production`](.env.production) как `VITE_ADMOB_REWARDED_UNIT_ID`.
+  Vite подхватывает `.env.production` сам при любой обычной сборке (`vite
+  build` по умолчанию в режиме production) — руками ничего экспортировать не
+  нужно, `npm run android:bundle` работает как есть. Дефолт на тестовый ID
+  Google остаётся в [ads.ts](src/core/ads.ts) только на случай отсутствия
+  файла.
+
+Раз ad unit настоящий, `isTesting` в `AdMobAdService` теперь `false` — живая
+реклама, не тестовый ролик Google. **Не смотри и не кликай собственную рекламу
+руками** — это невалидный трафик по правилам AdMob, при частом повторении
+грозит ограничениями на аккаунте.
+
+Безопасно тестировать можно так:
+
+- **Эмулятор Android** ничего настраивать не нужно — Google Mobile Ads SDK сам
+  узнаёт эмулятор и всегда отдаёт ему тестовые ролики, независимо от
+  `isTesting` и реального ad unit. Подтверждено логом `Ads: This request is
+  sent from a test device.`
+- **Реальный телефон** — нужно явно зарегистрировать устройство. Один раз
+  запусти сборку с реальным ad unit на телефоне, открой `adb logcat`,
+  отфильтруй по тегу `Ads`; при первом запросе рекламы SDK печатает готовую
+  строку вида `Use RequestConfiguration.Builder().setTestDeviceIds(Arrays.asList("XXXXXXXX"))`
+  — это и есть id устройства. Положи его в **гитигнорённый** `.env.local`
+  (не в `.env.production` — это личное устройство, а не свойство сборки):
+
+  ```
+  VITE_ADMOB_TEST_DEVICE_IDS=XXXXXXXX
+  ```
+
+  Можно перечислить несколько через запятую. `AdMobAdService`
+  ([ads.ts](src/core/ads.ts)) сам подставит `initializeForTesting: true` и
+  `testingDevices`, если переменная не пуста.
+
+**Свежесозданный аккаунт AdMob какое-то время не может отдавать рекламу вообще**
+— пока Google не проверит и не одобрит его, любой запрос падает с `Account not
+approved yet` (это ограничение аккаунта, не привязано к конкретному ad unit
+или коду; проверено на этом проекте — ошибка ушла бы сама после одобрения).
+Это нормально для нового аккаунта и требует только подождать, ничего чинить не
+нужно.
+
+Отдельно: если UMP-форма согласия ещё не настроена в AdMob (Privacy &
+messaging), `requestConsentInfo()` возвращает ошибку `Publisher
+misconfiguration`. `AdMobAdService.init()` эту ошибку глотает и продолжает
+инициализацию без согласия — реклама не рушится из-за недонастроенного
+consent-flow, но для игроков из EEA/UK форму всё равно стоит донастроить в
+консоли до реального релиза.
+
+`INTERNET`/`ACCESS_NETWORK_STATE` в манифесте и разрешения, которые сам
+подмешивает Google Mobile Ads SDK (`AD_ID`, `ACCESS_ADSERVICES_*`), нужны
+рекламе — без них показывать нечего.
+
 ## Приватность
 
 Игра не имеет сервера и аккаунтов: весь прогресс лежит в `localStorage` браузера
-(на Android — в локальном хранилище приложения) и никуда не отправляется, аналитики
-и рекламных SDK тоже нет. Текст политики — [PRIVACY.md](PRIVACY.md), это исходник;
-рабочая ссылка для Play Console / App Store Connect —
+(на Android — в локальном хранилище приложения) и никуда не отправляется,
+аналитики нет. Единственное исключение — необязательная rewarded-реклама на
+Android (см. «Реклама» выше): выбор посмотреть ролик отдаёт немного данных
+Google. Текст политики — [PRIVACY.md](PRIVACY.md), это исходник; рабочая ссылка
+для Play Console / App Store Connect —
 <https://onyx-systems.ch/privacy/samarkand>, страница должна совпадать с файлом.
 Меняя, чем игра распоряжается данными, — обновлять оба сразу.
 

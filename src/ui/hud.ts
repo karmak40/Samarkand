@@ -144,6 +144,9 @@ function drawCompactCluster(ui: Ui, state: HudState): void {
     background: 'rgba(0,0,0,0.55)',
     radius: 2,
   });
+  if (monster.pendingLevels > 0) {
+    drawPendingLevelGlow(ui.ctx, margin + w - 6, y - 4, state.elapsed);
+  }
   y += 16;
 
   // Level (left) and souls (right) share the row the desktop layout gives each its
@@ -329,9 +332,9 @@ function drawHealthCluster(ui: Ui, state: HudState): void {
 /**
  * Level and experience.
  *
- * Sits directly under the health bar because the two are read together. There is no
- * "claim your level" prompt: the draft opens by itself the moment the bar fills, so
- * the only job here is showing how close the next one is.
+ * Sits directly under the health bar because the two are read together. A level-up
+ * no longer interrupts the fight — it banks quietly, and a burning star pulses past
+ * the bar's end until the player spends it at the portal.
  */
 function drawExperience(ui: Ui, state: HudState): void {
   const { monster } = state;
@@ -345,6 +348,10 @@ function drawExperience(ui: Ui, state: HudState): void {
     radius: 2,
   });
 
+  if (monster.pendingLevels > 0) {
+    drawPendingLevelGlow(ui.ctx, x + w + 16, y + 4.5, state.elapsed);
+  }
+
   ui.text(t('hud.levelAbbrev', { n: monster.level }), x, y + 20, {
     size: 12,
     color: PALETTE.muted,
@@ -357,6 +364,57 @@ function drawExperience(ui: Ui, state: HudState): void {
     y + 20,
     { size: 11, color: PALETTE.dim, align: 'right', baseline: 'middle' },
   );
+}
+
+/**
+ * Pulsing "burning star" marking a banked, unclaimed level-up.
+ *
+ * Screen-space, not world-space — there is no HUD-anchored particle system to reuse
+ * (see `run-screens.ts`'s reachable-node halo for the same hand-rolled idiom), so
+ * this draws its own radial-gradient glow and star polygon straight to the canvas.
+ */
+function drawPendingLevelGlow(ctx: CanvasRenderingContext2D, x: number, y: number, time: number): void {
+  const pulse = 1 + Math.sin(time * 5) * 0.15;
+  const outerR = 8 * pulse;
+
+  ctx.save();
+  ctx.globalCompositeOperation = 'lighter';
+  ctx.globalAlpha = 0.55 + Math.sin(time * 5) * 0.15;
+  const halo = ctx.createRadialGradient(x, y, 0, x, y, outerR * 2.6);
+  halo.addColorStop(0, 'rgba(255,226,138,0.9)');
+  halo.addColorStop(1, 'rgba(255,123,49,0)');
+  ctx.fillStyle = halo;
+  ctx.beginPath();
+  ctx.arc(x, y, outerR * 2.6, 0, TAU);
+  ctx.fill();
+
+  ctx.globalAlpha = 1;
+  ctx.globalCompositeOperation = 'source-over';
+  drawStarPath(ctx, x, y, outerR, outerR * 0.45, time * 2);
+  ctx.fillStyle = '#ffe28a';
+  ctx.fill();
+  ctx.restore();
+}
+
+/** Five-point star path, points alternating outer/inner radius from `rotation`. */
+function drawStarPath(
+  ctx: CanvasRenderingContext2D,
+  cx: number,
+  cy: number,
+  outerR: number,
+  innerR: number,
+  rotation: number,
+): void {
+  ctx.beginPath();
+  for (let i = 0; i < 10; i++) {
+    const r = i % 2 === 0 ? outerR : innerR;
+    const angle = rotation + (i * Math.PI) / 5;
+    const px = cx + Math.cos(angle) * r;
+    const py = cy + Math.sin(angle) * r;
+    if (i === 0) ctx.moveTo(px, py);
+    else ctx.lineTo(px, py);
+  }
+  ctx.closePath();
 }
 
 function drawProgress(ui: Ui, state: HudState): void {

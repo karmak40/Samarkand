@@ -7,6 +7,8 @@ import {
   ELITE_CHAMPIONS_EARLY,
   ELITE_CHAMPIONS_LATE,
   ELITE_CHAMPIONS_LATE_MIN_DEPTH,
+  EARLY_ROOM_DIFFICULTY,
+  earlyRoomDifficultyFraction,
   ENEMY_BUDGET_BASE,
   ENEMY_BUDGET_PER_DEPTH,
   EXTRA_BUILDINGS_PER_DEPTH_DIVISOR,
@@ -467,6 +469,7 @@ function planSpawns(
   // Raised from 8 to cover the guaranteed ranged defender, which otherwise ate
   // most of a first room's budget on its own.
   let budget = (ENEMY_BUDGET_BASE + index * ENEMY_BUDGET_PER_DEPTH) * config.enemyBudgetScale;
+  budget *= 1 + EARLY_ROOM_DIFFICULTY.budgetBonus * earlyRoomDifficultyFraction(index);
 
   const available = (Object.keys(HUMAN_ARCHETYPES) as HumanId[]).filter((id) => {
     const a = HUMAN_ARCHETYPES[id];

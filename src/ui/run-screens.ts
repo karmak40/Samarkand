@@ -1,6 +1,7 @@
 import type { Input } from '../core/input';
-import { TAU } from '../core/math';
+import { clamp, TAU } from '../core/math';
 import { RNG } from '../core/rng';
+import { TAP_SLOP } from '../core/touch';
 import { t } from '../i18n';
 import { type Curse, curseDescription, curseName } from '../progression/curses';
 import { RARITY, type SkillCard } from '../progression/skills';
@@ -23,6 +24,13 @@ const NODE_STYLE: Record<NodeKind, NodeStyle> = {
   boss: { color: '#e0483f', glow: '#ff8a7a', radius: 24 },
 };
 
+/**
+ * Fixed pixel gap between depth columns, independent of screen width — a long run
+ * simply gets wider than the screen and pans, rather than squeezing every node and
+ * label together to force-fit whatever viewport happened to open.
+ */
+const STEP_X = 150;
+
 export function nodeKindName(kind: NodeKind): string {
   return t(`node.${kind}.name`);
 }
@@ -35,9 +43,10 @@ export function nodeKindDescription(kind: NodeKind): string {
  * The run map.
  *
  * Depth runs left to right, lanes stack vertically, and edges only ever join
- * adjacent lanes — so the whole route is readable without panning. Only the nodes
- * connected to where you stand are clickable; everything else is dimmed to make the
- * commitment obvious.
+ * adjacent lanes — so the route is readable at a glance. Columns keep a fixed,
+ * comfortable spacing rather than being squeezed to fit the screen, so a long run
+ * pans horizontally instead of cramming together. Only the nodes connected to where
+ * you stand are clickable; everything else is dimmed to make the commitment obvious.
  */
 export interface RunMapResult {
   /** Id of the node the player chose to travel to, or -1 for none this frame. */
@@ -46,10 +55,40 @@ export interface RunMapResult {
   back: boolean;
 }
 
+/**
+ * Persisted pan state for the run map, owned by the caller (one per run) so the
+ * scroll position and drag gesture survive across frames and screen re-visits.
+ */
+export interface MapViewState {
+  scrollX: number;
+  /** Node last auto-centered on; re-centers only when this changes. */
+  centeredNodeId: number | null;
+  dragging: boolean;
+  pressX: number;
+  pressScrollX: number;
+  /** Total horizontal travel since the press, to tell a tap from a drag. */
+  travel: number;
+  /** `input.mouseDown` as of the previous frame, to detect press/release edges. */
+  wasDown: boolean;
+}
+
+export function initMapViewState(): MapViewState {
+  return {
+    scrollX: 0,
+    centeredNodeId: null,
+    dragging: false,
+    pressX: 0,
+    pressScrollX: 0,
+    travel: 0,
+    wasDown: false,
+  };
+}
+
 export function drawRunMap(
   ui: Ui,
   input: Input,
   map: RunMap,
+  view: MapViewState,
   context: {
     currentNodeId: number | null;
     reachable: readonly MapNode[];
@@ -59,7 +98,58 @@ export function drawRunMap(
     biome: 1 | 2;
   },
 ): RunMapResult {
-  ui.ctx.drawImage(mapBackdrop(map, ui.width, ui.height, context.biome), 0, 0);
+  const margin = 70;
+  const top = 140;
+  const bottom = ui.height - 170;
+  const stepX = STEP_X;
+  const laneH = (bottom - top) / Math.max(1, map.lanes - 1);
+  const logicalW = margin * 2 + stepX * Math.max(0, map.depths - 1);
+  const maxScrollX = Math.max(0, logicalW - ui.width);
+
+  // Re-center whenever where the player stands changes (a fresh map, or just arrived
+  // after a room) — otherwise a long map could open scrolled away from the one node
+  // that matters right now.
+  if (context.currentNodeId !== view.centeredNodeId) {
+    view.centeredNodeId = context.currentNodeId;
+    const node = context.currentNodeId !== null ? map.nodes[context.currentNodeId] : null;
+    view.scrollX = clamp(node ? margin + node.depth * stepX - ui.width / 2 : 0, 0, maxScrollX);
+  }
+
+  // Press/drag/tap tracking, done by hand rather than via `ui.hitZone`'s click: a real
+  // mouse's `mouseClicked` fires the instant `mousedown` lands (no travel gating,
+  // unlike touch, which `Input` already tap-gates at release) — so pressing a node to
+  // *start* a drag would otherwise fire an instant, unintended travel to that room.
+  const pressedNow = input.mouseDown && !view.wasDown;
+  const releasedNow = !input.mouseDown && view.wasDown;
+  if (pressedNow) {
+    view.dragging = true;
+    view.pressX = input.mouse.x;
+    view.pressScrollX = view.scrollX;
+    view.travel = 0;
+  }
+  if (view.dragging && input.mouseDown) {
+    const dx = input.mouse.x - view.pressX;
+    view.travel = Math.max(view.travel, Math.abs(dx));
+    view.scrollX = clamp(view.pressScrollX - dx, 0, maxScrollX);
+  }
+  let tapped = false;
+  if (releasedNow) {
+    tapped = view.travel <= TAP_SLOP;
+    view.dragging = false;
+  }
+  view.wasDown = input.mouseDown;
+  if (input.wheel !== 0) view.scrollX = clamp(view.scrollX + input.wheel, 0, maxScrollX);
+  // A resize (rotating a phone, resizing the window) can shrink maxScrollX below a
+  // scroll position that was valid a frame ago — reclamp every frame, not just on
+  // the input events that would otherwise be the only thing touching scrollX.
+  view.scrollX = clamp(view.scrollX, 0, maxScrollX);
+
+  const position = (node: MapNode): { x: number; y: number } => ({
+    x: margin + node.depth * stepX - view.scrollX,
+    y: top + node.lane * laneH,
+  });
+
+  ui.ctx.drawImage(mapBackdrop(map, logicalW, ui.height, context.biome), -view.scrollX, 0);
 
   // A painted map is busy everywhere, unlike the plain dark screens elsewhere — the
   // title needs a banner under it, not just an outline, or it gets lost over a green
@@ -87,18 +177,6 @@ export function drawRunMap(
     baseline: 'middle',
     italic: true,
     maxWidth: bannerW - 32,
-  });
-
-  const margin = 70;
-  const top = 140;
-  const bottom = ui.height - 170;
-  const usableW = ui.width - margin * 2;
-  const stepX = usableW / Math.max(1, map.depths - 1);
-  const laneH = (bottom - top) / Math.max(1, map.lanes - 1);
-
-  const position = (node: MapNode): { x: number; y: number } => ({
-    x: margin + node.depth * stepX,
-    y: top + node.lane * laneH,
   });
 
   const reachableIds = new Set(context.reachable.map((n) => n.id));
@@ -131,9 +209,13 @@ export function drawRunMap(
     const isVisited = context.visited.has(node.id);
 
     const hit = rect(pos.x - style.radius - 6, pos.y - style.radius - 6, style.radius * 2 + 12, style.radius * 2 + 12);
+    // `.clicked` is intentionally unused here — a press that turns into a map drag
+    // must not also travel to whatever node it happened to start on top of. `tapped`
+    // (computed above) already carries the low-travel gate; `.hovered` just says
+    // where the release landed.
     const zone = isReachable ? ui.hitZone(hit) : { hovered: ui.isHovered(hit), clicked: false };
     if (zone.hovered) hoveredNode = node;
-    if (zone.clicked) picked = node.id;
+    if (tapped && zone.hovered) picked = node.id;
 
     // Reachable settlements breathe so the eye goes straight to the live choices.
     // A burnt one stands dead still — the one thing left here that doesn't move is
@@ -198,6 +280,8 @@ export function drawRunMap(
     }
   });
 
+  drawPanHint(ctx, ui.width, top, bottom, view.scrollX, maxScrollX);
+
   // A second banner for the ruler and the inspector line — same reasoning as the
   // title: this text sits over open terrain and needs its own dark ground.
   const footW = Math.min(620, ui.width - 40);
@@ -244,6 +328,47 @@ export function drawRunMap(
   });
 
   return { picked, back };
+}
+
+/**
+ * A soft edge fade plus a small arrow wherever the map keeps going off-screen, so a
+ * screen that has simply run out of width doesn't read the same as one with nothing
+ * left to show. Screen-space — drawn after the pan offset is already baked into
+ * every node position, so this never scrolls with the content.
+ */
+function drawPanHint(
+  ctx: CanvasRenderingContext2D,
+  width: number,
+  top: number,
+  bottom: number,
+  scrollX: number,
+  maxScrollX: number,
+): void {
+  const fadeW = 46;
+  const midY = (top + bottom) / 2;
+
+  const drawEdge = (onLeft: boolean) => {
+    const x0 = onLeft ? 0 : width;
+    const x1 = onLeft ? fadeW : width - fadeW;
+    const gradient = ctx.createLinearGradient(x0, 0, x1, 0);
+    gradient.addColorStop(0, 'rgba(10,8,6,0.55)');
+    gradient.addColorStop(1, 'rgba(10,8,6,0)');
+    ctx.fillStyle = gradient;
+    ctx.fillRect(Math.min(x0, x1), top, fadeW, bottom - top);
+
+    const arrowX = onLeft ? 16 : width - 16;
+    const dir = onLeft ? -1 : 1;
+    ctx.fillStyle = 'rgba(216,196,138,0.6)';
+    ctx.beginPath();
+    ctx.moveTo(arrowX + dir * 5, midY - 8);
+    ctx.lineTo(arrowX - dir * 5, midY);
+    ctx.lineTo(arrowX + dir * 5, midY + 8);
+    ctx.closePath();
+    ctx.fill();
+  };
+
+  if (scrollX > 0) drawEdge(true);
+  if (scrollX < maxScrollX) drawEdge(false);
 }
 
 /** Hovering explains a stop; with nothing hovered, the live options are listed. */
@@ -556,7 +681,10 @@ function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, rng:
   ctx.fillRect(0, 0, w, h);
 
   const anchors: BiomeAnchor[] = [];
-  const count = 10;
+  // Scales with width, not a flat count — the map screen now bakes this at the full
+  // logical (pannable) width rather than the screen width, and a flat count of
+  // patches would thin out into gaps on a long run.
+  const count = Math.max(10, Math.round(w / 90));
   for (let i = 0; i < count; i++) {
     anchors.push({
       x: rng.range(w * -0.05, w * 1.05),
