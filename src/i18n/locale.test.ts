@@ -50,6 +50,12 @@ describe('first visit (nothing saved)', () => {
     expect(getLocale()).toBe('it');
   });
 
+  it('picks Croatian for a Croatian system', async () => {
+    stubNavigator(['hr-HR']);
+    const { getLocale } = await import('./locale');
+    expect(getLocale()).toBe('hr');
+  });
+
   it('falls back to English for a language the game does not have', async () => {
     stubNavigator(['es-ES']);
     const { getLocale } = await import('./locale');

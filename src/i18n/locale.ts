@@ -1,6 +1,6 @@
-export type Locale = 'en' | 'de' | 'ru' | 'uk' | 'fr' | 'it';
+export type Locale = 'en' | 'de' | 'ru' | 'uk' | 'fr' | 'it' | 'hr';
 
-export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk', 'fr', 'it'];
+export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk', 'fr', 'it', 'hr'];
 
 const STORAGE_KEY = 'samarkand.locale';
 
@@ -27,6 +27,7 @@ function detectLocale(): Locale {
     if (lang === 'uk') return 'uk';
     if (lang === 'fr') return 'fr';
     if (lang === 'it') return 'it';
+    if (lang === 'hr') return 'hr';
   }
   return 'en';
 }
@@ -34,7 +35,15 @@ function detectLocale(): Locale {
 function loadLocale(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'de' || saved === 'ru' || saved === 'uk' || saved === 'fr' || saved === 'it') {
+    if (
+      saved === 'en' ||
+      saved === 'de' ||
+      saved === 'ru' ||
+      saved === 'uk' ||
+      saved === 'fr' ||
+      saved === 'it' ||
+      saved === 'hr'
+    ) {
       return saved;
     }
   } catch {

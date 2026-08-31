@@ -13,9 +13,10 @@ import { RU } from './dict.ru';
 import { UK } from './dict.uk';
 import { FR } from './dict.fr';
 import { IT } from './dict.it';
+import { HR } from './dict.hr';
 import { setLocale, t } from './index';
 
-const dicts = { ru: RU, en: EN, de: DE, uk: UK, fr: FR, it: IT } as const;
+const dicts = { ru: RU, en: EN, de: DE, uk: UK, fr: FR, it: IT, hr: HR } as const;
 
 /**
  * Key parity across locales.

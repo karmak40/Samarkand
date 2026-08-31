@@ -440,7 +440,7 @@ export const IT: Record<string, string> = {
   'status.burn.description': 'Danno da fuoco ogni 0,4s. Le cariche si sommano.',
   'status.poison.name': 'Avvelenato',
   'status.poison.description': 'Danno da veleno prolungato. Molte cariche, morte molto rapida.',
-  'status.bleed.name': 'Emorragia',
+  'status.bleed.name': 'Sanguinamento',
   'status.bleed.description': 'Danno fisico nel tempo, raddoppiato se il bersaglio corre.',
   'status.chill.name': 'Raffreddamento',
   'status.chill.description': 'Rallenta del 6% per carica. A 10 cariche il bersaglio si congela.',
