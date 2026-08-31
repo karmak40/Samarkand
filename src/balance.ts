@@ -146,7 +146,7 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     tunic: '#5a5f6b',
     accent: '#9aa3b2',
     spawnWeight: 16,
-    minDepth: 1,
+    minDepth: 0,
     bloodChance: 0.12,
     relicChance: 0.03,
     courage: 0.7,
@@ -172,7 +172,7 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     tunic: '#4f4a52',
     accent: '#8d8798',
     spawnWeight: 12,
-    minDepth: 2,
+    minDepth: 1,
     bloodChance: 0.12,
     relicChance: 0.05,
     courage: 0.5,
@@ -202,7 +202,7 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     accent: '#ff9a3c',
     onHitStatuses: [{ id: 'burn', duration: 4, stacks: 2, power: 2.5, get sourceLabel() { return t('effect.torch'); } }],
     spawnWeight: 14,
-    minDepth: 2,
+    minDepth: 1,
     bloodChance: 0.1,
     relicChance: 0.03,
     courage: 0.6,
@@ -2159,13 +2159,19 @@ export const ENEMY_BUDGET_PER_DEPTH = 5;
  * `ENEMY_TIER_SCALING`/`ENEMY_BUDGET_PER_DEPTH` above already correctly tune room 5+,
  * so this is a separate, additive, front-loaded bonus rather than a change to that
  * global rate (which would re-harden the late game too).
+ *
+ * A first pass at +15%/+10%/+25% still played too easy, so this round doubles the
+ * stat bonuses and pairs them with real roster changes (see `minDepth` lowered on
+ * `spearman`/`crossbowman`/`torchbearer` below): a room 1-4 fight now mixes in an
+ * armoured melee unit and a real ranged/elemental threat, not just more-and-tankier
+ * peasants.
  */
 export const EARLY_ROOM_DIFFICULTY = {
   startRoomIndex: 1,
   endRoomIndex: 5,
-  hpBonus: 0.15,
-  damageBonus: 0.1,
-  budgetBonus: 0.25,
+  hpBonus: 0.3,
+  damageBonus: 0.2,
+  budgetBonus: 0.4,
 };
 
 /** Linear taper from the full `EARLY_ROOM_DIFFICULTY` bonus down to 0 at `endRoomIndex`. */
