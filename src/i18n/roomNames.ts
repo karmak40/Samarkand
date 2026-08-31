@@ -86,6 +86,23 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       khagan: 'du Khagan',
     },
   },
+  it: {
+    prefixes: ['Silenzioso', 'Grigio', 'Vecchio', 'Lontano', 'Umido', 'Storto', 'Lupesco', 'Cinereo', 'Sordo', 'Ultimo'],
+    roots: {
+      hamlet: ['Casale', 'Borgata', 'Cascina', 'Podere'],
+      village: ['Cimitero', 'Borgo', 'Insediamento', 'Castelliere'],
+      fortified: ['Palizzata', 'Avamposto', 'Ridotta', 'Baluardo'],
+      shrine: ['Eremo', 'Cappella', 'Chiostro', 'Santuario'],
+      elite: ['Guarnigione', 'Sentinella', 'Accampamento', 'Posto di guardia'],
+      boss: ['Cattedrale', 'Bastione', 'Roccaforte'],
+    },
+    bossSuffix: {
+      inquisitor: "dell'Inquisizione",
+      warlord: 'del Signore della Guerra',
+      pyromancer: 'della Piromante',
+      khagan: 'del Khagan',
+    },
+  },
 };
 
 export function roomNamePrefixes(): string[] {

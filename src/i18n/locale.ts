@@ -1,6 +1,6 @@
-export type Locale = 'en' | 'de' | 'ru' | 'uk' | 'fr';
+export type Locale = 'en' | 'de' | 'ru' | 'uk' | 'fr' | 'it';
 
-export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk', 'fr'];
+export const LOCALES: readonly Locale[] = ['en', 'de', 'ru', 'uk', 'fr', 'it'];
 
 const STORAGE_KEY = 'samarkand.locale';
 
@@ -9,8 +9,8 @@ const STORAGE_KEY = 'samarkand.locale';
  *
  * Walks the full preference list (`navigator.languages`), not just the first entry:
  * a system set to French with German as a fallback should still land on German rather
- * than skipping straight past it to English. Whatever isn't 'de' or 'ru' anywhere in
- * that list falls back to English — there's no fourth language to fall back to.
+ * than skipping straight past it to English. Whatever isn't one of the game's other
+ * locales anywhere in that list falls back to English.
  */
 function detectLocale(): Locale {
   if (typeof navigator === 'undefined') return 'en';
@@ -26,6 +26,7 @@ function detectLocale(): Locale {
     if (lang === 'ru') return 'ru';
     if (lang === 'uk') return 'uk';
     if (lang === 'fr') return 'fr';
+    if (lang === 'it') return 'it';
   }
   return 'en';
 }
@@ -33,7 +34,9 @@ function detectLocale(): Locale {
 function loadLocale(): Locale {
   try {
     const saved = localStorage.getItem(STORAGE_KEY);
-    if (saved === 'en' || saved === 'de' || saved === 'ru' || saved === 'uk' || saved === 'fr') return saved;
+    if (saved === 'en' || saved === 'de' || saved === 'ru' || saved === 'uk' || saved === 'fr' || saved === 'it') {
+      return saved;
+    }
   } catch {
     // Private browsing or a disabled store — fall back to detection.
   }
