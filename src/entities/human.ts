@@ -1132,6 +1132,17 @@ export class Human extends Combatant {
     ctx.save();
     ctx.translate(this.x, this.y);
 
+    // A mounted defender's actual (x, y) still sits just outside the tower's own
+    // solid rect — placed there by `placeOnWall` so the tower can never occlude its
+    // own defender's line of fire. Purely for drawing, pull the whole figure — shadow
+    // included, so it still reads as ground contact rather than a disconnected blob —
+    // sideways onto the tower's centre first; the shadow marks the platform, not the
+    // grass beside it.
+    if (this.mountedOn?.alive) {
+      const towerCx = this.mountedOn.rect.x + this.mountedOn.rect.w / 2;
+      ctx.translate(towerCx - this.x, 0);
+    }
+
     // Shadow.
     drawGroundShadow(ctx, 0, this.radius * 0.6, this.radius * 0.95, this.radius * 0.36);
 
@@ -1150,8 +1161,8 @@ export class Human extends Combatant {
       ctx.restore();
     }
 
-    // A defender shielded by its tower stands on the parapet, not the ground —
-    // the shadow above stays put so the platform actually reads as height.
+    // Then lift the figure itself up to parapet height, same as before — the shadow
+    // stays behind at platform level so the height still reads.
     if (this.mountedOn?.alive) ctx.translate(0, -this.wallStandHeight());
 
     ctx.translate(0, bob - this.radius * 0.4);
@@ -1467,7 +1478,11 @@ export class Human extends Combatant {
   private drawOverlays(ctx: CanvasRenderingContext2D, world: World): void {
     const a = this.archetype;
     const isBoss = a.role === 'boss';
-    const mountY = this.y - (this.mountedOn?.alive ? this.wallStandHeight() : 0);
+    const mounted = this.mountedOn?.alive === true;
+    // Matches the same tower-centring `draw()` applies, so overlays track the
+    // figure's drawn position rather than its off-to-the-side logical one.
+    const mountX = mounted ? this.mountedOn!.rect.x + this.mountedOn!.rect.w / 2 : this.x;
+    const mountY = this.y - (mounted ? this.wallStandHeight() : 0);
 
     // Health bar, only once wounded (or always for the boss).
     if (this.hp < this.maxHp || isBoss) {
@@ -1476,7 +1491,7 @@ export class Human extends Combatant {
       const y = -this.radius * (isBoss ? 3.4 : 2.4);
 
       ctx.save();
-      ctx.translate(this.x, mountY);
+      ctx.translate(mountX, mountY);
       ctx.fillStyle = 'rgba(0,0,0,0.6)';
       ctx.fillRect(-w / 2 - 1, y - 1, w + 2, h + 2);
       ctx.fillStyle = isBoss ? '#c0343c' : '#a8232a';
@@ -1487,7 +1502,7 @@ export class Human extends Combatant {
     // Wind-up telegraph: a growing arc in the attack direction.
     if (this.state === 'windup') {
       ctx.save();
-      ctx.translate(this.x, mountY);
+      ctx.translate(mountX, mountY);
       ctx.rotate(this.facing);
       ctx.globalAlpha = 0.25 + this.windupProgress * 0.5;
       ctx.strokeStyle = a.role === 'support' || isBoss ? '#ffe9a8' : '#ff6b6b';
@@ -1503,7 +1518,7 @@ export class Human extends Combatant {
     // Panic marker so the player can read who is about to break and run.
     if (this.panic > 0.5 && !isBoss) {
       ctx.save();
-      ctx.translate(this.x, mountY - this.radius * 2.9);
+      ctx.translate(mountX, mountY - this.radius * 2.9);
       ctx.globalAlpha = clamp((this.panic - 0.5) * 2, 0, 1);
       ctx.fillStyle = '#e8e2d4';
       ctx.font = 'bold 13px Georgia, serif';

@@ -502,6 +502,7 @@ export const EN: Record<string, string> = {
   // ---- floating banner text ----------------------------------------------------------
   'text.levelUp': 'LEVEL {n}',
   'text.settlementFallen': 'SETTLEMENT FALLEN',
+  'text.reinforcementsArrived': 'REINFORCEMENTS ARRIVE',
   'text.lightCalls': 'THE LIGHT CALLS',
   'text.executed': 'EXECUTED',
   'text.exhausted': "can't…",

@@ -51,7 +51,7 @@ import { drawReviveOffer, newReviveView, type ReviveView } from './ui/revive';
 import { drawSettings, newSettingsView, type SettingsView } from './ui/settings';
 import { drawTouchControls } from './ui/touch-hud';
 import { PALETTE, Ui } from './ui/widgets';
-import { BIOME_ROOMS, generateRoom, type RoomPlan } from './world/roomgen';
+import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './world/roomgen';
  import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
 
@@ -163,6 +163,8 @@ export class Game {
   private humansAtRoomStart = 0;
   private roomIntroTimer = 0;
   private exitReady = false;
+  /** Whether this room's reinforcement wave (if it rolled one) has already marched in. */
+  private reinforcementsSpawned = false;
   /** Inactivity tracking for the anti-softlock guard. */
   private stallTimer = 0;
   private stallDamageMark = 0;
@@ -588,16 +590,7 @@ export class Game {
     }
     this.world.markSolidsDirty();
 
-    for (const spawn of plan.spawns) {
-      const human = new Human(spawn.id, spawn.x, spawn.y, index);
-      // Turrets built with `mountedBuildingIndex` (roomgen.ts) are shielded by that
-      // tower until it falls — the buildings loop above fills `world.buildings` in
-      // the same order as `plan.buildings`, so the index still lines up here.
-      if (spawn.mountedBuildingIndex !== undefined) {
-        human.mountedOn = this.world.buildings[spawn.mountedBuildingIndex] ?? null;
-      }
-      this.world.humans.push(human);
-    }
+    this.spawnHumans(plan.spawns, index, false);
 
     for (const relic of plan.relics) {
       this.world.spawnBoon(relic.x, relic.y);
@@ -614,6 +607,7 @@ export class Game {
     this.camera.snapTo(this.monster.x, this.monster.y);
     this.humansAtRoomStart = this.world.humans.length;
     this.exitReady = false;
+    this.reinforcementsSpawned = false;
     this.stallTimer = 0;
     this.stallDamageMark = this.tracker.totalDamageDealt;
     this.stallKillMark = this.tracker.totalKills;
@@ -621,6 +615,29 @@ export class Game {
 
     this.tracker.beginRoom(index, plan.name);
     if (plan.isBoss) this.sound.bossSpawn(this.monster);
+  }
+
+  /**
+   * Build `Human`s from a planned spawn list and drop them into the world.
+   *
+   * Shared by the room's initial garrison and a reinforcement wave arriving
+   * mid-fight — `alertNow` is the only real difference: the initial wave still
+   * relies on each unit's own `alertDelay`/proximity to notice the monster, while
+   * reinforcements already know exactly where the fight is the moment they arrive
+   * (same convention `world.spawnHuman` uses for a building-breach spawn).
+   */
+  private spawnHumans(spawns: readonly PlannedSpawn[], tier: number, alertNow: boolean): void {
+    for (const spawn of spawns) {
+      const human = new Human(spawn.id, spawn.x, spawn.y, tier);
+      // Turrets built with `mountedBuildingIndex` (roomgen.ts) are shielded by that
+      // tower until it falls — `world.buildings` is filled in the same order as
+      // `plan.buildings`, so the index still lines up here.
+      if (spawn.mountedBuildingIndex !== undefined) {
+        human.mountedOn = this.world.buildings[spawn.mountedBuildingIndex] ?? null;
+      }
+      if (alertNow) human.alert();
+      this.world.humans.push(human);
+    }
   }
 
   private completeRoom(): void {
@@ -1048,6 +1065,8 @@ export class Game {
 
     if (!this.exitReady && this.checkStalledRoom(simDt)) {
       for (const human of world.humans) human.alive = false;
+      // The guard exists to end a broken room, not open a fresh one.
+      this.reinforcementsSpawned = true;
     }
 
     // Cached once per simulation step rather than rescanned every render frame in
@@ -1088,6 +1107,24 @@ export class Game {
 
     if (!this.exitReady) {
       if (world.livingHumans > 0) return;
+
+      const plan = this.currentPlan;
+      if (plan && !this.reinforcementsSpawned && plan.reinforcements.length > 0) {
+        this.reinforcementsSpawned = true;
+        this.spawnHumans(plan.reinforcements, this.roomIndex, true);
+        world.camera.shake(6);
+        // "This one is different" horn — exactly the read a second wave needs.
+        this.sound.bossSpawn(this.monster);
+        world.texts.add(
+          this.monster.x,
+          this.monster.y - 60,
+          t('text.reinforcementsArrived'),
+          '#c0343c',
+          22,
+          1,
+        );
+        return;
+      }
 
       this.exitReady = true;
       world.cleared = true;

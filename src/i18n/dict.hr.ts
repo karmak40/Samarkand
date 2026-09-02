@@ -502,6 +502,7 @@ export const HR: Record<string, string> = {
   // ---- floating banner text ----------------------------------------------------------
   'text.levelUp': 'RAZINA {n}',
   'text.settlementFallen': 'NASELJE JE PALO',
+  'text.reinforcementsArrived': 'STIŽE POJAČANJE',
   'text.lightCalls': 'SVJETLOST ZOVE',
   'text.executed': 'POGUBLJEN',
   'text.exhausted': 'ne mogu…',

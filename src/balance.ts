@@ -2151,6 +2151,18 @@ export const ENEMY_BUDGET_BASE = 11;
 export const ENEMY_BUDGET_PER_DEPTH = 5;
 
 /**
+ * A settlement can call for backup: once the initial garrison falls, a second wave
+ * marches in from a neighbouring town and the portal stays shut until it falls too.
+ * Rolled once at generation time; never on a `boss` room — that fight is already
+ * the room's one big moment.
+ */
+export const REINFORCEMENT_WAVE = {
+  minRoomIndex: 2,
+  chance: 0.25,
+  budgetScale: 0.7,
+};
+
+/**
  * Extra difficulty layered onto rooms 1-4 specifically, fading to +0% by room 5.
  *
  * Player levels 2-4 land in these rooms (level 2 needs only 8 cumulative XP, level 4
@@ -2188,6 +2200,18 @@ export const CIVILIAN_FALLOFF_FLOOR = 0.15;
 /** Guaranteed ranged/support defenders: `base + Math.floor(index / perDepthDivisor)`. */
 export const GUARANTEED_RANGED_BASE = 1;
 export const GUARANTEED_RANGED_PER_DEPTH_DIVISOR = 3;
+
+/**
+ * Hard cap on `support`-role defenders (priests) per room.
+ *
+ * Each one heals a wounded ally roughly every `attackCooldown` seconds instead of
+ * attacking, so healing throughput scales linearly with how many are alive at once —
+ * past a couple, the room out-heals anything the player can deal and the fight
+ * cannot be won. Capped everywhere a room's roster is assembled (champions, the
+ * guaranteed ranged/support pick, and the general weighted fill), not just one of
+ * them.
+ */
+export const MAX_SUPPORT_PER_ROOM = 2;
 
 /** Fraction of a mounted turret's `SPAWN_COST` charged against the room's budget. */
 export const TURRET_BUDGET_FRACTION = 0.5;

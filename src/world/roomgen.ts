@@ -14,6 +14,8 @@ import {
   EXTRA_BUILDINGS_PER_DEPTH_DIVISOR,
   GUARANTEED_RANGED_BASE,
   GUARANTEED_RANGED_PER_DEPTH_DIVISOR,
+  MAX_SUPPORT_PER_ROOM,
+  REINFORCEMENT_WAVE,
   RELIC_COUNT,
   ROOM_KIND_CONFIG,
   type RoomKindConfig,
@@ -64,6 +66,8 @@ export interface RoomPlan {
   bounds: Rect;
   buildings: PlannedBuilding[];
   spawns: PlannedSpawn[];
+  /** A second wave, spawned once the first falls — empty when this room has none. */
+  reinforcements: PlannedSpawn[];
   monsterStart: Vec2;
   /** Where the portal opens once the settlement is cleared. */
   exit: Vec2;
@@ -235,6 +239,25 @@ export function generateRoom(
       : null;
   const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId, biome);
 
+  // A settlement can call for backup. Rolled here so it's part of the same seeded
+  // sequence as everything else; built from a second, smaller `planSpawns` pass
+  // over the same buildings, so a still-standing tower picks up a new defender the
+  // same way the room's own layout already reads.
+  const reinforcements: PlannedSpawn[] =
+    kind !== 'boss' && index >= REINFORCEMENT_WAVE.minRoomIndex && rng.bool(REINFORCEMENT_WAVE.chance)
+      ? planSpawns(
+          index,
+          kind,
+          { ...config, enemyBudgetScale: config.enemyBudgetScale * REINFORCEMENT_WAVE.budgetScale },
+          bounds,
+          buildings,
+          monsterStart,
+          rng,
+          null,
+          biome,
+        )
+      : [];
+
   const name =
     kind === 'boss'
       ? `${rng.pick(roomNameRoots('boss'))} ${roomNameBossSuffix(bossId ?? 'inquisitor')}`
@@ -247,6 +270,7 @@ export function generateRoom(
     bounds,
     buildings,
     spawns,
+    reinforcements,
     monsterStart,
     exit,
     bossId,
@@ -452,11 +476,22 @@ function planSpawns(
 ): PlannedSpawn[] {
   const spawns: PlannedSpawn[] = [];
 
+  // A support (priest) heals a wounded ally roughly every attack cooldown instead of
+  // attacking, so healing throughput scales linearly with how many are alive at
+  // once — past MAX_SUPPORT_PER_ROOM the room can out-heal any damage the player
+  // deals. Tracked across every place below that can add one.
+  let supportCount = 0;
+  const isSupport = (id: HumanId): boolean => HUMAN_ARCHETYPES[id].role === 'support';
+
   // An elite garrison is defined by *who* holds it, not by how many. Champions are
   // seeded first so the fight has a shape even before the budget is spent.
   if (kind === 'elite') {
     const champions = index >= ELITE_CHAMPIONS_LATE_MIN_DEPTH ? ELITE_CHAMPIONS_LATE : ELITE_CHAMPIONS_EARLY;
     for (const id of champions) {
+      if (isSupport(id)) {
+        if (supportCount >= MAX_SUPPORT_PER_ROOM) continue;
+        supportCount++;
+      }
       const point = placementFor(id, bounds, buildings, monsterStart, rng);
       spawns.push({ id, x: point.x, y: point.y });
     }
@@ -503,7 +538,10 @@ function planSpawns(
   if (rangedPool.length > 0) {
     const guaranteed = GUARANTEED_RANGED_BASE + Math.floor(index / GUARANTEED_RANGED_PER_DEPTH_DIVISOR);
     for (let i = 0; i < guaranteed && budget > 0; i++) {
-      const id = rng.pick(rangedPool);
+      const pool = supportCount >= MAX_SUPPORT_PER_ROOM ? rangedPool.filter((id) => !isSupport(id)) : rangedPool;
+      if (pool.length === 0) break;
+      const id = rng.pick(pool);
+      if (isSupport(id)) supportCount++;
       budget -= SPAWN_COST[id];
       const point = placementFor(id, bounds, buildings, monsterStart, rng);
       spawns.push({ id, x: point.x, y: point.y });
@@ -513,6 +551,8 @@ function planSpawns(
   let guard = 0;
   while (budget > 0 && guard++ < 400) {
     const id = rng.pickWeighted(available, (candidate) => {
+      // Capped elsewhere means unpickable here, not just uncounted.
+      if (isSupport(candidate) && supportCount >= MAX_SUPPORT_PER_ROOM) return 0;
       const a = HUMAN_ARCHETYPES[candidate];
       // Later rooms shift the mix away from civilians toward real soldiers.
       const civilianFalloff =
@@ -523,6 +563,7 @@ function planSpawns(
     const cost = SPAWN_COST[id];
     if (cost > budget + 1.5) break;
     budget -= cost;
+    if (isSupport(id)) supportCount++;
 
     const point = placementFor(id, bounds, buildings, monsterStart, rng);
     spawns.push({ id, x: point.x, y: point.y });

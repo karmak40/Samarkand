@@ -502,6 +502,7 @@ export const UK: Record<string, string> = {
   // ---- floating banner text ----------------------------------------------------------
   'text.levelUp': 'РІВЕНЬ {n}',
   'text.settlementFallen': 'ПОСЕЛЕННЯ ПАЛО',
+  'text.reinforcementsArrived': 'ПРИБУЛО ПІДКРІПЛЕННЯ',
   'text.lightCalls': 'СВІТЛО КЛИЧЕ',
   'text.executed': 'СТРАТА',
   'text.exhausted': 'не можу…',
