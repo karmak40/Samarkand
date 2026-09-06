@@ -22,6 +22,21 @@
 	<string>$(MARKETING_VERSION)</string>
 	<key>CFBundleVersion</key>
 	<string>$(CURRENT_PROJECT_VERSION)</string>
+	<!--
+	  PLACEHOLDER — Google's own sample App ID, and it must not ship.
+
+	  Required whether or not this build shows a single ad: the Google Mobile Ads SDK
+	  is linked in as soon as `@capacitor-community/admob` is a dependency, and it
+	  checks for this key from a dispatch block at process start. Without it the app
+	  raises GADInvalidInitializationException and dies before the first frame — the
+	  game's own code never gets as far as deciding not to ask for an ad.
+
+	  Before shipping, either replace this with the real iOS App ID from the AdMob
+	  console (it is a different app and a different ID from the Android one), or drop
+	  the plugin from the iOS build and delete this key with it.
+	-->
+	<key>GADApplicationIdentifier</key>
+	<string>ca-app-pub-3940256099942544~1458002511</string>
 	<key>LSRequiresIPhoneOS</key>
 	<true/>
 	<key>UIApplicationSceneManifest</key>

@@ -5,6 +5,7 @@ export const DE: Record<string, string> = {
   'menu.hunt': 'JAGD',
   'menu.chronicle': 'Chronik',
   'menu.controlsFooter': 'WASD bewegen · LEERTASTE Sprint · TAB Statistik · ESC Pause',
+  'menu.controlsFooterTouch': 'Ziehen zum Bewegen · DASH zum Ausweichen · ≡ für Build',
 
   'shop.title': 'HÖHLE',
   'shop.maxed': 'MAX',
@@ -687,6 +688,7 @@ export const DE: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'Körper: {name}',
+  'menu.huntResume': '{name} · Fortsetzung: {biome}, Raum {room}',
   'menu.biome.1': 'Dörfer',
   'menu.biome.2': 'Kriegslager',
   'lair.tab.species': 'Körper',

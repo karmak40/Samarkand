@@ -5,6 +5,7 @@ export const RU: Record<string, string> = {
   'menu.hunt': 'ОХОТА',
   'menu.chronicle': 'Летопись',
   'menu.controlsFooter': 'WASD движение · ПРОБЕЛ рывок · TAB статистика · ESC пауза',
+  'menu.controlsFooterTouch': 'Свайп — движение · DASH — рывок · ≡ — билд',
 
   'shop.title': 'ЛОГОВО',
   'shop.maxed': 'МАКС',
@@ -687,6 +688,7 @@ export const RU: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тело: {name}',
+  'menu.huntResume': '{name} · продолжение: {biome}, комната {room}',
   'menu.biome.1': 'Деревни',
   'menu.biome.2': 'Военный лагерь',
   'lair.tab.species': 'Тела',

@@ -5,6 +5,7 @@ export const IT: Record<string, string> = {
   'menu.hunt': 'CACCIA',
   'menu.chronicle': 'Cronaca',
   'menu.controlsFooter': 'WASD movimento · SPAZIO scatto · TAB statistiche · ESC pausa',
+  'menu.controlsFooterTouch': 'Trascina per muoverti · DASH per schivare · ≡ per la build',
 
   'shop.title': 'TANA',
   'shop.maxed': 'MAX',
@@ -687,6 +688,7 @@ export const IT: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'corpo: {name}',
+  'menu.huntResume': '{name} · ripresa: {biome}, stanza {room}',
   'menu.biome.1': 'Villaggi',
   'menu.biome.2': 'Campo di guerra',
   'lair.tab.species': 'Corpi',

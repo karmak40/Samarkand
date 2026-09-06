@@ -106,7 +106,8 @@ export class RunStats {
   totalKills = 0;
   private readonly killsById = new Map<string, KillRecord>();
   bestKillStreak = 0;
-  private killStreak = 0;
+  /** Kills within `killStreakTimer` of each other. Read by the HUD/camera to react live. */
+  killStreak = 0;
   private killStreakTimer = 0;
 
   // --- progression ----------------------------------------------------------

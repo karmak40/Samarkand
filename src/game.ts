@@ -152,6 +152,14 @@ export class Game {
   private difficultyBase = 0;
   /** This run's total room count, for the HUD and for `generateRoom`'s pacing. */
   private totalRunRooms = TOTAL_DEPTHS;
+  /**
+   * How many of `biome`'s own layers were skipped generating a shortened map to
+   * resume from a checkpoint. Zero on a normal run. Added to a node's own depth
+   * to get its true depth within the biome, since the map itself only ever
+   * counts from 0 — `difficultyBase` can't be reused for this, as it also
+   * carries the war-camp's continuation offset for the *whole run's* numbering.
+   */
+  private biomeStartDepth = 0;
 
   private marketOffers: MarketOffer[] = [];
   private cursedOffers: CursedOffer[] = [];
@@ -162,6 +170,14 @@ export class Game {
   private roomIndex = 0;
   private humansAtRoomStart = 0;
   private roomIntroTimer = 0;
+  /**
+   * `tracker.elapsed` the moment the player first proved they'd read the
+   * opening control hint — moved a real distance and landed a hit — or null
+   * while that's still unproven. Drives the hint's fade-out in `drawHints`:
+   * someone who gets it in three seconds shouldn't have it hanging around for
+   * fourteen, and someone still fumbling at fourteen shouldn't lose it either.
+   */
+  private controlsHintClearedAt: number | null = null;
   private exitReady = false;
   /** Whether this room's reinforcement wave (if it rolled one) has already marched in. */
   private reinforcementsSpawned = false;
@@ -329,15 +345,26 @@ export class Game {
     this.cardsReturnState = null;
     Object.assign(this.mapView, initMapViewState());
     this.hurtFlash = 0;
+    this.controlsHintClearedAt = null;
     this.reviveAdUsed = false;
     this.reviveView.phase = 'offer';
 
-    // Biomes reached in a past run are a standing preference, same as the starting
-    // body — asking again before every hunt would be friction, not a decision.
-    // Chosen directly rather than continued into, the war-camp is its own short
-    // run: a fresh difficulty ramp and its own ending, not the back half of a
-    // longer one the player never played the front half of.
-    if (this.meta.selectedStartBiome >= 2) {
+    // A daily is compared against every other player on the same seed, so it
+    // always starts at the true beginning regardless of a pending checkpoint.
+    // Everything else resumes from wherever the last non-victorious run's third
+    // room landed, same reasoning as the biome preference below: asking the
+    // player to re-clear ground they already paid for in blood would be
+    // friction, not a decision.
+    if (!daily && this.meta.checkpointDepth > 0) {
+      const startDepth = Math.min(this.meta.checkpointDepth, BIOME_ROOMS - 2);
+      const base = this.meta.checkpointBiome === 2 ? BIOME_ROOMS + startDepth : startDepth;
+      this.generateBiome(this.meta.checkpointBiome, base, TOTAL_DEPTHS, startDepth);
+    } else if (this.meta.selectedStartBiome >= 2) {
+      // Biomes reached in a past run are a standing preference, same as the
+      // starting body — asking again before every hunt would be friction, not a
+      // decision. Chosen directly rather than continued into, the war-camp is
+      // its own short run: a fresh difficulty ramp and its own ending, not the
+      // back half of a longer one the player never played the front half of.
       this.generateBiome(2, 0, BIOME_ROOMS);
     } else {
       // The first biome's map and every arena behind it come from the seed, so a
@@ -360,12 +387,18 @@ export class Game {
    * started in the first biome keeps going; starting the war-camp directly from
    * the menu passes `0`/`BIOME_ROOMS` so it ramps up fresh, like a short run of
    * its own.
+   *
+   * `startDepth` shortens the generated map by that many layers when resuming
+   * from a checkpoint — the player re-enters mid-climb, so there is that much
+   * less of this biome left to walk. Zero (the default) generates the whole
+   * thing, same as ever.
    */
-  private generateBiome(biome: 1 | 2, difficultyBase: number, totalRunRooms: number): void {
+  private generateBiome(biome: 1 | 2, difficultyBase: number, totalRunRooms: number, startDepth = 0): void {
     this.biome = biome;
     this.difficultyBase = difficultyBase;
     this.totalRunRooms = totalRunRooms;
-    this.runMap = generateRunMap(BIOME_ROOMS, this.runRng.fork());
+    this.biomeStartDepth = startDepth;
+    this.runMap = generateRunMap(BIOME_ROOMS - startDepth, this.runRng.fork());
 
     const planRng = this.runRng.fork();
     this.plansByNode = new Map();
@@ -436,6 +469,15 @@ export class Game {
    */
   private returnToMap(): void {
     const node = this.currentNodeId !== null ? this.runMap.nodes[this.currentNodeId] : null;
+
+    // Every third room cleared becomes the checkpoint the next run resumes
+    // from if this one doesn't end in victory. Market and altar stops don't
+    // move `roomsCleared`, so passing through one between fights can't
+    // re-trigger this on a room already checkpointed.
+    if (node && this.tracker.roomsCleared > 0 && this.tracker.roomsCleared % 3 === 0) {
+      this.meta.recordCheckpoint(this.biome, node.depth + this.biomeStartDepth);
+    }
+
     if (node && node.kind === 'boss') {
       if (this.biome === 1) {
         // Permanent the instant the boss falls, independent of how the run
@@ -448,6 +490,9 @@ export class Game {
       }
       this.tracker.outcome = 'victory';
       this.sound.victory();
+      // The run is won — the next hunt starts from the top, not from a
+      // checkpoint that belonged to the climb that just finished.
+      this.meta.clearCheckpoint();
       this.finishRun();
       return;
     }
@@ -866,7 +911,18 @@ export class Game {
         this.meta.settings.touchControls !== 'off',
         this.state === 'playing' ? 'play' : 'ui',
       );
-      this.ui.frame(this.input, this.renderer.width, this.renderer.height);
+
+      // One reading of the notch per frame, handed to both the half that hit-tests
+      // touches and the half that draws what they hit. Splitting that would be the
+      // same bug as a touch button drawn somewhere other than where it is tested.
+      const safe = this.renderer.safe;
+      this.input.setSafeArea(safe);
+      this.ui.frame(this.input, this.renderer.safeWidth, this.renderer.safeHeight, {
+        x: -safe.left,
+        y: -safe.top,
+        w: this.renderer.width,
+        h: this.renderer.height,
+      });
 
       this.update(delta);
       this.draw(delta);
@@ -1021,6 +1077,14 @@ export class Game {
 
     world.time += simDt;
     this.tracker.tick(simDt);
+    if (
+      this.controlsHintClearedAt === null &&
+      this.roomIndex === 0 &&
+      this.tracker.distanceTravelled > 60 &&
+      this.tracker.hitsLanded > 0
+    ) {
+      this.controlsHintClearedAt = this.tracker.elapsed;
+    }
     world.rebuildGrid();
 
     this.monster.handleInput(this.input, world, simDt);
@@ -1280,6 +1344,7 @@ export class Game {
         skills: this.skillPool.takenList,
         hurtFlash: this.hurtFlash,
         elapsed: this.tracker.elapsed,
+        hintClearedAt: this.controlsHintClearedAt,
         bossName: boss ? boss.archetype.name : null,
         bossHealth: boss ? boss.healthFraction : 0,
         touchActive: this.touchActive(),

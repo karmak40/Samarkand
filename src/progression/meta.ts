@@ -107,6 +107,9 @@ export interface SaveData {
   deepestBiomeReached: number;
   /** Which biome the next run starts in, capped at `deepestBiomeReached`. */
   selectedStartBiome: number;
+  /** Where the next run starts if the last one didn't end in victory. */
+  checkpointBiome: number;
+  checkpointDepth: number;
   /** Presentation and controls. Never anything that changes difficulty. */
   settings: Settings;
   /** Master volume, 0..1. */
@@ -252,6 +255,42 @@ export class MetaProgress implements ContentGate {
     const clamped = Math.min(Math.max(1, Math.round(biome)), this.deepestBiomeReached);
     if (clamped === this.selectedStartBiome) return;
     this.selectedStartBiome = clamped;
+    this.save();
+  }
+
+  // ---- checkpoint ------------------------------------------------------------
+
+  /**
+   * The next run's starting point, if the last one didn't end in victory.
+   *
+   * Rooms deep into a run are steep to re-grind after a death, so every third
+   * one cleared becomes the new resume point — overwritten as the player goes
+   * further, cleared entirely on a win. This is a shortcut for the *next*
+   * attempt, not a mid-run save: nothing about the run itself (build, HP,
+   * inventory) survives, only where it starts.
+   */
+  checkpointBiome: 1 | 2 = 1;
+  /** Depth within `checkpointBiome`, always a multiple of 3. Zero means none set. */
+  checkpointDepth = 0;
+
+  get hasCheckpoint(): boolean {
+    return this.checkpointDepth > 0;
+  }
+
+  /** Called every third room cleared. Ignores anything that isn't further in. */
+  recordCheckpoint(biome: 1 | 2, depth: number): void {
+    if (biome < this.checkpointBiome) return;
+    if (biome === this.checkpointBiome && depth <= this.checkpointDepth) return;
+    this.checkpointBiome = biome;
+    this.checkpointDepth = depth;
+    this.save();
+  }
+
+  /** Called on a victorious run — the next hunt starts from the top again. */
+  clearCheckpoint(): void {
+    if (this.checkpointDepth === 0 && this.checkpointBiome === 1) return;
+    this.checkpointBiome = 1;
+    this.checkpointDepth = 0;
     this.save();
   }
 
@@ -414,6 +453,8 @@ export class MetaProgress implements ContentGate {
       speciesId: this.speciesId,
       deepestBiomeReached: this.deepestBiomeReached,
       selectedStartBiome: this.selectedStartBiome,
+      checkpointBiome: this.checkpointBiome,
+      checkpointDepth: this.checkpointDepth,
       settings: this.settings,
       lifetime: this.lifetime,
       achievements: [...this.achievements],
@@ -473,6 +514,14 @@ export class MetaProgress implements ContentGate {
           ? Math.min(Math.max(1, Math.floor(data.selectedStartBiome)), this.deepestBiomeReached)
           : 1;
 
+      // Missing on any save older than this feature — defaults to no checkpoint,
+      // same as a profile that has never died mid-run.
+      this.checkpointBiome = data.checkpointBiome === 2 ? 2 : 1;
+      this.checkpointDepth =
+        typeof data.checkpointDepth === 'number' && data.checkpointDepth > 0
+          ? Math.floor(data.checkpointDepth)
+          : 0;
+
       // Merge rather than replace, so a save written by an older build that lacks
       // newer counters still loads with sane defaults.
       this.lifetime = { ...emptyLifetime(), ...(data.lifetime ?? {}) };
@@ -530,6 +579,8 @@ export class MetaProgress implements ContentGate {
     this.speciesId = DEFAULT_SPECIES_ID;
     this.deepestBiomeReached = 1;
     this.selectedStartBiome = 1;
+    this.checkpointBiome = 1;
+    this.checkpointDepth = 0;
     this.settings = defaultSettings();
     this.unlocked.clear();
     this.achievements.clear();

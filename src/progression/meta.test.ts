@@ -104,6 +104,63 @@ describe('choosing a body', () => {
   });
 });
 
+describe('checkpoint', () => {
+  it('starts unset', () => {
+    const meta = new MetaProgress();
+    expect(meta.hasCheckpoint).toBe(false);
+    expect(meta.checkpointBiome).toBe(1);
+    expect(meta.checkpointDepth).toBe(0);
+  });
+
+  it('records a deeper room and ignores a shallower one', () => {
+    const meta = new MetaProgress();
+    meta.recordCheckpoint(1, 6);
+    expect(meta.checkpointDepth).toBe(6);
+
+    meta.recordCheckpoint(1, 3);
+    expect(meta.checkpointDepth).toBe(6);
+
+    meta.recordCheckpoint(1, 9);
+    expect(meta.checkpointDepth).toBe(9);
+  });
+
+  it('a later biome always beats an earlier one, regardless of depth', () => {
+    const meta = new MetaProgress();
+    meta.recordCheckpoint(2, 3);
+    expect(meta.checkpointBiome).toBe(2);
+    expect(meta.checkpointDepth).toBe(3);
+
+    meta.recordCheckpoint(1, 9);
+    expect(meta.checkpointBiome).toBe(2);
+    expect(meta.checkpointDepth).toBe(3);
+  });
+
+  it('clears back to the top', () => {
+    const meta = new MetaProgress();
+    meta.recordCheckpoint(2, 6);
+    meta.clearCheckpoint();
+
+    expect(meta.hasCheckpoint).toBe(false);
+    expect(meta.checkpointBiome).toBe(1);
+    expect(meta.checkpointDepth).toBe(0);
+  });
+
+  it('round-trips through localStorage', () => {
+    const first = new MetaProgress();
+    first.recordCheckpoint(2, 6);
+
+    const second = new MetaProgress();
+    expect(second.checkpointBiome).toBe(2);
+    expect(second.checkpointDepth).toBe(6);
+  });
+
+  it('defaults to unset on a save from before this feature existed', () => {
+    writeSave({ version: 4, souls: 0, unlocked: [], lifetime: {} });
+    const meta = new MetaProgress();
+    expect(meta.hasCheckpoint).toBe(false);
+  });
+});
+
 describe('persistence', () => {
   it('round-trips through localStorage', () => {
     const first = new MetaProgress();

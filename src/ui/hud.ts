@@ -21,6 +21,8 @@ export interface HudState {
   hurtFlash: number;
   /** Seconds since the run started, for the tutorial hint. */
   elapsed: number;
+  /** `elapsed` when the opening hint's message was first demonstrated, or null. */
+  hintClearedAt: number | null;
   bossName: string | null;
   bossHealth: number;
   /** Whether the player is on the on-screen stick rather than a keyboard. */
@@ -233,21 +235,31 @@ function drawCompactCluster(ui: Ui, state: HudState): void {
 
 // ---------------------------------------------------------------------------
 
+/**
+ * Red closing in from the edges as health drops.
+ *
+ * Measured off the whole screen rather than the safe area: this is the one HUD
+ * element that is supposed to reach the physical edge of the glass, and one that
+ * stopped short of the notch would put a hard red line across the display.
+ */
 function drawHurtVignette(ui: Ui, amount: number): void {
   if (amount <= 0.01) return;
   const ctx = ui.ctx;
+  const { x, y, w, h } = ui.bleed;
+  const cx = x + w / 2;
+  const cy = y + h / 2;
   const grad = ctx.createRadialGradient(
-    ui.width / 2,
-    ui.height / 2,
-    Math.min(ui.width, ui.height) * 0.3,
-    ui.width / 2,
-    ui.height / 2,
-    Math.max(ui.width, ui.height) * 0.7,
+    cx,
+    cy,
+    Math.min(w, h) * 0.3,
+    cx,
+    cy,
+    Math.max(w, h) * 0.7,
   );
   grad.addColorStop(0, 'rgba(160,20,26,0)');
   grad.addColorStop(1, `rgba(160,20,26,${(amount * 0.55).toFixed(3)})`);
   ctx.fillStyle = grad;
-  ctx.fillRect(0, 0, ui.width, ui.height);
+  ctx.fillRect(x, y, w, h);
 }
 
 function drawHealthCluster(ui: Ui, state: HudState): void {
@@ -732,12 +744,33 @@ function drawBossBar(ui: Ui, state: HudState): void {
   });
 }
 
+/** Never dismissed before this even if the player got it instantly. */
+const HINT_MIN_VISIBLE = 6;
+/** Always dismissed by this even if `hintClearedAt` never arrives. */
+const HINT_HARD_MAX = 20;
+/** Read-time kept after the player demonstrates they understood the hint. */
+const HINT_GRACE = 1.5;
+
 function drawHints(ui: Ui, state: HudState): void {
   // The core mechanic needs saying exactly once, early — true on touch as much as on
   // a keyboard, only the wording of how to move changes.
-  if (state.elapsed > 14 || state.roomIndex > 0) return;
+  if (state.roomIndex > 0) return;
 
-  const alpha = state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > 11 ? (14 - state.elapsed) / 3 : 1;
+  // Moving a real distance and landing a hit is the player acting out both halves
+  // of the hint themselves — proof it landed, better than any fixed timer. Someone
+  // who gets there in three seconds doesn't need it lingering for fourteen; someone
+  // still fumbling at fourteen shouldn't lose it either, so the hard cap only bites
+  // when the softer, demonstrated one never fires at all.
+  const dismissAt = clamp(
+    state.hintClearedAt !== null ? state.hintClearedAt + HINT_GRACE : HINT_HARD_MAX,
+    HINT_MIN_VISIBLE,
+    HINT_HARD_MAX,
+  );
+  if (state.elapsed > dismissAt) return;
+
+  const fadeOutStart = Math.max(2, dismissAt - 3);
+  const alpha =
+    state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > fadeOutStart ? (dismissAt - state.elapsed) / (dismissAt - fadeOutStart) : 1;
 
   // On touch, the right edge is the on-screen stick's button column — centre the
   // hint in whatever's left of the screen instead of letting it run underneath them.

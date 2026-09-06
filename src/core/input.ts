@@ -1,4 +1,5 @@
 import { type Vec2 } from './math';
+import { type Insets, NO_INSETS } from './safe-area';
 import {
   buttonAt,
   dragStickOrigin,
@@ -83,7 +84,11 @@ export class Input {
   private readonly pressed = new Set<ActionName>();
   private readonly released = new Set<ActionName>();
 
-  /** Mouse position in CSS pixels relative to the canvas. */
+  /**
+   * Mouse position in CSS pixels, in the same space the interface is drawn in —
+   * relative to the safe area, not to the canvas corner. Off a phone the two are the
+   * same point; on one, this is what keeps a tap landing on the button under it.
+   */
   readonly mouse: Vec2 = { x: 0, y: 0 };
   mouseDown = false;
   mouseClicked = false;
@@ -112,6 +117,14 @@ export class Input {
   private touchEnabled = false;
   private touchMode: TouchMode = 'ui';
   private layout: TouchLayout = touchLayout(0, 0);
+
+  /**
+   * What the system has claimed on each edge, pushed in by the game every frame.
+   *
+   * Held here rather than read from CSS on each event because a touchmove burst
+   * arrives dozens of times a second and each read would force a style resolve.
+   */
+  private safe: Insets = NO_INSETS;
 
   /** The touch steering the monster, if any, with where it landed and where it is now. */
   private stickTouch: number | null = null;
@@ -160,8 +173,8 @@ export class Input {
 
     const onMouseMove = (e: MouseEvent) => {
       const rect = this.target.getBoundingClientRect();
-      this.mouse.x = e.clientX - rect.left;
-      this.mouse.y = e.clientY - rect.top;
+      this.mouse.x = e.clientX - rect.left - this.safe.left;
+      this.mouse.y = e.clientY - rect.top - this.safe.top;
     };
 
     const onMouseDown = (e: MouseEvent) => {
@@ -192,9 +205,13 @@ export class Input {
 
     const onContextMenu = (e: Event) => e.preventDefault();
 
+    // Into the space the interface is drawn in. A finger that lands beside the notch
+    // gets a negative coordinate rather than a clamped one, which is exactly right:
+    // the steering pad is the whole screen, so the stick should appear under the
+    // thumb wherever the thumb is, even out there.
     const localOf = (touch: Touch, bounds: DOMRect): Vec2 => ({
-      x: touch.clientX - bounds.left,
-      y: touch.clientY - bounds.top,
+      x: touch.clientX - bounds.left - this.safe.left,
+      y: touch.clientY - bounds.top - this.safe.top,
     });
 
     const onTouchStart = (e: TouchEvent) => {
@@ -206,7 +223,12 @@ export class Input {
       this.touchSeen = true;
 
       const bounds = this.target.getBoundingClientRect();
-      this.layout = touchLayout(bounds.width, bounds.height);
+      // The same box `drawTouchControls` lays the buttons out in — it is handed
+      // `ui.width`/`ui.height`, which are the safe area, not the glass.
+      this.layout = touchLayout(
+        bounds.width - this.safe.left - this.safe.right,
+        bounds.height - this.safe.top - this.safe.bottom,
+      );
 
       for (const touch of Array.from(e.changedTouches)) {
         const at = localOf(touch, bounds);
@@ -337,6 +359,17 @@ export class Input {
   }
 
   // ---- touch -------------------------------------------------------------------
+
+  /**
+   * Tell the input layer where the safe area currently is.
+   *
+   * Pushed in from the renderer, which is already the one thing that reads it, so
+   * there is a single answer per frame and no chance of the hit test and the drawing
+   * disagreeing about where the notch is.
+   */
+  setSafeArea(safe: Insets): void {
+    this.safe = safe;
+  }
 
   /**
    * Tell the input layer what the on-screen controls are for right now.

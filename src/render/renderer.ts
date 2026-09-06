@@ -1,5 +1,6 @@
 import { Camera } from '../core/camera';
 import { clamp, TAU, type Vec2 } from '../core/math';
+import { type Insets, NO_INSETS, readSafeAreaInsets } from '../core/safe-area';
 import type { Human } from '../entities/human';
 import { t } from '../i18n';
 import type { World } from '../world/world';
@@ -12,18 +13,32 @@ import { Terrain } from './terrain';
  * Layer order (bottom to top): terrain, decals, ground hazards, y-sorted entities,
  * projectiles, lightning arcs, particles, damage numbers, vignette. UI is drawn
  * afterwards in screen space by the HUD.
+ *
+ * Two coordinate spaces come out of here, and which one is current is a property of
+ * the canvas, not of the caller. World space (`beginWorld`) has its origin at the
+ * corner of the glass, so the arena bleeds under a notch. UI space (`beginUi`) has
+ * its origin inside the safe area, which is what makes every `ui.width`-relative
+ * position in the HUD land somewhere a thumb can reach — without any of that code
+ * knowing the notch exists. `drawWorld` switches to the first and hands back the
+ * second, so the only rule for callers is the one they already followed: draw the
+ * world, then draw the UI.
  */
 export class Renderer {
   readonly canvas: HTMLCanvasElement;
   readonly ctx: CanvasRenderingContext2D;
   readonly terrain = new Terrain();
 
-  /** CSS pixel size of the viewport. */
+  /** CSS pixel size of the viewport, notch included. */
   width = 0;
   height = 0;
+
+  /** What the system has claimed on each edge, in CSS pixels. Zero off a phone. */
+  safe: Insets = NO_INSETS;
+
   private dpr = 1;
 
   private observer: ResizeObserver | null = null;
+  private onOrientation: (() => void) | null = null;
 
   /** Baked edge darkening, rebuilt only when the viewport changes shape. */
   private vignette: HTMLCanvasElement | null = null;
@@ -43,11 +58,23 @@ export class Renderer {
       this.observer = new ResizeObserver(() => this.resize());
       this.observer.observe(canvas);
     }
+
+    // Turning a phone from landscape-left to landscape-right swaps which edge the
+    // notch is on without changing a single dimension, so the observer above never
+    // fires and the HUD would keep avoiding the wrong side of the screen.
+    if (typeof window !== 'undefined') {
+      this.onOrientation = () => this.resize();
+      window.addEventListener('orientationchange', this.onOrientation);
+    }
   }
 
   destroy(): void {
     this.observer?.disconnect();
     this.observer = null;
+    if (this.onOrientation) {
+      window.removeEventListener('orientationchange', this.onOrientation);
+      this.onOrientation = null;
+    }
   }
 
   /** Re-read the element size and rescale the backing store. */
@@ -57,6 +84,7 @@ export class Renderer {
     const rect = this.canvas.getBoundingClientRect();
     this.width = Math.max(1, Math.round(rect.width));
     this.height = Math.max(1, Math.round(rect.height));
+    this.safe = readSafeAreaInsets();
 
     const bw = Math.round(this.width * this.dpr);
     const bh = Math.round(this.height * this.dpr);
@@ -64,6 +92,16 @@ export class Renderer {
       this.canvas.width = bw;
       this.canvas.height = bh;
     }
+  }
+
+  /** Width of the box the UI may lay itself out in, in CSS pixels. */
+  get safeWidth(): number {
+    return Math.max(1, this.width - this.safe.left - this.safe.right);
+  }
+
+  /** Height of the box the UI may lay itself out in, in CSS pixels. */
+  get safeHeight(): number {
+    return Math.max(1, this.height - this.safe.top - this.safe.bottom);
   }
 
   /**
@@ -85,9 +123,34 @@ export class Renderer {
   begin(): void {
     this.syncSize();
     const ctx = this.ctx;
-    ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+    // Cleared in device pixels so the wipe covers the notch strips too — those are
+    // still ours to paint, and leaving them stale would smear last frame down the
+    // side of the screen.
+    ctx.setTransform(1, 0, 0, 1, 0, 0);
     ctx.fillStyle = '#07070a';
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillRect(0, 0, this.canvas.width, this.canvas.height);
+    this.beginUi();
+  }
+
+  /**
+   * CSS pixels with the origin at the corner of the glass. The arena is drawn here,
+   * so it fills the whole screen on a phone rather than sitting in a letterbox.
+   */
+  private beginWorld(): void {
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, 0, 0);
+  }
+
+  /**
+   * CSS pixels with the origin inside the safe area — the space the HUD, the menus
+   * and the on-screen controls all lay themselves out in.
+   *
+   * Rounded to whole device pixels: an origin on a half-pixel would soften every
+   * glyph in the interface, which is a strange price to pay for a notch.
+   */
+  beginUi(): void {
+    const ox = Math.round(this.safe.left * this.dpr);
+    const oy = Math.round(this.safe.top * this.dpr);
+    this.ctx.setTransform(this.dpr, 0, 0, this.dpr, ox, oy);
   }
 
   syncCamera(camera: Camera): void {
@@ -116,6 +179,7 @@ export class Renderer {
     const ctx = this.ctx;
     const view = camera.visibleRect();
 
+    this.beginWorld();
     ctx.save();
     camera.applyTransform(ctx);
 
@@ -148,6 +212,27 @@ export class Renderer {
     this.drawVignette();
     this.drawOffscreenMarkers(world, camera);
     if (exit && exitOpen) this.drawExitEdgeMarker(camera, exit);
+
+    // The world is done; everything after this frame draws interface.
+    this.beginUi();
+  }
+
+  /**
+   * The ring the edge markers ride on, in world-space coordinates.
+   *
+   * Markers say "the thing you want is that way", which only works if the marker
+   * itself can be seen — so unlike the arena behind them they stay out of the notch.
+   * The box is the safe area, and the margin is measured inward from that.
+   */
+  private markerBox(margin: number): { cx: number; cy: number; halfW: number; halfH: number } {
+    const halfW = Math.max(1, this.safeWidth / 2 - margin);
+    const halfH = Math.max(1, this.safeHeight / 2 - margin);
+    return {
+      cx: this.safe.left + this.safeWidth / 2,
+      cy: this.safe.top + this.safeHeight / 2,
+      halfW,
+      halfH,
+    };
   }
 
   /** Gold pointer on the viewport border while the portal is off screen. */
@@ -155,21 +240,17 @@ export class Renderer {
     const ctx = this.ctx;
     const screen = camera.worldToScreen(exit.x, exit.y);
     const margin = 46;
+    const { cx, cy, halfW, halfH } = this.markerBox(margin);
 
+    // Already comfortably on screen — nothing to point at.
     if (
-      screen.x > margin &&
-      screen.x < this.width - margin &&
-      screen.y > margin &&
-      screen.y < this.height - margin
+      Math.abs(screen.x - cx) < halfW &&
+      Math.abs(screen.y - cy) < halfH
     ) {
       return;
     }
 
-    const cx = this.width / 2;
-    const cy = this.height / 2;
     const angle = Math.atan2(screen.y - cy, screen.x - cx);
-    const halfW = this.width / 2 - margin;
-    const halfH = this.height / 2 - margin;
     const scale = Math.min(
       Math.abs(halfW / Math.cos(angle)) || Infinity,
       Math.abs(halfH / Math.sin(angle)) || Infinity,
@@ -318,11 +399,7 @@ export class Renderer {
    */
   private drawOffscreenMarkers(world: World, camera: Camera): void {
     const ctx = this.ctx;
-    const margin = 34;
-    const cx = this.width / 2;
-    const cy = this.height / 2;
-    const halfW = this.width / 2 - margin;
-    const halfH = this.height / 2 - margin;
+    const { cx, cy, halfW, halfH } = this.markerBox(34);
 
     const project = (wx: number, wy: number): { x: number; y: number; angle: number; onScreen: boolean } => {
       const screen = camera.worldToScreen(wx, wy);
@@ -454,13 +531,20 @@ export class Renderer {
     this.vignetteSize = { w: this.width, h: this.height, dpr: this.dpr };
   }
 
-  /** Full-screen colour wash, used for damage flashes and transitions. */
+  /**
+   * Full-screen colour wash, used for damage flashes and transitions.
+   *
+   * Reaches past the safe area on purpose. A flash that stopped at the notch would
+   * leave two unlit bars down the sides of the screen, and the eye reads that as the
+   * screen being broken rather than the monster being hurt. Expects UI space, which
+   * is what a frame is left in once `drawWorld` has run.
+   */
   overlay(color: string, alpha: number): void {
     if (alpha <= 0) return;
     const ctx = this.ctx;
     ctx.globalAlpha = Math.min(1, alpha);
     ctx.fillStyle = color;
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillRect(-this.safe.left, -this.safe.top, this.width, this.height);
     ctx.globalAlpha = 1;
   }
 }

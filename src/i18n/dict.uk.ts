@@ -5,6 +5,7 @@ export const UK: Record<string, string> = {
   'menu.hunt': 'ПОЛЮВАННЯ',
   'menu.chronicle': 'Літопис',
   'menu.controlsFooter': 'WASD рух · ПРОБІЛ ривок · TAB статистика · ESC пауза',
+  'menu.controlsFooterTouch': 'Свайп — рух · DASH — ривок · ≡ — білд',
 
   'shop.title': 'ЛІГВО',
   'shop.maxed': 'МАКС',
@@ -687,6 +688,7 @@ export const UK: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тіло: {name}',
+  'menu.huntResume': '{name} · продовження: {biome}, кімната {room}',
   'menu.biome.1': 'Села',
   'menu.biome.2': 'Військовий табір',
   'lair.tab.species': 'Тіла',

@@ -5,6 +5,7 @@ export const HR: Record<string, string> = {
   'menu.hunt': 'LOV',
   'menu.chronicle': 'Kronika',
   'menu.controlsFooter': 'WASD kretanje · RAZMAK sprint · TAB statistika · ESC pauza',
+  'menu.controlsFooterTouch': 'Povuci za kretanje · DASH za izbjegavanje · ≡ za build',
 
   'shop.title': 'BRLOG',
   'shop.maxed': 'MAKS',
@@ -687,6 +688,7 @@ export const HR: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'tijelo: {name}',
+  'menu.huntResume': '{name} · nastavak: {biome}, soba {room}',
   'menu.biome.1': 'Sela',
   'menu.biome.2': 'Ratni logor',
   'lair.tab.species': 'Tijela',

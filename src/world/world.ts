@@ -271,6 +271,7 @@ export class World {
     maxRange: number,
     requireLineOfSight = true,
     exclude?: Human,
+    requireOnScreen = false,
   ): Human | null {
     let best: Human | null = null;
     let bestD2 = maxRange * maxRange;
@@ -301,6 +302,7 @@ export class World {
             const d2 = dist2(x, y, human.x, human.y);
             if (d2 >= bestD2) continue;
             if (requireLineOfSight && !this.hasLineOfSight(x, y, human.x, human.y)) continue;
+            if (requireOnScreen && !this.isOnScreen(human.x, human.y)) continue;
             best = human;
             bestD2 = d2;
           }
@@ -309,6 +311,19 @@ export class World {
     }
 
     return best;
+  }
+
+  /**
+   * Whether a point falls inside what the camera is actually showing right now.
+   *
+   * A ranged shot from off-screen reads as unfair no matter which side fires it —
+   * the target never saw it coming because it couldn't have. Zero padding on
+   * purpose: this asks "is it in frame", not "is it comfortably in frame", so it
+   * only ever rejects what would truly render outside the glass.
+   */
+  isOnScreen(x: number, y: number): boolean {
+    const view = this.camera.visibleRect(0);
+    return x >= view.x && x <= view.x + view.w && y >= view.y && y <= view.y + view.h;
   }
 
   hasLineOfSight(ax: number, ay: number, bx: number, by: number): boolean {
@@ -763,9 +778,23 @@ export class World {
 
   onKilled(killer: Combatant | null, victim: Combatant, options: DamageOptions): void {
     void killer;
-    void victim;
     void options;
-    // Concrete kill accounting lives in Human.onDeath, which knows the archetype.
+    // Concrete kill accounting lives in Human.onDeath, which knows the archetype;
+    // this only reacts to the tally it left behind.
+    if (victim.faction !== 'human') return;
+
+    const streak = this.tracker.killStreak;
+    // A running streak snowballs rather than landing exactly as flat as the first
+    // kill did — both capped well under a hard hit taken, so a long streak reads
+    // as building momentum, never as losing control of the camera.
+    this.camera.shake(Math.min(7, 1.5 + streak * 0.4));
+    this.camera.freeze(Math.min(0.05, 0.008 + streak * 0.0025));
+
+    if (streak >= 3) {
+      const color = streak >= 10 ? '#ffd76a' : streak >= 6 ? '#ff9d4d' : '#ff6b6b';
+      const emphasis = Math.min(1.6, 0.3 + streak * 0.09);
+      this.texts.add(victim.x, victim.y - victim.radius - 30, `×${streak}`, color, 15 + Math.min(14, streak), emphasis);
+    }
   }
 
   onHealed(target: Combatant, amount: number, label: string): void {

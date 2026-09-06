@@ -5,6 +5,7 @@ export const EN: Record<string, string> = {
   'menu.hunt': 'HUNT',
   'menu.chronicle': 'Chronicle',
   'menu.controlsFooter': 'WASD move · SPACE dash · TAB stats · ESC pause',
+  'menu.controlsFooterTouch': 'Drag to move · DASH to dodge · ≡ for build',
 
   'shop.title': 'LAIR',
   'shop.maxed': 'MAX',
@@ -687,6 +688,7 @@ export const EN: Record<string, string> = {
 
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'body: {name}',
+  'menu.huntResume': '{name} · resuming in {biome}, room {room}',
   'menu.biome.1': 'Villages',
   'menu.biome.2': 'War-camp',
   'lair.tab.species': 'Bodies',

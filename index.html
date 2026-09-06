@@ -2,7 +2,17 @@
 <html lang="ru">
   <head>
     <meta charset="UTF-8" />
-    <meta name="viewport" content="width=device-width, initial-scale=1.0" />
+    <!--
+      `viewport-fit=cover` lets the canvas reach under the notch and the home indicator
+      instead of being letterboxed away from them, which is what the arena wants. What
+      the HUD wants is the opposite, and it gets it from `env(safe-area-inset-*)` — see
+      `src/core/safe-area.ts`. `user-scalable=no` because a pinch mid-fight is always a
+      misfire: the game has its own zoom and the page has nothing to read.
+    -->
+    <meta
+      name="viewport"
+      content="width=device-width, initial-scale=1.0, viewport-fit=cover, user-scalable=no"
+    />
     <title>SAMARKAND — Пробуждение</title>
 
     <!--

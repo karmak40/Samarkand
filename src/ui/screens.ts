@@ -935,9 +935,11 @@ export type MenuAction =
 export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActive: boolean): MenuAction {
   const ctx = ui.ctx;
 
-  // Background: slow drifting embers over a dark field.
+  // Background: slow drifting embers over a dark field. Filled edge to edge of the
+  // glass, notch strips included — a title screen that stopped at the safe area
+  // would frame itself in two black bars.
   ctx.fillStyle = '#07070a';
-  ctx.fillRect(0, 0, ui.width, ui.height);
+  ctx.fillRect(ui.bleed.x, ui.bleed.y, ui.bleed.w, ui.bleed.h);
   drawMenuAtmosphere(ui, time);
 
   ui.fittedText('SAMARKAND', ui.width / 2, ui.height * 0.2, {
@@ -965,12 +967,21 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActi
   let by = ui.height * 0.36;
 
   // The body is named on the hunt button itself, so the choice is visible from the
-  // title screen even though it is made in the lair.
+  // title screen even though it is made in the lair. A pending checkpoint takes
+  // over that same line — it's the more useful thing to tell the player about
+  // right before they commit to the next hunt.
+  const huntSub = meta.hasCheckpoint
+    ? t('menu.huntResume', {
+        name: meta.species.name,
+        biome: t(`menu.biome.${meta.checkpointBiome}`),
+        room: meta.checkpointDepth + 1,
+      })
+    : t('menu.huntAs', { name: meta.species.name });
   if (
     ui.button(rect(bx, by, buttonW, 52), t('menu.hunt'), {
       accent: PALETTE.blood,
       size: 18,
-      sub: t('menu.huntAs', { name: meta.species.name }),
+      sub: huntSub,
     })
   ) {
     action = 'start';
@@ -1028,15 +1039,15 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActi
 
   drawAudioControl(ui, meta);
 
-  // Nothing here to hint at on a screen with no keyboard behind it.
-  if (!touchActive) {
-    ui.text(t('menu.controlsFooter'), ui.width / 2, ui.height - 22, {
-      size: 12,
-      color: PALETTE.dim,
-      align: 'center',
-      baseline: 'middle',
-    });
-  }
+  // Touch gets its own line rather than none at all — the keyboard one names keys
+  // that aren't there, but leaving the footer blank told a phone player nothing
+  // before they even reached the arena's own hint.
+  ui.text(touchActive ? t('menu.controlsFooterTouch') : t('menu.controlsFooter'), ui.width / 2, ui.height - 22, {
+    size: 12,
+    color: PALETTE.dim,
+    align: 'center',
+    baseline: 'middle',
+  });
 
   return action;
 }
@@ -1172,7 +1183,7 @@ function drawAudioControl(ui: Ui, meta: MetaProgress): void {
  */
 export function drawMenuBackdrop(ui: Ui, time: number): void {
   ui.ctx.fillStyle = '#07070a';
-  ui.ctx.fillRect(0, 0, ui.width, ui.height);
+  ui.ctx.fillRect(ui.bleed.x, ui.bleed.y, ui.bleed.w, ui.bleed.h);
   drawMenuAtmosphere(ui, time);
 }
 

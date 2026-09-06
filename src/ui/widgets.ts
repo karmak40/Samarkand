@@ -54,8 +54,29 @@ export interface ButtonOptions {
 export class Ui {
   readonly ctx: CanvasRenderingContext2D;
   private input!: Input;
+
+  /**
+   * The box the interface lays itself out in, in CSS pixels.
+   *
+   * On a phone this is the screen minus whatever the notch and the home indicator
+   * have taken, and the canvas is translated so that (0, 0) here is its top-left
+   * corner. That is the whole of the notch handling as far as every screen, the HUD
+   * and the on-screen controls are concerned: they keep measuring from `width` and
+   * `height` and keep landing somewhere visible.
+   */
   width = 0;
   height = 0;
+
+  /**
+   * The whole screen, expressed in the same coordinates — so negative at the top-left
+   * whenever there is an inset.
+   *
+   * Only for the handful of things that should ignore the safe area rather than
+   * respect it: a modal dim or a damage flash has to reach the actual edge of the
+   * glass, because a wash that stops short reads as a rendering fault rather than as
+   * an effect.
+   */
+  bleed: Rect = { x: 0, y: 0, w: 0, h: 0 };
 
   /** Set while any widget is hovered, so the cursor can change. */
   hoveringInteractive = false;
@@ -72,10 +93,11 @@ export class Ui {
     this.ctx = ctx;
   }
 
-  frame(input: Input, width: number, height: number): void {
+  frame(input: Input, width: number, height: number, bleed: Rect): void {
     this.input = input;
     this.width = width;
     this.height = height;
+    this.bleed = bleed;
     this.hoveringInteractive = false;
 
     // Swap the hover sets so this frame can compare against the previous one.
@@ -450,11 +472,11 @@ export class Ui {
 
   // ---- decoration ----------------------------------------------------------
 
-  /** Full-screen dim, for modal screens. */
+  /** Full-screen dim, for modal screens. Covers the notch strips too — see `bleed`. */
   scrim(alpha = 0.72): void {
     const ctx = this.ctx;
     ctx.fillStyle = `rgba(4,4,6,${alpha})`;
-    ctx.fillRect(0, 0, this.width, this.height);
+    ctx.fillRect(this.bleed.x, this.bleed.y, this.bleed.w, this.bleed.h);
   }
 
   /** Section heading with a rule to its right. */

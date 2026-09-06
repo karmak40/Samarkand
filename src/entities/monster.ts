@@ -967,7 +967,11 @@ export class Monster extends Combatant {
 
   private updateAttack(dt: number, world: World): void {
     const range = this.stats.get('range');
-    this.target = world.nearestHuman(this.x, this.y, range, true);
+    // Stacked range stats have no ceiling and can reach well past what the camera
+    // shows — a shot the player never saw connect reads as the game cheating, not
+    // as reach paying off. Off-screen humans are skipped in favour of the nearest
+    // one actually in frame, same range budget either way.
+    this.target = world.nearestHuman(this.x, this.y, range, true, undefined, true);
 
     if (this.target) {
       // Always face the target, even while moving — it reads as "stalking".

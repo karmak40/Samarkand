@@ -17,6 +17,16 @@ import type { World } from '../world/world';
 import type { Building } from './building';
 import { Combatant, type DeathContext } from './entity';
 
+/** Distance from a wall at which a fleeing unit starts bending its path off it. */
+const FLEE_WALL_AVOID_MARGIN = 140;
+/**
+ * How hard the wall push competes against "run straight away from the monster".
+ * Below 1 a unit already backed into a corner would rather keep facing the wall
+ * than turn along it; comfortably above 1 it reliably wins close in, while
+ * doing nothing at all out in the open where `wallAvoidance` returns zero.
+ */
+const FLEE_WALL_AVOID_STRENGTH = 1.8;
+
 export type HumanRole = 'civilian' | 'melee' | 'ranged' | 'support' | 'turret' | 'boss';
 
 export type HumanId =
@@ -366,10 +376,17 @@ export class Human extends Combatant {
       }
 
       // Run directly away, with a slight tangential bias so crowds fan out
-      // instead of forming a single conga line.
+      // instead of forming a single conga line — bent off a nearby wall so
+      // that "away from the monster" doesn't double as "into the corner",
+      // which otherwise strands them somewhere the monster can then barely
+      // land a hit on at all.
       const away = Math.atan2(this.y - monster.y, this.x - monster.x);
       const bias = ((this.id % 2) * 2 - 1) * 0.45;
-      this.moveToward(away + bias, dt, winded ? 0.5 : 1.15);
+      const repel = this.wallAvoidance(world);
+      const steerX = Math.cos(away + bias) + repel.x * FLEE_WALL_AVOID_STRENGTH;
+      const steerY = Math.sin(away + bias) + repel.y * FLEE_WALL_AVOID_STRENGTH;
+      const angle = steerX === 0 && steerY === 0 ? away + bias : Math.atan2(steerY, steerX);
+      this.moveToward(angle, dt, winded ? 0.5 : 1.15);
     } else {
       this.fleeTime = Math.max(0, this.fleeTime - dt * 2);
       this.decelerate(dt);
@@ -399,11 +416,27 @@ export class Human extends Combatant {
    * that's a real behaviour difference from the other roles, not an oversight
    * this is fixing), and `updateBoss` leaves `hasLos` at its default `true`
    * (never actually checked) since bosses have never required a sightline.
+   *
+   * Also requires the attacker itself to be on-screen — a hit that came from
+   * outside the frame the player is looking at is exactly as unfair as one the
+   * monster lands on something it can't see, and `attackRange` alone doesn't
+   * guarantee that (a siege engine's reach comfortably clears most viewports).
+   * Melee and boss roles are never actually filtered by this in practice; their
+   * ranges are short enough to already be on-screen whenever they're in range.
    */
-  private canBeginAttack(distance: number, options: { requireIdle?: boolean; hasLos?: boolean } = {}): boolean {
+  private canBeginAttack(
+    world: World,
+    distance: number,
+    options: { requireIdle?: boolean; hasLos?: boolean } = {},
+  ): boolean {
     const { requireIdle = true, hasLos = true } = options;
     if (requireIdle && (this.state === 'windup' || this.state === 'recover')) return false;
-    return this.attackCooldown <= 0 && distance <= this.archetype.attackRange && hasLos;
+    return (
+      this.attackCooldown <= 0 &&
+      distance <= this.archetype.attackRange &&
+      hasLos &&
+      world.isOnScreen(this.x, this.y)
+    );
   }
 
   private updateFighter(dt: number, world: World, distance: number): void {
@@ -427,7 +460,7 @@ export class Human extends Combatant {
     if (this.charging > 0 && this.state !== 'windup' && this.state !== 'recover') {
       this.moveToward(toMonster, dt, 1.15);
       this.facing = damp(this.facing, toMonster, 10, dt);
-      if (this.canBeginAttack(distance, { hasLos: a.role !== 'ranged' || hasLos })) {
+      if (this.canBeginAttack(world, distance, { hasLos: a.role !== 'ranged' || hasLos })) {
         this.beginAttack(world);
       }
       this.advanceAttack(dt, world, distance);
@@ -477,7 +510,7 @@ export class Human extends Combatant {
       }
     }
 
-    if (this.canBeginAttack(distance, { hasLos: a.role !== 'ranged' || hasLos })) this.beginAttack(world);
+    if (this.canBeginAttack(world, distance, { hasLos: a.role !== 'ranged' || hasLos })) this.beginAttack(world);
     this.advanceAttack(dt, world, distance);
 
     this.facing = damp(this.facing, toMonster, 10, dt);
@@ -515,7 +548,7 @@ export class Human extends Combatant {
     else this.decelerate(dt);
 
     const hasLos = world.hasLineOfSight(this.x, this.y, monster.x, monster.y);
-    if (this.canBeginAttack(distance, { requireIdle: false, hasLos })) {
+    if (this.canBeginAttack(world, distance, { requireIdle: false, hasLos })) {
       this.beginAttack(world);
     }
     this.advanceAttack(dt, world, distance);
@@ -545,7 +578,7 @@ export class Human extends Combatant {
       this.moveToward(toMonster + Math.PI / 2, dt, 0.6);
     }
 
-    if (this.canBeginAttack(distance)) this.beginAttack(world);
+    if (this.canBeginAttack(world, distance)) this.beginAttack(world);
     this.advanceAttack(dt, world, distance);
     this.facing = damp(this.facing, toMonster, 7, dt);
   }
@@ -996,6 +1029,31 @@ export class Human extends Combatant {
 
   private wanderAngle(): number {
     return Math.atan2(this.wanderY - this.y, this.wanderX - this.x);
+  }
+
+  /**
+   * Push vector away from the nearest arena wall(s), zero once comfortably clear
+   * of all of them. Two components can both be nonzero at once — that's what
+   * turns a corner into a diagonal push rather than one that only ever cancels
+   * a single wall and slides the unit into the next one over.
+   */
+  private wallAvoidance(world: World): { x: number; y: number } {
+    const b = world.bounds;
+    const inset = world.wallInset;
+    const margin = FLEE_WALL_AVOID_MARGIN;
+
+    const left = this.x - (b.x + inset);
+    const right = b.x + b.w - inset - this.x;
+    const top = this.y - (b.y + inset);
+    const bottom = b.y + b.h - inset - this.y;
+
+    let x = 0;
+    let y = 0;
+    if (left < margin) x += (margin - left) / margin;
+    if (right < margin) x -= (margin - right) / margin;
+    if (top < margin) y += (margin - top) / margin;
+    if (bottom < margin) y -= (margin - bottom) / margin;
+    return { x, y };
   }
 
   private wander(dt: number, world: World): void {
