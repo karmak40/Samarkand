@@ -13,6 +13,7 @@ export type BuildingKind =
   | 'chapel'
   | 'watchtower'
   | 'stronghold'
+  | 'bell_tower'
   | 'well'
   | 'wall'
   | 'palisade'

@@ -514,6 +514,8 @@ export const RU: Record<string, string> = {
   'map.subtitle': 'Выбери, куда двинешься дальше. Назад дороги нет.',
   'map.titleAct2': 'ВОЕННЫЙ ЛАГЕРЬ',
   'map.subtitleAct2': 'Деревни позади. Здесь держали армию.',
+  'map.titleAct3': 'СОБОР',
+  'map.subtitleAct3': 'Военный лагерь остался позади, обратившись в пепел. Здесь всё ещё верят, что тебя можно остановить.',
   'map.depth': 'глубина {n} / {total}',
   'map.current': 'ты здесь',
   'node.battle.name': 'Поселение',
@@ -686,11 +688,24 @@ export const RU: Record<string, string> = {
   'text.khaganHorde': 'В АТАКУ!',
   'text.sandstormRises': 'ПЕСОК ПОДНИМАЕТСЯ',
 
+  // ---- cathedral biome ---------------------------------------------------------
+  'building.bellTower.name': 'Колокольня',
+  'enemy.flagellant.name': 'Флагеллант',
+  'enemy.exorcist.name': 'Экзорцист',
+  'enemy.paladin.name': 'Паладин',
+  'enemy.anchorite.name': 'Анахорет',
+  'effect.exorcism': 'Изгнание',
+  'effect.consecratedGround': 'Освящённая земля',
+  'effect.judgment': 'Кара',
+  'text.sanctuaryCalled': 'СВЯТИЛИЩЕ',
+  'text.radianceBurst': 'СИЯНИЕ',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тело: {name}',
   'menu.huntResume': '{name} · продолжение: {biome}, комната {room}',
   'menu.biome.1': 'Деревни',
   'menu.biome.2': 'Военный лагерь',
+  'menu.biome.3': 'Собор',
   'lair.tab.species': 'Тела',
   'species.active': 'ВЫБРАНО',
   'species.choose': 'ВЗЯТЬ',

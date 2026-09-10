@@ -95,7 +95,7 @@ export function drawRunMap(
     visited: ReadonlySet<number>;
     time: number;
     /** Which half of the run this map belongs to — the war-camp reads the terrain too. */
-    biome: 1 | 2;
+    biome: 1 | 2 | 3;
   },
 ): RunMapResult {
   const margin = 70;
@@ -162,7 +162,12 @@ export function drawRunMap(
     shadow: false,
   });
 
-  ui.fittedText(context.biome === 2 ? t('map.titleAct2') : t('map.title'), ui.width / 2, 54, {
+  const mapTitle =
+    context.biome === 3 ? t('map.titleAct3') : context.biome === 2 ? t('map.titleAct2') : t('map.title');
+  const mapSubtitle =
+    context.biome === 3 ? t('map.subtitleAct3') : context.biome === 2 ? t('map.subtitleAct2') : t('map.subtitle');
+
+  ui.fittedText(mapTitle, ui.width / 2, 54, {
     size: 30,
     color: PALETTE.ink,
     align: 'center',
@@ -170,7 +175,7 @@ export function drawRunMap(
     letterSpacing: 10,
     maxWidth: bannerW - 32,
   });
-  ui.fittedText(context.biome === 2 ? t('map.subtitleAct2') : t('map.subtitle'), ui.width / 2, 88, {
+  ui.fittedText(mapSubtitle, ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
     align: 'center',
@@ -609,11 +614,11 @@ let cachedBackdrop: {
   forMap: RunMap;
   width: number;
   height: number;
-  biome: 1 | 2;
+  biome: 1 | 2 | 3;
   canvas: HTMLCanvasElement;
 } | null = null;
 
-function mapBackdrop(map: RunMap, width: number, height: number, biome: 1 | 2): HTMLCanvasElement {
+function mapBackdrop(map: RunMap, width: number, height: number, biome: 1 | 2 | 3): HTMLCanvasElement {
   if (
     cachedBackdrop &&
     cachedBackdrop.forMap === map &&
@@ -635,7 +640,7 @@ function mapBackdrop(map: RunMap, width: number, height: number, biome: 1 | 2): 
 }
 
 interface Biome {
-  readonly key: 'forest' | 'plains' | 'mountain' | 'water' | 'sand';
+  readonly key: 'forest' | 'plains' | 'mountain' | 'water' | 'sand' | 'stone';
   readonly fill: string;
   readonly edge: string;
   /** Relative chance of an anchor rolling this biome. */
@@ -659,6 +664,14 @@ const WAR_CAMP_BIOMES: readonly Biome[] = [
   { key: 'water', fill: '#4f8892', edge: '#33616a', weight: 0.6 },
 ];
 
+/** The Cathedral's map: cold highlands and bare stone, nothing that grows. */
+const CATHEDRAL_BIOMES: readonly Biome[] = [
+  { key: 'stone', fill: '#3d3f49', edge: '#2a2c34', weight: 4 },
+  { key: 'mountain', fill: '#5c5f6b', edge: '#3f4149', weight: 3 },
+  { key: 'plains', fill: '#454852', edge: '#33353d', weight: 2 },
+  { key: 'water', fill: '#3e5a63', edge: '#2b3e45', weight: 0.8 },
+];
+
 interface BiomeAnchor {
   readonly x: number;
   readonly y: number;
@@ -674,10 +687,10 @@ interface BiomeAnchor {
  * player has been; only the settlements and roads drawn on top change frame to
  * frame.
  */
-function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, mapBiome: 1 | 2): void {
-  const palette = mapBiome === 2 ? WAR_CAMP_BIOMES : BIOMES;
+function paintBackdrop(ctx: CanvasRenderingContext2D, w: number, h: number, rng: RNG, mapBiome: 1 | 2 | 3): void {
+  const palette = mapBiome === 3 ? CATHEDRAL_BIOMES : mapBiome === 2 ? WAR_CAMP_BIOMES : BIOMES;
 
-  ctx.fillStyle = mapBiome === 2 ? '#c2a968' : '#b6ab6c';
+  ctx.fillStyle = mapBiome === 3 ? '#3d3f49' : mapBiome === 2 ? '#c2a968' : '#b6ab6c';
   ctx.fillRect(0, 0, w, h);
 
   const anchors: BiomeAnchor[] = [];
@@ -791,6 +804,22 @@ function paintBiomeTexture(ctx: CanvasRenderingContext2D, anchor: BiomeAnchor, r
         ctx.beginPath();
         ctx.moveTo(x, y);
         ctx.lineTo(x + rng.range(-2, 2), y - h);
+        ctx.stroke();
+      }
+      break;
+
+    case 'stone':
+      // Flat, angular slabs rather than mountain's peaks — bare rock, not highlands.
+      ctx.fillStyle = 'rgba(200,196,206,0.22)';
+      ctx.strokeStyle = 'rgba(20,20,26,0.3)';
+      ctx.lineWidth = 1;
+      for (let i = 0; i < density * 2; i++) {
+        const { x, y } = jitterWithin(anchor, rng, 0.8);
+        const w = rng.range(10, 20);
+        const h = rng.range(6, 12);
+        ctx.beginPath();
+        ctx.rect(x - w / 2, y - h / 2, w, h);
+        ctx.fill();
         ctx.stroke();
       }
       break;

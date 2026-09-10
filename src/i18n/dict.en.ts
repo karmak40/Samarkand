@@ -514,6 +514,8 @@ export const EN: Record<string, string> = {
   'map.subtitle': 'Choose where you go next. There is no way back.',
   'map.titleAct2': 'THE WAR-CAMP',
   'map.subtitleAct2': 'The villages are behind you now. This is where they kept their army.',
+  'map.titleAct3': 'THE CATHEDRAL',
+  'map.subtitleAct3': 'The war-camp is ash behind you. This is where they still believe they can stop you.',
   'map.depth': 'depth {n} / {total}',
   'map.current': 'you are here',
   'node.battle.name': 'Settlement',
@@ -686,11 +688,24 @@ export const EN: Record<string, string> = {
   'text.khaganHorde': 'RIDE!',
   'text.sandstormRises': 'THE SANDS RISE',
 
+  // ---- cathedral biome ---------------------------------------------------------
+  'building.bellTower.name': 'Bell Tower',
+  'enemy.flagellant.name': 'Flagellant',
+  'enemy.exorcist.name': 'Exorcist',
+  'enemy.paladin.name': 'Paladin',
+  'enemy.anchorite.name': 'The Anchorite',
+  'effect.exorcism': 'Exorcism',
+  'effect.consecratedGround': 'Consecrated Ground',
+  'effect.judgment': 'Judgment',
+  'text.sanctuaryCalled': 'SANCTUARY',
+  'text.radianceBurst': 'RADIANCE',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'body: {name}',
   'menu.huntResume': '{name} · resuming in {biome}, room {room}',
   'menu.biome.1': 'Villages',
   'menu.biome.2': 'War-camp',
+  'menu.biome.3': 'Cathedral',
   'lair.tab.species': 'Bodies',
   'species.active': 'CHOSEN',
   'species.choose': 'TAKE',

@@ -56,7 +56,7 @@ import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './w
 import { World } from './world/world';
 
 /** Whole-run room count: two biomes, each `BIOME_ROOMS` deep, back to back. */
-const TOTAL_DEPTHS = BIOME_ROOMS * 2;
+const TOTAL_DEPTHS = BIOME_ROOMS * 3;
 const FIXED_STEP = 1 / 60;
 const MAX_STEPS_PER_FRAME = 5;
 
@@ -139,7 +139,7 @@ export class Game {
   private plansByNode = new Map<number, RoomPlan>();
   private mapTime = 0;
   /** Which biome's content (roster, terrain, boss) the active map uses. */
-  private biome: 1 | 2 = 1;
+  private biome: 1 | 2 | 3 = 1;
   /**
    * Depth offset added to `this.runMap`'s own node depths (which always start at 0
    * again for every biome) for every difficulty curve and for `roomIndex`.
@@ -357,15 +357,15 @@ export class Game {
     // friction, not a decision.
     if (!daily && this.meta.checkpointDepth > 0) {
       const startDepth = Math.min(this.meta.checkpointDepth, BIOME_ROOMS - 2);
-      const base = this.meta.checkpointBiome === 2 ? BIOME_ROOMS + startDepth : startDepth;
+      const base = (this.meta.checkpointBiome - 1) * BIOME_ROOMS + startDepth;
       this.generateBiome(this.meta.checkpointBiome, base, TOTAL_DEPTHS, startDepth);
     } else if (this.meta.selectedStartBiome >= 2) {
       // Biomes reached in a past run are a standing preference, same as the
       // starting body — asking again before every hunt would be friction, not a
-      // decision. Chosen directly rather than continued into, the war-camp is
+      // decision. Chosen directly rather than continued into, a later biome is
       // its own short run: a fresh difficulty ramp and its own ending, not the
       // back half of a longer one the player never played the front half of.
-      this.generateBiome(2, 0, BIOME_ROOMS);
+      this.generateBiome(this.meta.selectedStartBiome as 1 | 2 | 3, 0, BIOME_ROOMS);
     } else {
       // The first biome's map and every arena behind it come from the seed, so a
       // run is fully reproducible — including which branches were on offer.
@@ -393,7 +393,7 @@ export class Game {
    * less of this biome left to walk. Zero (the default) generates the whole
    * thing, same as ever.
    */
-  private generateBiome(biome: 1 | 2, difficultyBase: number, totalRunRooms: number, startDepth = 0): void {
+  private generateBiome(biome: 1 | 2 | 3, difficultyBase: number, totalRunRooms: number, startDepth = 0): void {
     this.biome = biome;
     this.difficultyBase = difficultyBase;
     this.totalRunRooms = totalRunRooms;
@@ -486,6 +486,14 @@ export class Game {
         this.meta.recordBiomeReached(2);
         this.sound.victory();
         this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
+        return;
+      }
+      if (this.biome === 2) {
+        // Same reasoning one act later: the Cathedral opens up regardless of
+        // how this run's climb through it goes.
+        this.meta.recordBiomeReached(3);
+        this.sound.victory();
+        this.generateBiome(3, BIOME_ROOMS * 2, TOTAL_DEPTHS);
         return;
       }
       this.tracker.outcome = 'victory';
@@ -1660,9 +1668,10 @@ export class Game {
    * (see `main.ts`'s `window.samarkand` gate). Requires a run already in progress,
    * same as every other `debug*` helper.
    */
-  debugSetBiome(biome: 1 | 2): void {
+  debugSetBiome(biome: 1 | 2 | 3): void {
     if (!this.runMap) return;
-    if (biome === 2) this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
+    if (biome === 3) this.generateBiome(3, BIOME_ROOMS * 2, TOTAL_DEPTHS);
+    else if (biome === 2) this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
     else this.generateBiome(1, 0, TOTAL_DEPTHS);
   }
 

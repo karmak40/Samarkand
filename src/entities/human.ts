@@ -1,4 +1,5 @@
 import {
+  ANCHORITE_ABILITIES,
   EARLY_ROOM_DIFFICULTY,
   earlyRoomDifficultyFraction,
   ENEMY_TIER_SCALING,
@@ -44,7 +45,11 @@ export type HumanId =
   | 'inquisitor'
   | 'warlord'
   | 'pyromancer'
-  | 'khagan';
+  | 'khagan'
+  | 'flagellant'
+  | 'exorcist'
+  | 'paladin'
+  | 'anchorite';
 
 /** Every boss the first biome's run can end on. One is drawn per run from the seed. */
 export const BOSS_IDS = ['inquisitor', 'warlord', 'pyromancer'] as const;
@@ -83,12 +88,17 @@ export interface HumanArchetype {
   /** Earliest room index *within its biome* this unit can appear in. */
   readonly minDepth: number;
   /**
-   * Earliest biome this unit can appear in. Omitted means every biome — most units
-   * predate the war-camp and have nothing biome-specific about them. Kept separate
-   * from `minDepth` because a biome picked directly from the menu restarts the depth
-   * count from 0, and a war-camp specialist must still show up on room 1 of it.
+   * Earliest biome this unit can appear in. Omitted means biome 1 or 2 — most
+   * units predate the war-camp and have nothing biome-specific about them. Kept
+   * separate from `minDepth` because a biome picked directly from the menu
+   * restarts the depth count from 0, and a war-camp specialist must still show
+   * up on room 1 of it.
+   *
+   * Biome 3 and beyond are exclusive rather than additive: `roomgen.ts`'s
+   * `biomeEligible()` treats `minBiome >= 3` as "only ever this exact biome",
+   * so the Cathedral's roster never mixes with the villages' or the war-camp's.
    */
-  readonly minBiome?: 1 | 2;
+  readonly minBiome?: 1 | 2 | 3;
   /** Chance to drop a blood (healing) orb. */
   readonly bloodChance: number;
   /** Chance this unit drops a relic granting a temporary form. */
@@ -602,6 +612,9 @@ export class Human extends Combatant {
       case 'khagan':
         this.castKhagan(world);
         return;
+      case 'anchorite':
+        this.castAnchorite(world);
+        return;
       default:
         this.castInquisitor(world);
     }
@@ -892,6 +905,81 @@ export class Human extends Combatant {
         world.particles.ring(this.x, this.y, '#c9a25c', 160, 0.8);
         world.camera.shake(cfg.shake);
         world.texts.add(this.x, this.y - 40, t('text.sandstormRises'), '#e8d4a0', 18);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Sanctuary, Judgment, Radiance — see `ANCHORITE_ABILITIES`. Where the other
+   * bosses punish a position (standing still, standing near a brute, standing
+   * in a bolt's path), this one punishes a *distance*: too far during
+   * Sanctuary, too close during Radiance, leaving a real band in between
+   * that's actually safe — the answer to a player who just kites at max range.
+   */
+  private castAnchorite(world: World): void {
+    const monster = world.monster;
+    const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const power = this.damageScale;
+
+    switch (this.specialIndex) {
+      case 0: {
+        // Anchored to where it's cast, not to the boss as it keeps moving —
+        // committing to a spot is the whole point, not an aura that follows.
+        const cfg = ANCHORITE_ABILITIES.sanctuary;
+        world.particles.ring(this.x, this.y, '#d4af37', cfg.initialRadius, 0.6);
+        world.holyZones.push({
+          x: this.x,
+          y: this.y,
+          radius: cfg.initialRadius,
+          initialRadius: cfg.initialRadius,
+          minRadius: cfg.minRadius,
+          life: cfg.life,
+          maxLife: cfg.life,
+          dps: cfg.dps * power,
+          invert: true,
+        });
+        world.texts.add(this.x, this.y - 40, t('text.sanctuaryCalled'), '#d4af37', 18);
+        break;
+      }
+      case 1: {
+        const cfg = ANCHORITE_ABILITIES.judgment;
+        for (let i = -cfg.halfSpread; i <= cfg.halfSpread; i++) {
+          world.spawnProjectile({
+            x: this.x + Math.cos(angle) * cfg.spawnRadius,
+            y: this.y + Math.sin(angle) * cfg.spawnRadius,
+            angle: angle + i * cfg.angleStep,
+            speed: cfg.speed,
+            packets: [{ type: 'holy', amount: cfg.damage * power }],
+            faction: 'human',
+            sourceLabel: t('effect.judgment'),
+            radius: cfg.projectileRadius,
+            range: cfg.range,
+            color: '#efe7d2',
+            glow: '#ffffff',
+            shape: 'bolt',
+            owner: this,
+            knockback: cfg.knockback,
+          });
+        }
+        break;
+      }
+      default: {
+        const cfg = ANCHORITE_ABILITIES.radiance;
+        world.holyZones.push({
+          x: this.x,
+          y: this.y,
+          radius: cfg.radius,
+          initialRadius: cfg.radius,
+          minRadius: cfg.radius,
+          life: cfg.life,
+          maxLife: cfg.life,
+          dps: cfg.dps * power,
+          invert: false,
+        });
+        world.particles.ring(this.x, this.y, '#ffffff', cfg.radius, 0.4);
+        world.camera.shake(6);
+        world.texts.add(this.x, this.y - 40, t('text.radianceBurst'), '#ffffff', 18);
         break;
       }
     }

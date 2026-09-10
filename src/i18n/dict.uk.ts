@@ -514,6 +514,8 @@ export const UK: Record<string, string> = {
   'map.subtitle': 'Обери, куди рушиш далі. Назад дороги немає.',
   'map.titleAct2': 'ВІЙСЬКОВИЙ ТАБІР',
   'map.subtitleAct2': 'Села позаду. Тут тримали армію.',
+  'map.titleAct3': 'СОБОР',
+  'map.subtitleAct3': 'Військовий табір лишився позаду, обернувшись на попіл. Тут досі вірять, що тебе можна зупинити.',
   'map.depth': 'глибина {n} / {total}',
   'map.current': 'ти тут',
   'node.battle.name': 'Поселення',
@@ -686,11 +688,24 @@ export const UK: Record<string, string> = {
   'text.khaganHorde': 'В АТАКУ!',
   'text.sandstormRises': 'ПІСОК ЗДІЙМАЄТЬСЯ',
 
+  // ---- cathedral biome ---------------------------------------------------------
+  'building.bellTower.name': 'Дзвіниця',
+  'enemy.flagellant.name': 'Флагелянт',
+  'enemy.exorcist.name': 'Екзорцист',
+  'enemy.paladin.name': 'Паладин',
+  'enemy.anchorite.name': 'Анахорит',
+  'effect.exorcism': 'Вигнання',
+  'effect.consecratedGround': 'Освячена земля',
+  'effect.judgment': 'Кара',
+  'text.sanctuaryCalled': 'СВЯТИЛИЩЕ',
+  'text.radianceBurst': 'СЯЙВО',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'тіло: {name}',
   'menu.huntResume': '{name} · продовження: {biome}, кімната {room}',
   'menu.biome.1': 'Села',
   'menu.biome.2': 'Військовий табір',
+  'menu.biome.3': 'Собор',
   'lair.tab.species': 'Тіла',
   'species.active': 'ОБРАНО',
   'species.choose': 'ОБРАТИ',

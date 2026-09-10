@@ -56,7 +56,17 @@ export class Terrain {
       shrine: ['#3d3420', '#4a4029'],
       boss: ['#372a1c', '#453524'],
     };
-    const set = plan.biome === 2 ? aridPalettes : palettes;
+    // The Cathedral trades earth for cold flagstone — the one warm note is the
+    // gold-lit ground right under a bell tower's ward, painted separately in
+    // `World.drawHolyZones`, not here.
+    const stonePalettes: Record<string, [string, string]> = {
+      hamlet: ['#2a2c33', '#383b44'],
+      village: ['#282a30', '#363940'],
+      fortified: ['#26282e', '#33353c'],
+      shrine: ['#24272f', '#30343d'],
+      boss: ['#1f2027', '#2b2c35'],
+    };
+    const set = plan.biome === 3 ? stonePalettes : plan.biome === 2 ? aridPalettes : palettes;
     const [dark, light] = set[plan.kind] ?? set.village!;
 
     ctx.fillStyle = dark;
@@ -128,7 +138,11 @@ export class Terrain {
     void plan;
   }
 
-  private paintScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG, biome: 1 | 2): void {
+  private paintScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG, biome: 1 | 2 | 3): void {
+    if (biome === 3) {
+      this.paintCathedralScatter(ctx, bounds, rng);
+      return;
+    }
     if (biome === 2) {
       this.paintAridScatter(ctx, bounds, rng);
       return;
@@ -195,6 +209,55 @@ export class Terrain {
       ctx.fillStyle = `rgba(50,40,26,${rng.range(0.15, 0.35).toFixed(2)})`;
       ctx.beginPath();
       ctx.ellipse(x, y, rng.range(1, 3), rng.range(0.6, 1.8), rng.next() * TAU, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /** Flagstone joints, candle wax and cold ash instead of anything that grows. */
+  private paintCathedralScatter(ctx: CanvasRenderingContext2D, bounds: Rect, rng: RNG): void {
+    // Flagstone joints: a loose, hand-laid grid rather than a perfect one, so it
+    // doesn't read as a texture tile repeating.
+    const cell = 74;
+    for (let gx = 0; gx < bounds.w + cell; gx += cell) {
+      const x = gx + rng.range(-6, 6);
+      ctx.strokeStyle = `rgba(10,10,14,${rng.range(0.2, 0.32).toFixed(2)})`;
+      ctx.lineWidth = rng.range(1, 1.8);
+      ctx.beginPath();
+      ctx.moveTo(x, 0);
+      for (let y = 0; y < bounds.h; y += 40) {
+        ctx.lineTo(x + rng.range(-3, 3), Math.min(bounds.h, y + 40));
+      }
+      ctx.stroke();
+    }
+    for (let gy = 0; gy < bounds.h + cell; gy += cell) {
+      const y = gy + rng.range(-6, 6);
+      ctx.strokeStyle = `rgba(10,10,14,${rng.range(0.2, 0.32).toFixed(2)})`;
+      ctx.lineWidth = rng.range(1, 1.8);
+      ctx.beginPath();
+      ctx.moveTo(0, y);
+      for (let x = 0; x < bounds.w; x += 40) {
+        ctx.lineTo(Math.min(bounds.w, x + 40), y + rng.range(-3, 3));
+      }
+      ctx.stroke();
+    }
+
+    // Candle wax pools — pale drips, the one warm-ish thing on an otherwise cold floor.
+    for (let i = 0; i < 90; i++) {
+      const x = rng.range(0, bounds.w);
+      const y = rng.range(0, bounds.h);
+      ctx.fillStyle = `rgba(214,201,166,${rng.range(0.08, 0.18).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rng.range(3, 7), rng.range(2, 4), rng.next() * TAU, 0, TAU);
+      ctx.fill();
+    }
+
+    // Cold ash and soot motes.
+    for (let i = 0; i < 260; i++) {
+      const x = rng.range(0, bounds.w);
+      const y = rng.range(0, bounds.h);
+      ctx.fillStyle = `rgba(180,178,188,${rng.range(0.06, 0.16).toFixed(2)})`;
+      ctx.beginPath();
+      ctx.ellipse(x, y, rng.range(1, 2.4), rng.range(1, 2), rng.next() * TAU, 0, TAU);
       ctx.fill();
     }
   }

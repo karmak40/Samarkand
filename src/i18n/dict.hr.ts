@@ -514,6 +514,8 @@ export const HR: Record<string, string> = {
   'map.subtitle': 'Odaberi kamo ćeš dalje. Nema povratka.',
   'map.titleAct2': 'RATNI LOGOR',
   'map.subtitleAct2': 'Sela su sada iza tebe. Ovdje su držali svoju vojsku.',
+  'map.titleAct3': 'KATEDRALA',
+  'map.subtitleAct3': 'Ratni logor je iza tebe, pretvoren u pepeo. Ovdje još vjeruju da te mogu zaustaviti.',
   'map.depth': 'dubina {n} / {total}',
   'map.current': 'ovdje si',
   'node.battle.name': 'Naselje',
@@ -686,11 +688,24 @@ export const HR: Record<string, string> = {
   'text.khaganHorde': 'U JURIŠ!',
   'text.sandstormRises': 'PIJESAK SE DIŽE',
 
+  // ---- cathedral biome ---------------------------------------------------------
+  'building.bellTower.name': 'Zvonik',
+  'enemy.flagellant.name': 'Flagelant',
+  'enemy.exorcist.name': 'Egzorcist',
+  'enemy.paladin.name': 'Paladin',
+  'enemy.anchorite.name': 'Anahoreta',
+  'effect.exorcism': 'Egzorcizam',
+  'effect.consecratedGround': 'Posvećeno tlo',
+  'effect.judgment': 'Sud',
+  'text.sanctuaryCalled': 'SVETIŠTE',
+  'text.radianceBurst': 'SJAJ',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'tijelo: {name}',
   'menu.huntResume': '{name} · nastavak: {biome}, soba {room}',
   'menu.biome.1': 'Sela',
   'menu.biome.2': 'Ratni logor',
+  'menu.biome.3': 'Katedrala',
   'lair.tab.species': 'Tijela',
   'species.active': 'ODABRANO',
   'species.choose': 'UZMI',

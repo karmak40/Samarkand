@@ -6,6 +6,7 @@ import {
   type DamageType,
 } from '../combat/damage';
 import { type StatusApplication } from '../combat/status';
+import { CATHEDRAL_WARD } from '../balance';
 import { Camera } from '../core/camera';
 import {
   circleRectOverlap,
@@ -93,8 +94,18 @@ export class World {
   /** Queued lightning arcs to draw this frame: [x1,y1,x2,y2,age]. */
   readonly arcs: Array<{ x1: number; y1: number; x2: number; y2: number; life: number }> = [];
 
-  /** Lingering damage zones: fire pools, poison clouds, consecrated ground. */
+  /** Lingering damage zones: fire pools, poison clouds. Only ever hurt humans. */
   readonly hazards: GroundHazard[] = [];
+
+  /**
+   * Scripted pressure zones that hurt the *monster* instead — the Cathedral's
+   * boss (see `castAnchorite`). Nothing here ever touches a human; `hazards`
+   * above already owns that half. Bell towers (`updateHolyPressure`) use the
+   * same damage/status shape but aren't zones in this array — their pressure
+   * is derived fresh every frame from which towers are still standing, not
+   * from a timed, spawned effect.
+   */
+  readonly holyZones: HolyZone[] = [];
 
   /** Callbacks the run installs so entities never import the run directly. */
   onBuildingBreached?: (building: Building, occupants: number) => void;
@@ -124,6 +135,7 @@ export class World {
     this.pickups = [];
     this.arcs.length = 0;
     this.hazards.length = 0;
+    this.holyZones.length = 0;
     this.delayed.length = 0;
     this.time = 0;
     this.cleared = false;
@@ -683,6 +695,92 @@ export class World {
     ctx.restore();
   }
 
+  /**
+   * Bell towers pressure the monster continuously while alive — the radius is
+   * fixed and derived fresh every frame from which towers still stand, so
+   * there's no spawn/despawn bookkeeping to get wrong when one falls mid-tick.
+   * Scripted `holyZones` (the Anchorite's Sanctuary/Radiance) are ticked and
+   * expired here too, since both share the same "damage the monster, not the
+   * humans" shape that `updateHazards` doesn't cover.
+   */
+  private updateHolyPressure(dt: number): void {
+    const monster = this.monster;
+    if (!monster.alive) return;
+
+    const pressure = (dps: number): void => {
+      monster.takeDamage(
+        {
+          packets: [{ type: 'holy', amount: dps * dt }],
+          sourceLabel: t('effect.consecratedGround'),
+          kind: 'dot',
+          dodgeable: false,
+        },
+        this,
+        null,
+      );
+      monster.statuses.apply({
+        id: 'weaken',
+        duration: CATHEDRAL_WARD.tickInterval * 2,
+        stacks: CATHEDRAL_WARD.weakenStacksPerTick,
+        sourceLabel: t('effect.consecratedGround'),
+      });
+    };
+
+    for (const building of this.buildings) {
+      if (!building.alive || building.profile.kind !== 'bell_tower') continue;
+      if (dist2(monster.x, monster.y, building.x, building.y) > CATHEDRAL_WARD.radius * CATHEDRAL_WARD.radius) continue;
+      pressure(CATHEDRAL_WARD.dps);
+    }
+
+    for (let i = this.holyZones.length - 1; i >= 0; i--) {
+      const zone = this.holyZones[i]!;
+      zone.life -= dt;
+      if (zone.life <= 0) {
+        this.holyZones.splice(i, 1);
+        continue;
+      }
+      zone.radius = zone.minRadius + (zone.initialRadius - zone.minRadius) * (zone.life / zone.maxLife);
+
+      const inside = dist2(monster.x, monster.y, zone.x, zone.y) <= zone.radius * zone.radius;
+      if (zone.invert ? !inside : inside) pressure(zone.dps);
+    }
+  }
+
+  /** Bell tower wards and the Anchorite's scripted zones — same glow treatment as `drawHazards`. */
+  drawHolyZones(ctx: CanvasRenderingContext2D): void {
+    ctx.save();
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = 'rgba(212,175,55,0.55)';
+    ctx.lineWidth = 2;
+
+    for (const building of this.buildings) {
+      if (!building.alive || building.profile.kind !== 'bell_tower') continue;
+      const grad = ctx.createRadialGradient(building.x, building.y, 0, building.x, building.y, CATHEDRAL_WARD.radius);
+      grad.addColorStop(0, 'rgba(212,175,55,0.16)');
+      grad.addColorStop(1, 'rgba(212,175,55,0)');
+      ctx.globalAlpha = 1;
+      ctx.fillStyle = grad;
+      ctx.beginPath();
+      ctx.arc(building.x, building.y, CATHEDRAL_WARD.radius, 0, TAU);
+      ctx.fill();
+      ctx.stroke();
+    }
+
+    for (const zone of this.holyZones) {
+      const alpha = Math.min(1, zone.life * 2) * (zone.invert ? 0.28 : 0.4);
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = zone.invert ? 'rgba(212,175,55,0.1)' : 'rgba(255,255,255,0.18)';
+      ctx.beginPath();
+      ctx.arc(zone.x, zone.y, zone.radius, 0, TAU);
+      if (zone.invert) ctx.fill();
+      ctx.strokeStyle = zone.invert ? 'rgba(212,175,55,0.7)' : 'rgba(255,255,255,0.7)';
+      ctx.stroke();
+    }
+
+    ctx.globalAlpha = 1;
+    ctx.restore();
+  }
+
   /** Lightning arcs, drawn above entities. */
   drawArcs(ctx: CanvasRenderingContext2D): void {
     if (this.arcs.length === 0) return;
@@ -819,6 +917,7 @@ export class World {
     this.particles.update(dt);
     this.texts.update(dt);
     this.updateHazards(dt);
+    this.updateHolyPressure(dt);
 
     for (let i = this.arcs.length - 1; i >= 0; i--) {
       const arc = this.arcs[i]!;
@@ -899,6 +998,23 @@ export interface GroundHazard {
   /** Countdown to the next damage tick. */
   tickTimer: number;
   age: number;
+}
+
+/** A scripted zone that pressures the monster — see `Human.castAnchorite`. */
+export interface HolyZone {
+  x: number;
+  y: number;
+  /** Current radius — recomputed from `initialRadius`/`minRadius`/`life` each tick. */
+  radius: number;
+  initialRadius: number;
+  /** Equal to `initialRadius` for a zone that doesn't shrink. */
+  minRadius: number;
+  dps: number;
+  /** Seconds remaining. */
+  life: number;
+  maxLife: number;
+  /** true: damages the monster while *outside* the radius (Sanctuary). false: while inside (Radiance). */
+  invert: boolean;
 }
 
 function dominantOf(result: DamageResult): DamageType {

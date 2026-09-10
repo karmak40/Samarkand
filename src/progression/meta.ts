@@ -269,7 +269,7 @@ export class MetaProgress implements ContentGate {
    * attempt, not a mid-run save: nothing about the run itself (build, HP,
    * inventory) survives, only where it starts.
    */
-  checkpointBiome: 1 | 2 = 1;
+  checkpointBiome: 1 | 2 | 3 = 1;
   /** Depth within `checkpointBiome`, always a multiple of 3. Zero means none set. */
   checkpointDepth = 0;
 
@@ -278,7 +278,7 @@ export class MetaProgress implements ContentGate {
   }
 
   /** Called every third room cleared. Ignores anything that isn't further in. */
-  recordCheckpoint(biome: 1 | 2, depth: number): void {
+  recordCheckpoint(biome: 1 | 2 | 3, depth: number): void {
     if (biome < this.checkpointBiome) return;
     if (biome === this.checkpointBiome && depth <= this.checkpointDepth) return;
     this.checkpointBiome = biome;
@@ -516,7 +516,7 @@ export class MetaProgress implements ContentGate {
 
       // Missing on any save older than this feature — defaults to no checkpoint,
       // same as a profile that has never died mid-run.
-      this.checkpointBiome = data.checkpointBiome === 2 ? 2 : 1;
+      this.checkpointBiome = data.checkpointBiome === 3 ? 3 : data.checkpointBiome === 2 ? 2 : 1;
       this.checkpointDepth =
         typeof data.checkpointDepth === 'number' && data.checkpointDepth > 0
           ? Math.floor(data.checkpointDepth)

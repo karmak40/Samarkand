@@ -2,6 +2,9 @@ import {
   ARENA_WALL_THICKNESS,
   BIOME_1_BOSS_WEIGHTS,
   BIOME_ROOM_COUNT,
+  CATHEDRAL_BOSS_ID,
+  CATHEDRAL_CHAMPIONS_EARLY,
+  CATHEDRAL_CHAMPIONS_LATE,
   CIVILIAN_FALLOFF_FLOOR,
   CIVILIAN_FALLOFF_PER_DEPTH,
   ELITE_CHAMPIONS_EARLY,
@@ -27,7 +30,7 @@ import {
   WARCAMP_STRONGHOLD_COUNT,
 } from '../balance';
 import { type BuildingKind } from '../entities/building';
-import { HUMAN_ARCHETYPES, type BossId, type HumanId } from '../entities/human';
+import { HUMAN_ARCHETYPES, type BossId, type HumanArchetype, type HumanId } from '../entities/human';
 import { clamp, type Rect, rectsOverlap, segmentRectHit, TAU, type Vec2 } from '../core/math';
 import { RNG } from '../core/rng';
 import { roomNameBossSuffix, roomNamePrefixes, roomNameRoots } from '../i18n';
@@ -84,7 +87,7 @@ export interface RoomPlan {
   wallThickness: number;
   isBoss: boolean;
   /** Which biome this room belongs to — the terrain palette reads this. */
-  biome: 1 | 2;
+  biome: 1 | 2 | 3;
 }
 
 /**
@@ -127,7 +130,7 @@ export function generateRoom(
   index: number,
   rng: RNG,
   request: ArenaRequest = 'battle',
-  biome: 1 | 2 = 1,
+  biome: 1 | 2 | 3 = 1,
 ): RoomPlan {
   const kind: RoomKind =
     request === 'boss' ? 'boss' : request === 'elite' ? 'elite' : roomKindForDepth(index, rng);
@@ -200,6 +203,30 @@ export function generateRoom(
     pushBuilding(buildings, { kind: buildingKind, rect });
   }
 
+  // --- bell tower (Cathedral only) -------------------------------------------
+  // Every Cathedral room gets one — it's the priority target the biome's whole
+  // mechanic hangs on, so it can't be left to a probabilistic palette pick the
+  // way a war-camp stronghold is.
+  if (biome === 3 && !buildings.some((b) => b.kind === 'bell_tower')) {
+    const size = buildingSize('bell_tower', rng);
+    for (let attempt = 0; attempt < 40; attempt++) {
+      const angle = rng.next() * TAU;
+      const minR = plazaRadius + 60;
+      const maxR = Math.min(width, height) * 0.42;
+      const radius = minR + Math.pow(rng.next(), 0.7) * (maxR - minR);
+      const rect: Rect = {
+        x: clamp(cx + Math.cos(angle) * radius - size.w / 2, margin, width - margin - size.w),
+        y: clamp(cy + Math.sin(angle) * radius - size.h / 2, margin, height - margin - size.h),
+        w: size.w,
+        h: size.h,
+      };
+      if (overlapsAny(rect, buildings, 34)) continue;
+      if (rectsOverlap(rect, plaza)) continue;
+      pushBuilding(buildings, { kind: 'bell_tower', rect });
+      break;
+    }
+  }
+
   // --- palisade ------------------------------------------------------------
   if (config.palisade) addPalisade(buildings, bounds, rng);
 
@@ -225,17 +252,20 @@ export function generateRoom(
 
   // --- defenders -----------------------------------------------------------
   // Drawn from the run seed, so the finale differs between runs and every player
-  // on a daily seed faces the same one. The war-camp's boss is fixed rather than
-  // rolled — the Khagan is the run's real ending, not one of three interchangeable
-  // finales the way the first biome's boss is.
+  // on a daily seed faces the same one. The war-camp's and the Cathedral's
+  // bosses are fixed rather than rolled — each is the run's real ending at the
+  // point it's reached, not one of three interchangeable finales the way the
+  // first biome's boss is.
   const bossId: HumanId | null =
     kind === 'boss'
-      ? biome === 2
-        ? WARCAMP_BOSS_ID
-        : rng.pickWeighted(
-            Object.keys(BIOME_1_BOSS_WEIGHTS) as BossId[],
-            (id) => BIOME_1_BOSS_WEIGHTS[id],
-          )
+      ? biome === 3
+        ? CATHEDRAL_BOSS_ID
+        : biome === 2
+          ? WARCAMP_BOSS_ID
+          : rng.pickWeighted(
+              Object.keys(BIOME_1_BOSS_WEIGHTS) as BossId[],
+              (id) => BIOME_1_BOSS_WEIGHTS[id],
+            )
       : null;
   const spawns = planSpawns(index, kind, config, bounds, buildings, monsterStart, rng, bossId, biome);
 
@@ -308,6 +338,10 @@ function buildingSize(kind: BuildingKind, rng: RNG): { w: number; h: number } {
       return { w: rng.range(52, 64), h: rng.range(52, 64) };
     case 'stronghold':
       return { w: rng.range(130, 165), h: rng.range(110, 140) };
+    case 'bell_tower':
+      // Tall and narrow — reads as a spire even from the top-down camera, and
+      // stands out from every squat building around it.
+      return { w: rng.range(46, 58), h: rng.range(70, 92) };
     case 'well':
       return { w: 46, h: 46 };
     case 'cart':
@@ -457,6 +491,20 @@ function pickEntry(bounds: Rect, buildings: PlannedBuilding[], rng: RNG): Vec2 {
 }
 
 /**
+ * Whether an archetype can be drawn in a given biome.
+ *
+ * Biomes 1 and 2 share one roster (`minBiome` only ever pushes a unit's debut
+ * later, same as `minDepth` — nothing ever *stops* appearing). Biome 3 and any
+ * biome added after it are exclusive instead: reaching the Cathedral should
+ * feel like an entirely different place, not the war-camp with three new
+ * units mixed in, so `minBiome >= 3` means "only ever this exact biome."
+ */
+function biomeEligible(a: HumanArchetype, biome: number): boolean {
+  if (a.minBiome && a.minBiome >= 3) return biome === a.minBiome;
+  return biome <= 2;
+}
+
+/**
  * Fill the room's point budget with defenders.
  *
  * Composition rules: civilians always outnumber soldiers in small settlements,
@@ -472,7 +520,7 @@ function planSpawns(
   monsterStart: Vec2,
   rng: RNG,
   bossId: HumanId | null,
-  biome: 1 | 2,
+  biome: 1 | 2 | 3,
 ): PlannedSpawn[] {
   const spawns: PlannedSpawn[] = [];
 
@@ -486,7 +534,15 @@ function planSpawns(
   // An elite garrison is defined by *who* holds it, not by how many. Champions are
   // seeded first so the fight has a shape even before the budget is spent.
   if (kind === 'elite') {
-    const champions = index >= ELITE_CHAMPIONS_LATE_MIN_DEPTH ? ELITE_CHAMPIONS_LATE : ELITE_CHAMPIONS_EARLY;
+    const late = index >= ELITE_CHAMPIONS_LATE_MIN_DEPTH;
+    const champions =
+      biome === 3
+        ? late
+          ? CATHEDRAL_CHAMPIONS_LATE
+          : CATHEDRAL_CHAMPIONS_EARLY
+        : late
+          ? ELITE_CHAMPIONS_LATE
+          : ELITE_CHAMPIONS_EARLY;
     for (const id of champions) {
       if (isSupport(id)) {
         if (supportCount >= MAX_SUPPORT_PER_ROOM) continue;
@@ -508,7 +564,7 @@ function planSpawns(
 
   const available = (Object.keys(HUMAN_ARCHETYPES) as HumanId[]).filter((id) => {
     const a = HUMAN_ARCHETYPES[id];
-    return a.enabled && a.spawnWeight > 0 && a.minDepth <= index && (a.minBiome ?? 1) <= biome;
+    return a.enabled && a.spawnWeight > 0 && a.minDepth <= index && biomeEligible(a, biome);
   });
 
   // Watchtowers field a ballista each, and a stronghold fields a siege engine —

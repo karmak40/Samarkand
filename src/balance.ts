@@ -492,6 +492,129 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     relicChance: 1,
     courage: 1,
   },
+
+  /**
+   * The Cathedral's roster is exclusive to biome 3 — `minBiome: 3` and nothing
+   * from the villages or the war-camp appears alongside it (see `biomeEligible`
+   * in roomgen.ts). Three units cover the three roles that matter: a civilian
+   * that doesn't flee, a ranged holy attacker, and a standalone melee threat.
+   */
+  flagellant: {
+    id: 'flagellant',
+    get name() { return t('enemy.flagellant.name'); },
+    role: 'civilian',
+    enabled: true,
+    hp: 34,
+    armor: 0,
+    resist: { holy: 0.3 },
+    speed: 110,
+    radius: 10,
+    damage: [{ type: 'physical', amount: 4 }],
+    attackRange: 28,
+    preferredRange: 28,
+    attackCooldown: 1.7,
+    windup: 0.4,
+    recover: 0.45,
+    souls: 2,
+    knockbackResist: 0.6,
+    tunic: '#3a3530',
+    accent: '#8b1f24',
+    spawnWeight: 26,
+    minDepth: 0,
+    minBiome: 3,
+    bloodChance: 0.1,
+    relicChance: 0,
+    courage: 0.1,
+  },
+  exorcist: {
+    id: 'exorcist',
+    get name() { return t('enemy.exorcist.name'); },
+    role: 'ranged',
+    enabled: true,
+    hp: 58,
+    armor: 6,
+    resist: { unholy: 0.6, holy: 0.9 },
+    speed: 122,
+    radius: 11,
+    damage: [{ type: 'holy', amount: 15 }],
+    attackRange: 360,
+    preferredRange: 300,
+    attackCooldown: 1.9,
+    windup: 0.6,
+    recover: 0.45,
+    souls: 7,
+    knockbackResist: 0.9,
+    tunic: '#e8dcc4',
+    accent: '#7d8a99',
+    onHitStatuses: [{ id: 'weaken', duration: 3, stacks: 1, get sourceLabel() { return t('effect.exorcism'); } }],
+    spawnWeight: 16,
+    minDepth: 1,
+    minBiome: 3,
+    bloodChance: 0.15,
+    relicChance: 0.12,
+    courage: 0.85,
+  },
+  paladin: {
+    id: 'paladin',
+    get name() { return t('enemy.paladin.name'); },
+    role: 'melee',
+    enabled: true,
+    hp: 210,
+    armor: 52,
+    resist: { physical: 0.12, unholy: 0.3 },
+    speed: 128,
+    radius: 14,
+    damage: [{ type: 'holy', amount: 22 }],
+    attackRange: 48,
+    preferredRange: 48,
+    attackCooldown: 1.4,
+    windup: 0.5,
+    recover: 0.5,
+    souls: 11,
+    knockbackResist: 2.8,
+    tunic: '#e8dcc4',
+    accent: '#d4af37',
+    spawnWeight: 20,
+    minDepth: 2,
+    minBiome: 3,
+    bloodChance: 0.22,
+    relicChance: 0.2,
+    courage: 1,
+  },
+
+  /**
+   * The Anchorite: the Cathedral's own finale, and the run's real ending now
+   * that there's a third act. Its own melee reach is unremarkable — the threat
+   * is the Sanctuary it anchors to itself (see `ANCHORITE_ABILITIES`), which
+   * punishes staying at range instead of standing still (Inquisitor) or
+   * relying on numbers (Khagan).
+   */
+  anchorite: {
+    id: 'anchorite',
+    get name() { return t('enemy.anchorite.name'); },
+    role: 'boss',
+    enabled: true,
+    hp: 2300,
+    armor: 60,
+    resist: { holy: 0.9, unholy: 0.2 },
+    speed: 124,
+    radius: 24,
+    damage: [{ type: 'holy', amount: 34 }],
+    attackRange: 100,
+    preferredRange: 90,
+    attackCooldown: 1.7,
+    windup: 0.6,
+    recover: 0.55,
+    souls: 100,
+    knockbackResist: 15,
+    tunic: '#efe7d2',
+    accent: '#d4af37',
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
 };
 
 /** Point cost of each unit when filling a room's enemy spawn budget (roomgen.ts). */
@@ -511,6 +634,10 @@ export const SPAWN_COST: Record<HumanId, number> = {
   warlord: 0,
   pyromancer: 0,
   khagan: 0,
+  flagellant: 1,
+  exorcist: 6,
+  paladin: 8,
+  anchorite: 0,
 };
 
 // ===========================================================================
@@ -611,6 +738,20 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
     hasRoof: true,
     opaque: true,
     relicChance: 0.2,
+  },
+  bell_tower: {
+    kind: 'bell_tower',
+    get name() { return t('building.bellTower.name'); },
+    // Mandatory to destroy, same reasoning as watchtower/stronghold — it's the
+    // one thing making the room actively worse to stand in, not optional loot.
+    hp: 260,
+    souls: 18,
+    occupancy: [0, 1],
+    wallColor: '#8b8579',
+    roofColor: '#d4af37',
+    hasRoof: true,
+    opaque: true,
+    relicChance: 0.15,
   },
   well: {
     kind: 'well',
@@ -1415,7 +1556,7 @@ export const SKILL_CARDS: readonly SkillCard[] = [
  * both biomes — including each one's boss, so the war-camp's ending gets the same
  * flourish the first biome's did.
  */
-export const EVOLUTION_ROOMS = [3, 7, 11, 15, 19, 23] as const;
+export const EVOLUTION_ROOMS = [3, 7, 11, 15, 19, 23, 27, 31, 35] as const;
 
 export const MUTATIONS: readonly Mutation[] = [
   {
@@ -2221,12 +2362,54 @@ export const ELITE_CHAMPIONS_EARLY: readonly HumanId[] = ['knight', 'priest'];
 export const ELITE_CHAMPIONS_LATE: readonly HumanId[] = ['knight', 'knight', 'priest'];
 export const ELITE_CHAMPIONS_LATE_MIN_DEPTH = 6;
 
+/** Same idea for the Cathedral's exclusive roster — no knight/priest to seed with. */
+export const CATHEDRAL_CHAMPIONS_EARLY: readonly HumanId[] = ['paladin', 'exorcist'];
+export const CATHEDRAL_CHAMPIONS_LATE: readonly HumanId[] = ['paladin', 'paladin', 'exorcist'];
+
 /** Relics placed per room: fixed for elite/boss, a base + depth bonus for a plain battle. */
 export const RELIC_COUNT = {
   boss: 3,
   elite: 2,
   battleBase: 1,
   battleBonusMinDepth: 4,
+};
+
+export const ANCHORITE_ABILITIES = {
+  /**
+   * The signature move: a ring anchored to the boss that shrinks over its
+   * lifetime. Standing outside it is what's punished, not standing still —
+   * the opposite of the Inquisitor, and a harder answer to kiting than the
+   * Khagan's dust ring, which only ever threatened where you already were.
+   */
+  sanctuary: {
+    initialRadius: 260,
+    minRadius: 90,
+    life: 11,
+    dps: 22,
+    telegraphSeconds: 0.6,
+  },
+  /** A fan of holy bolts — the boss's one normal ranged threat, dodgeable sideways. */
+  judgment: {
+    halfSpread: 2,
+    spawnRadius: 28,
+    speed: 420,
+    damage: 26,
+    angleStep: 0.18,
+    projectileRadius: 7,
+    range: 700,
+    knockback: 40,
+  },
+  /**
+   * Radiance: a short burst around the boss itself. The Sanctuary punishes
+   * standing off at range; this punishes facetanking it at melee range
+   * instead, so there's a real band of distance that's actually safe rather
+   * than "closer is always better."
+   */
+  radiance: {
+    radius: 130,
+    life: 1.4,
+    dps: 30,
+  },
 };
 
 /**
@@ -2241,6 +2424,24 @@ export const BIOME_1_BOSS_WEIGHTS: Record<BossId, number> = {
   pyromancer: 1,
 };
 export const WARCAMP_BOSS_ID: HumanId = 'khagan';
+/** Biome 3's finale — a pool of one, same reasoning as `WARCAMP_BOSS_ID`. */
+export const CATHEDRAL_BOSS_ID: HumanId = 'anchorite';
+
+/**
+ * Ground the Cathedral turns against the monster — the biome's one real
+ * mechanical difference from villages/war-camp, where every hazard on the
+ * ground only ever threatens the humans. Tuned well under a hard hit taken in
+ * combat (see `MONSTER_COMBAT_TUNING`) since it's meant to be a steady
+ * pressure to solve (raze the tower), not a burst to react to.
+ */
+export const CATHEDRAL_WARD = {
+  /** Radius around a living bell tower the monster takes pressure inside of. */
+  radius: 170,
+  dps: 14,
+  /** Stacks of `weaken` applied per tick — see `combat/status.ts`. */
+  weakenStacksPerTick: 1,
+  tickInterval: 0.25,
+};
 
 // ===========================================================================
 // Boss special abilities (Human.castWarlord/castPyromancer/castInquisitor/castKhagan)

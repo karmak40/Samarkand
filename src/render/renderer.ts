@@ -186,6 +186,7 @@ export class Renderer {
     this.terrain.draw(ctx, view);
     world.decals.draw(ctx, view);
     world.drawHazards(ctx);
+    world.drawHolyZones(ctx);
 
     if (exit && exitOpen) {
       this.drawExit(ctx, exit, world.time);

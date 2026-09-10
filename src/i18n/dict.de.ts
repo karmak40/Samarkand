@@ -514,6 +514,8 @@ export const DE: Record<string, string> = {
   'map.subtitle': 'Wähle, wohin du weitergehst. Es gibt kein Zurück.',
   'map.titleAct2': 'DAS KRIEGSLAGER',
   'map.subtitleAct2': 'Die Dörfer liegen hinter dir. Hier hielten sie ihr Heer.',
+  'map.titleAct3': 'DIE KATHEDRALE',
+  'map.subtitleAct3': 'Das Kriegslager liegt in Asche hinter dir. Hier glaubt man noch, dich aufhalten zu können.',
   'map.depth': 'Tiefe {n} / {total}',
   'map.current': 'du bist hier',
   'node.battle.name': 'Siedlung',
@@ -686,11 +688,24 @@ export const DE: Record<string, string> = {
   'text.khaganHorde': 'REITET!',
   'text.sandstormRises': 'DER SAND ERHEBT SICH',
 
+  // ---- cathedral biome ---------------------------------------------------------
+  'building.bellTower.name': 'Glockenturm',
+  'enemy.flagellant.name': 'Flagellant',
+  'enemy.exorcist.name': 'Exorzist',
+  'enemy.paladin.name': 'Paladin',
+  'enemy.anchorite.name': 'Der Anachoret',
+  'effect.exorcism': 'Exorzismus',
+  'effect.consecratedGround': 'Geweihter Boden',
+  'effect.judgment': 'Gericht',
+  'text.sanctuaryCalled': 'ZUFLUCHT',
+  'text.radianceBurst': 'GLANZ',
+
   // ---- starting bodies -------------------------------------------------------
   'menu.huntAs': 'Körper: {name}',
   'menu.huntResume': '{name} · Fortsetzung: {biome}, Raum {room}',
   'menu.biome.1': 'Dörfer',
   'menu.biome.2': 'Kriegslager',
+  'menu.biome.3': 'Kathedrale',
   'lair.tab.species': 'Körper',
   'species.active': 'GEWÄHLT',
   'species.choose': 'NEHMEN',
