@@ -638,7 +638,12 @@ export class Monster extends Combatant {
     return world.rng.next() < this.stats.get('critChance');
   }
 
-  private fire(world: World, target: Human): void {
+  /**
+   * `target` only ever needs a position and a velocity to lead — a living
+   * `Human` or a stationary point (the bell tower's, `vx`/`vy` zeroed) both
+   * satisfy it, so aiming at a building doesn't need its own firing path.
+   */
+  private fire(world: World, target: { x: number; y: number; vx: number; vy: number }): void {
     const crit = this.rollCrit(world);
     const { packets, statuses } = this.buildAttack(crit);
 
@@ -973,9 +978,15 @@ export class Monster extends Combatant {
     // one actually in frame, same range budget either way.
     this.target = world.nearestHuman(this.x, this.y, range, true, undefined, true);
 
-    if (this.target) {
+    // A living bell tower is the room's actual priority — it's what's hurting
+    // the monster, not whichever defender happens to be nearest — so it takes
+    // the shot over a human target whenever it's close enough to hit back.
+    const tower = world.nearestBellTower(this.x, this.y, range);
+    const aimAt = tower ?? this.target;
+
+    if (aimAt) {
       // Always face the target, even while moving — it reads as "stalking".
-      const desired = Math.atan2(this.target.y - this.y, this.target.x - this.x);
+      const desired = Math.atan2(aimAt.y - this.y, aimAt.x - this.x);
       this.aim = damp(this.aim, desired, MONSTER_AIM_TUNING.aimDampRate, dt);
     } else if (this.speed > 20) {
       this.aim = damp(this.aim, this.heading, MONSTER_AIM_TUNING.wanderAimDampRate, dt);
@@ -986,9 +997,9 @@ export class Monster extends Combatant {
 
     this.attackTimer -= dt;
     if (this.attackTimer > 0) return;
-    if (!this.target) return;
+    if (!aimAt) return;
 
-    this.fire(world, this.target);
+    this.fire(world, tower ? { x: tower.x, y: tower.y, vx: 0, vy: 0 } : this.target!);
     this.attackTimer = this.attackInterval();
   }
 

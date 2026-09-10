@@ -326,6 +326,49 @@ export class World {
   }
 
   /**
+   * The Cathedral's bell tower, if one stands and is close enough to actually
+   * strike back at.
+   *
+   * The monster otherwise only ever aims at humans (`nearestHuman`) — a
+   * building was never a valid target on its own, only ever damaged as a side
+   * effect of a shot travelling through it toward someone standing behind it.
+   * A bell tower usually has nobody behind it, so without this it can stand
+   * forever untouched while its ward keeps ticking. Small linear scan over
+   * `buildings` rather than the grid `nearestHuman` uses — a room only ever
+   * has the one.
+   *
+   * Line of sight is checked against every *other* sight-blocker, not
+   * `hasLineOfSight`'s usual whole-building list — a tower's own silhouette
+   * can't occlude its own centre point, and naively including it there made
+   * every opaque tower permanently "blocked" from the one thing it's a target
+   * for.
+   */
+  nearestBellTower(x: number, y: number, maxRange: number): Building | null {
+    let best: Building | null = null;
+    let bestD2 = maxRange * maxRange;
+    for (const building of this.buildings) {
+      if (!building.alive || building.profile.kind !== 'bell_tower') continue;
+      const d2 = dist2(x, y, building.x, building.y);
+      if (d2 >= bestD2) continue;
+      if (!this.isOnScreen(building.x, building.y)) continue;
+
+      let blocked = false;
+      for (const rect of this.sightRects) {
+        if (rect === building.rect) continue;
+        if (segmentRectHit(x, y, building.x, building.y, rect)) {
+          blocked = true;
+          break;
+        }
+      }
+      if (blocked) continue;
+
+      best = building;
+      bestD2 = d2;
+    }
+    return best;
+  }
+
+  /**
    * Whether a point falls inside what the camera is actually showing right now.
    *
    * A ranged shot from off-screen reads as unfair no matter which side fires it —

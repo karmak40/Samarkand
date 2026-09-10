@@ -21,11 +21,15 @@ export function unlockKey(category: UnlockCategory, refId: string): string {
   return `${category}:${refId}`;
 }
 
+// A full run's gross souls (banked regardless of in-run spending, see
+// `Monster.gainSouls`) can already clear several thousand once a build gets
+// going — these five-fold what they were, so the whole catalogue is a
+// many-runs goal instead of something one strong Cathedral clear empties out.
 const CARD_PRICE: Record<Rarity, number> = {
   common: 0,
-  rare: 45,
-  epic: 90,
-  legendary: 165,
+  rare: 225,
+  epic: 450,
+  legendary: 825,
 };
 
 const RARITY_TIER: Record<Rarity, number> = { common: 0, rare: 1, epic: 2, legendary: 3 };
@@ -84,14 +88,14 @@ export const UNLOCKS: readonly UnlockDef[] = [
     id: unlockKey('mutation', mutation.id),
     category: 'mutation' as const,
     refId: mutation.id,
-    price: 125,
+    price: 625,
     tier: 1,
   })),
   ...BOONS.filter((boon) => !DEFAULT_BOONS.has(boon.id)).map((boon) => ({
     id: unlockKey('boon', boon.id),
     category: 'boon' as const,
     refId: boon.id,
-    price: 70,
+    price: 350,
     tier: 1,
   })),
   // Bodies carry their own price: they differ far more from each other than two

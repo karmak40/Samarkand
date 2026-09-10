@@ -15,11 +15,11 @@ import { type AchievementDef } from './progression/achievements';
 import { getBoon } from './progression/boons';
 import { dailySeed } from './progression/daily';
  import { applyCurse, curseName, getCurse, rollCurses } from './progression/curses';
-import { drawMutations, isEvolutionRoom, type Mutation } from './progression/evolution';
-import { MetaProgress } from './progression/meta';
+import { drawMutations, getMutation, isEvolutionRoom, type Mutation } from './progression/evolution';
+import { type CheckpointBuild, MetaProgress } from './progression/meta';
 import { EFFECTS_SCALE, SHAKE_SCALE } from './progression/settings';
 import { type UnlockCategory } from './progression/gate';
-import { type SkillCard, SkillPool } from './progression/skills';
+import { getCard, type SkillCard, SkillPool } from './progression/skills';
 import { Renderer } from './render/renderer';
 import { RunStats } from './stats/tracker';
 import { drawHud } from './ui/hud';
@@ -359,6 +359,10 @@ export class Game {
       const startDepth = Math.min(this.meta.checkpointDepth, BIOME_ROOMS - 2);
       const base = (this.meta.checkpointBiome - 1) * BIOME_ROOMS + startDepth;
       this.generateBiome(this.meta.checkpointBiome, base, TOTAL_DEPTHS, startDepth);
+      // A fresh level-1 body thrown at a room this deep would be fighting a
+      // roster tuned for whatever the run had already grown into — replay the
+      // build the checkpoint was taken with rather than just its depth.
+      if (this.meta.checkpointBuild) this.applyCheckpointBuild(this.meta.checkpointBuild);
     } else if (this.meta.selectedStartBiome >= 2) {
       // Biomes reached in a past run are a standing preference, same as the
       // starting body — asking again before every hunt would be friction, not a
@@ -475,7 +479,7 @@ export class Game {
     // move `roomsCleared`, so passing through one between fights can't
     // re-trigger this on a room already checkpointed.
     if (node && this.tracker.roomsCleared > 0 && this.tracker.roomsCleared % 3 === 0) {
-      this.meta.recordCheckpoint(this.biome, node.depth + this.biomeStartDepth);
+      this.meta.recordCheckpoint(this.biome, node.depth + this.biomeStartDepth, this.snapshotBuild());
     }
 
     if (node && node.kind === 'boss') {
@@ -505,6 +509,52 @@ export class Game {
       return;
     }
     this.state = 'map';
+  }
+
+  /** What `recordCheckpoint` freezes the character as, for `applyCheckpointBuild` to replay. */
+  private snapshotBuild(): CheckpointBuild {
+    return {
+      level: this.monster.level,
+      xpIntoLevel: this.monster.xpIntoLevel,
+      souls: this.monster.souls,
+      skills: this.skillPool.takenList.map((s) => ({ id: s.card.id, stacks: s.stacks })),
+      mutationIds: [...this.monster.mutations],
+      curseIds: [...this.monster.curses],
+    };
+  }
+
+  /**
+   * Replays a checkpointed build onto the freshly-constructed monster a
+   * resumed run starts with. Mutations and curses go through their normal
+   * apply paths (a burst of particles/sound on a run's very first frame reads
+   * as a fitting "here's what you had" flourish, not a bug); skills are
+   * re-acquired stack by stack so `SkillPool`'s own bookkeeping — max-stack
+   * limits, what a future draft should avoid repeating — stays correct.
+   */
+  private applyCheckpointBuild(build: CheckpointBuild): void {
+    const monster = this.monster;
+    monster.level = build.level;
+    monster.xpIntoLevel = build.xpIntoLevel;
+    monster.souls = build.souls;
+
+    for (const id of build.mutationIds) {
+      const mutation = getMutation(id);
+      if (mutation) monster.applyMutation(mutation, this.world);
+    }
+    for (const id of build.curseIds) {
+      const curse = getCurse(id);
+      if (!curse) continue;
+      applyCurse(curse, monster.stats);
+      monster.curses.add(id);
+    }
+    for (const { id, stacks } of build.skills) {
+      const card = getCard(id);
+      if (!card) continue;
+      for (let i = 0; i < stacks; i++) this.skillPool.acquire(card, monster.stats);
+    }
+
+    monster.syncMaxHp(true);
+    monster.hp = monster.maxHp;
   }
 
   private installWorldHooks(): void {

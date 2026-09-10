@@ -64,6 +64,44 @@ function emptyDaily(key: string): DailyRecord {
   return { key, runs: 0, bestRooms: 0, bestKills: 0, bestSouls: 0, victory: false };
 }
 
+/** The character a checkpoint resumes with — see `MetaProgress.checkpointBuild`. */
+export interface CheckpointBuild {
+  level: number;
+  xpIntoLevel: number;
+  souls: number;
+  /** Skill card ids with how many stacks of each were taken. */
+  skills: Array<{ id: string; stacks: number }>;
+  mutationIds: string[];
+  curseIds: string[];
+}
+
+/** A save is editable text — rebuilt field by field rather than trusted wholesale. */
+function sanitizeCheckpointBuild(raw: unknown): CheckpointBuild | null {
+  if (!raw || typeof raw !== 'object') return null;
+  const data = raw as Partial<CheckpointBuild>;
+  if (typeof data.level !== 'number' || data.level < 1) return null;
+
+  const skills = Array.isArray(data.skills)
+    ? data.skills
+        .filter((s): s is { id: string; stacks: number } => {
+          return !!s && typeof s.id === 'string' && typeof s.stacks === 'number' && s.stacks > 0;
+        })
+        .map((s) => ({ id: s.id, stacks: Math.floor(s.stacks) }))
+    : [];
+
+  const strings = (value: unknown): string[] =>
+    Array.isArray(value) ? value.filter((v): v is string => typeof v === 'string') : [];
+
+  return {
+    level: Math.floor(data.level),
+    xpIntoLevel: typeof data.xpIntoLevel === 'number' && data.xpIntoLevel >= 0 ? data.xpIntoLevel : 0,
+    souls: typeof data.souls === 'number' && data.souls >= 0 ? data.souls : 0,
+    skills,
+    mutationIds: strings(data.mutationIds),
+    curseIds: strings(data.curseIds),
+  };
+}
+
 function emptyLifetime(): LifetimeStats {
   const damageByType = {} as Record<DamageType, number>;
   for (const type of DAMAGE_TYPES) damageByType[type] = 0;
@@ -110,6 +148,7 @@ export interface SaveData {
   /** Where the next run starts if the last one didn't end in victory. */
   checkpointBiome: number;
   checkpointDepth: number;
+  checkpointBuild: CheckpointBuild | null;
   /** Presentation and controls. Never anything that changes difficulty. */
   settings: Settings;
   /** Master volume, 0..1. */
@@ -265,24 +304,28 @@ export class MetaProgress implements ContentGate {
    *
    * Rooms deep into a run are steep to re-grind after a death, so every third
    * one cleared becomes the new resume point — overwritten as the player goes
-   * further, cleared entirely on a win. This is a shortcut for the *next*
-   * attempt, not a mid-run save: nothing about the run itself (build, HP,
-   * inventory) survives, only where it starts.
+   * further, cleared entirely on a win. `checkpointBuild` travels with it: a
+   * fresh level-1 body thrown at whatever the run had scaled up to by that
+   * depth was never a fair fight, especially once a later biome's roster
+   * assumes a body that's already been built up. The room itself (its layout,
+   * the exact fight in progress) is still not saved — only the character.
    */
   checkpointBiome: 1 | 2 | 3 = 1;
   /** Depth within `checkpointBiome`, always a multiple of 3. Zero means none set. */
   checkpointDepth = 0;
+  checkpointBuild: CheckpointBuild | null = null;
 
   get hasCheckpoint(): boolean {
     return this.checkpointDepth > 0;
   }
 
   /** Called every third room cleared. Ignores anything that isn't further in. */
-  recordCheckpoint(biome: 1 | 2 | 3, depth: number): void {
+  recordCheckpoint(biome: 1 | 2 | 3, depth: number, build: CheckpointBuild): void {
     if (biome < this.checkpointBiome) return;
     if (biome === this.checkpointBiome && depth <= this.checkpointDepth) return;
     this.checkpointBiome = biome;
     this.checkpointDepth = depth;
+    this.checkpointBuild = build;
     this.save();
   }
 
@@ -291,6 +334,7 @@ export class MetaProgress implements ContentGate {
     if (this.checkpointDepth === 0 && this.checkpointBiome === 1) return;
     this.checkpointBiome = 1;
     this.checkpointDepth = 0;
+    this.checkpointBuild = null;
     this.save();
   }
 
@@ -455,6 +499,7 @@ export class MetaProgress implements ContentGate {
       selectedStartBiome: this.selectedStartBiome,
       checkpointBiome: this.checkpointBiome,
       checkpointDepth: this.checkpointDepth,
+      checkpointBuild: this.checkpointBuild,
       settings: this.settings,
       lifetime: this.lifetime,
       achievements: [...this.achievements],
@@ -521,6 +566,7 @@ export class MetaProgress implements ContentGate {
         typeof data.checkpointDepth === 'number' && data.checkpointDepth > 0
           ? Math.floor(data.checkpointDepth)
           : 0;
+      this.checkpointBuild = sanitizeCheckpointBuild(data.checkpointBuild);
 
       // Merge rather than replace, so a save written by an older build that lacks
       // newer counters still loads with sane defaults.
@@ -581,6 +627,7 @@ export class MetaProgress implements ContentGate {
     this.selectedStartBiome = 1;
     this.checkpointBiome = 1;
     this.checkpointDepth = 0;
+    this.checkpointBuild = null;
     this.settings = defaultSettings();
     this.unlocked.clear();
     this.achievements.clear();

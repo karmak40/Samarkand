@@ -744,7 +744,7 @@ export const BUILDING_PROFILES: Record<BuildingKind, BuildingProfile> = {
     get name() { return t('building.bellTower.name'); },
     // Mandatory to destroy, same reasoning as watchtower/stronghold — it's the
     // one thing making the room actively worse to stand in, not optional loot.
-    hp: 260,
+    hp: 190,
     souls: 18,
     occupancy: [0, 1],
     wallColor: '#8b8579',
@@ -998,7 +998,7 @@ export const SPECIES: readonly Species[] = [
       glowColor: '#e0813c',
       glowStrength: 0.45,
     },
-    price: 130,
+    price: 650,
   },
   {
     id: 'harbinger',
@@ -1035,7 +1035,7 @@ export const SPECIES: readonly Species[] = [
       glowStrength: 0.8,
       aura: 'void',
     },
-    price: 170,
+    price: 850,
   },
 ];
 

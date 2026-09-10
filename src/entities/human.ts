@@ -13,6 +13,7 @@ import { type DamagePacket, type DamageResult, type Defenses, type DamageType } 
 import { type StatusApplication } from '../combat/status';
 import { angleDelta, clamp, damp, dist2, TAU } from '../core/math';
 import { t } from '../i18n';
+import { hexAlpha, shade } from '../render/monster-render';
 import { drawGroundShadow } from '../render/shadow';
 import type { World } from '../world/world';
 import type { Building } from './building';
@@ -27,6 +28,15 @@ const FLEE_WALL_AVOID_MARGIN = 140;
  * doing nothing at all out in the open where `wallAvoidance` returns zero.
  */
 const FLEE_WALL_AVOID_STRENGTH = 1.8;
+
+/**
+ * A ballista/siege-engine's own `speed` stat is 0 — they were built to stand
+ * on a platform, not walk — so once that platform falls they borrow this
+ * instead of staying frozen where the tower used to be. Slower than a
+ * standard archer (146): someone who just lost their emplacement, not built
+ * to sprint.
+ */
+const GROUNDED_TURRET_SPEED = 110;
 
 export type HumanRole = 'civilian' | 'melee' | 'ranged' | 'support' | 'turret' | 'boss';
 
@@ -465,6 +475,10 @@ export class Human extends Combatant {
 
     const hasLos = world.hasLineOfSight(this.x, this.y, monster.x, monster.y);
     const toMonster = this.angleToMonster(world);
+    // A turret's platform can fall out from under it — it isn't anchored
+    // anymore once that happens, so it fights (and needs a sightline) like any
+    // other ranged defender instead of standing frozen where the tower was.
+    const grounded = a.role === 'turret' && !this.mountedOn?.alive;
 
     // While charging, everything else is suspended: close the distance.
     if (this.charging > 0 && this.state !== 'windup' && this.state !== 'recover') {
@@ -491,21 +505,24 @@ export class Human extends Combatant {
       }
 
       default: {
-        if (a.role === 'turret') {
+        if (a.role === 'turret' && !grounded) {
           this.decelerate(dt);
           break;
         }
 
-        if (a.role === 'ranged') {
+        if (a.role === 'ranged' || grounded) {
+          // A dismounted turret's own `speed` stat is 0 — it was never meant
+          // to walk while mounted — so it borrows a stand-in pace instead.
+          const groundedSpeed = grounded ? GROUNDED_TURRET_SPEED : undefined;
           // Kite: back off when too close, close in when out of range or blocked.
           if (!hasLos || distance > a.preferredRange * 1.15) {
-            this.moveToward(toMonster, dt, 1);
+            this.moveToward(toMonster, dt, 1, groundedSpeed);
           } else if (distance < a.preferredRange * 0.62) {
-            this.moveToward(toMonster + Math.PI, dt, 1.05);
+            this.moveToward(toMonster + Math.PI, dt, 1.05, groundedSpeed);
           } else {
             // Strafe so archers are moving targets rather than statues.
             const side = (this.id % 2) * 2 - 1;
-            this.moveToward(toMonster + (Math.PI / 2) * side, dt, 0.55);
+            this.moveToward(toMonster + (Math.PI / 2) * side, dt, 0.55, groundedSpeed);
           }
         } else {
           // Melee units stop at the edge of their reach instead of walking into
@@ -520,7 +537,9 @@ export class Human extends Combatant {
       }
     }
 
-    if (this.canBeginAttack(world, distance, { hasLos: a.role !== 'ranged' || hasLos })) this.beginAttack(world);
+    if (this.canBeginAttack(world, distance, { hasLos: (a.role !== 'ranged' && !grounded) || hasLos })) {
+      this.beginAttack(world);
+    }
     this.advanceAttack(dt, world, distance);
 
     this.facing = damp(this.facing, toMonster, 10, dt);
@@ -1156,8 +1175,14 @@ export class Human extends Combatant {
     this.moveToward(this.wanderAngle(), dt, 0.35);
   }
 
-  private moveToward(angle: number, dt: number, speedScale: number): void {
-    if (this.archetype.speed <= 0) return;
+  /**
+   * `speedOverride` exists for a turret whose platform just fell — its
+   * archetype's own `speed` is 0 (it was never meant to walk while mounted),
+   * so `grounded` movement borrows a stand-in speed instead of the base stat.
+   */
+  private moveToward(angle: number, dt: number, speedScale: number, speedOverride?: number): void {
+    const baseSpeed = speedOverride ?? this.archetype.speed;
+    if (baseSpeed <= 0) return;
 
     // Walking straight into a wall face produces zero net movement forever, because
     // the collision solver just pushes back along the same axis. When that happens,
@@ -1167,7 +1192,7 @@ export class Human extends Combatant {
       angle += (Math.PI / 2) * this.avoidDir;
     }
 
-    const target = this.archetype.speed * speedScale * this.statuses.moveMultiplier();
+    const target = baseSpeed * speedScale * this.statuses.moveMultiplier();
     const accel = 900;
     this.vx = damp(this.vx, Math.cos(angle) * target, accel / Math.max(60, target), dt);
     this.vy = damp(this.vy, Math.sin(angle) * target, accel / Math.max(60, target), dt);
@@ -1335,11 +1360,32 @@ export class Human extends Combatant {
       ctx.stroke();
     }
 
-    // Torso.
-    ctx.fillStyle = a.tunic;
+    // A cloak trails behind a ranged defender or a boss — drawn under the torso
+    // so only its fringe shows, same idiom as a robe hem or a set of pauldrons
+    // below: silhouette reads by role at a glance, not just by tunic colour.
+    if (!mounted && (a.role === 'ranged' || isBoss)) this.drawCloak(ctx, isBoss);
+
+    // Torso, gradient-shaded instead of a flat fill so the figure has some
+    // roundness even at this size.
+    const torsoGrad = ctx.createRadialGradient(
+      -this.radius * 0.25, -this.radius * 0.3, this.radius * 0.1,
+      0, 0, this.radius * 1.1,
+    );
+    torsoGrad.addColorStop(0, shade(a.tunic, 0.2));
+    torsoGrad.addColorStop(0.6, a.tunic);
+    torsoGrad.addColorStop(1, shade(a.tunic, -0.3));
+    ctx.fillStyle = torsoGrad;
     ctx.beginPath();
     ctx.ellipse(0, 0, this.radius * 0.72, this.radius * 0.95, 0, 0, TAU);
     ctx.fill();
+
+    // A support's robe hem covers the legwork below the waist; armour plating
+    // sits on a melee or turret defender's shoulders instead. Never both — the
+    // roles that get one never get the other.
+    if (!mounted) {
+      if (a.role === 'support') this.drawRobeHem(ctx);
+      else if (a.role === 'melee' || a.role === 'turret') this.drawPauldrons(ctx);
+    }
 
     // Armour plate / tabard accent.
     ctx.fillStyle = a.accent;
@@ -1349,11 +1395,21 @@ export class Human extends Combatant {
     ctx.fill();
     ctx.globalAlpha = 1;
 
+    // Rim light along the torso's upper-left edge, so it doesn't read as flat
+    // against the arena floor the way a plain fill does.
+    ctx.strokeStyle = hexAlpha(shade(a.accent, 0.35), 0.4);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, this.radius * 0.72, this.radius * 0.95, 0, 0, TAU);
+    ctx.stroke();
+
     // Head.
     ctx.fillStyle = '#c9a37c';
     ctx.beginPath();
     ctx.arc(0, -this.radius * 1.05, this.radius * 0.44, 0, TAU);
     ctx.fill();
+
+    if (!mounted) this.drawHeadCovering(ctx, isBoss);
 
     this.drawWeapon(ctx);
 
@@ -1432,6 +1488,86 @@ export class Human extends Combatant {
     ctx.stroke();
   }
 
+  /**
+   * A fan of accent-coloured cloth trailing down from the shoulders, drawn
+   * before the torso so only its fringe peeks past — a ranged defender's
+   * light cloak, or a boss's grander one.
+   */
+  private drawCloak(ctx: CanvasRenderingContext2D, big: boolean): void {
+    const a = this.archetype;
+    const reach = big ? 1.9 : 1.3;
+    ctx.fillStyle = hexAlpha(a.accent, big ? 0.55 : 0.4);
+    ctx.beginPath();
+    ctx.moveTo(-this.radius * 0.6, -this.radius * 0.3);
+    ctx.lineTo(this.radius * 0.6, -this.radius * 0.3);
+    ctx.lineTo(0, this.radius * reach);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** A support's robe, wide at the hem, covering most of the legwork below it. */
+  private drawRobeHem(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = shade(this.archetype.tunic, -0.12);
+    ctx.beginPath();
+    ctx.moveTo(-this.radius * 0.5, -this.radius * 0.1);
+    ctx.lineTo(this.radius * 0.5, -this.radius * 0.1);
+    ctx.lineTo(this.radius * 0.85, this.radius * 1.15);
+    ctx.lineTo(-this.radius * 0.85, this.radius * 1.15);
+    ctx.closePath();
+    ctx.fill();
+  }
+
+  /** Two shoulder plates for a melee or turret defender's armour. */
+  private drawPauldrons(ctx: CanvasRenderingContext2D): void {
+    ctx.fillStyle = shade(this.archetype.accent, -0.1);
+    for (const side of [-1, 1]) {
+      ctx.beginPath();
+      ctx.arc(side * this.radius * 0.62, -this.radius * 0.35, this.radius * 0.26, 0, TAU);
+      ctx.fill();
+    }
+  }
+
+  /**
+   * Helm, hood or crown, by role — a bare head otherwise (ranged defenders and
+   * civilians). Bosses always get the crown regardless of their own role's
+   * usual covering, so the run's five finales all read as royalty first.
+   */
+  private drawHeadCovering(ctx: CanvasRenderingContext2D, isBoss: boolean): void {
+    const a = this.archetype;
+    const hy = -this.radius * 1.05;
+    const hr = this.radius * 0.44;
+
+    if (isBoss) {
+      ctx.fillStyle = shade(a.accent, 0.2);
+      for (let i = -1; i <= 1; i++) {
+        ctx.beginPath();
+        ctx.moveTo(i * hr * 0.6 - hr * 0.14, hy - hr * 0.5);
+        ctx.lineTo(i * hr * 0.6 + hr * 0.14, hy - hr * 0.5);
+        ctx.lineTo(i * hr * 0.6, hy - hr * 1.15);
+        ctx.closePath();
+        ctx.fill();
+      }
+      return;
+    }
+
+    if (a.role === 'melee' || a.role === 'turret') {
+      ctx.fillStyle = shade(a.accent, -0.05);
+      ctx.beginPath();
+      ctx.arc(0, hy, hr * 1.05, Math.PI, TAU);
+      ctx.closePath();
+      ctx.fill();
+      return;
+    }
+
+    if (a.role === 'support') {
+      ctx.fillStyle = shade(a.tunic, -0.25);
+      ctx.beginPath();
+      ctx.arc(0, hy + hr * 0.15, hr * 1.2, Math.PI * 0.05, Math.PI * 0.95, false);
+      ctx.closePath();
+      ctx.fill();
+    }
+  }
+
   private drawWeapon(ctx: CanvasRenderingContext2D): void {
     const a = this.archetype;
     // The weapon swings forward through the wind-up, so the telegraph is readable.
@@ -1461,6 +1597,7 @@ export class Human extends Combatant {
         break;
       case 'priest':
       case 'inquisitor':
+      case 'exorcist':
         this.drawHolySymbol(ctx);
         break;
       case 'warlord':
@@ -1470,6 +1607,7 @@ export class Human extends Combatant {
         this.drawFireBrand(ctx);
         break;
       case 'knight':
+      case 'paladin':
         this.drawSwordAndShield(ctx);
         break;
       case 'khagan':
@@ -1478,8 +1616,14 @@ export class Human extends Combatant {
       case 'militia':
         this.drawClub(ctx);
         break;
+      case 'flagellant':
+        this.drawFlail(ctx);
+        break;
+      case 'anchorite':
+        this.drawStaff(ctx);
+        break;
       default:
-        // Civilians carry nothing worth drawing.
+        // Plain civilians carry nothing worth drawing.
         break;
     }
 
@@ -1619,6 +1763,56 @@ export class Human extends Combatant {
   private drawClub(ctx: CanvasRenderingContext2D): void {
     ctx.fillStyle = '#b4a583';
     ctx.fillRect(-2, -2, this.radius * 1.3, 4);
+  }
+
+  /** A flagellant's own instrument: a short haft, a chain, a spiked ball. */
+  private drawFlail(ctx: CanvasRenderingContext2D): void {
+    const ballX = this.radius * 1.3;
+    const ballY = this.radius * 0.4;
+    ctx.strokeStyle = '#4a3a2c';
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.moveTo(-4, 0);
+    ctx.lineTo(ballX, ballY);
+    ctx.stroke();
+
+    ctx.fillStyle = '#6b6b6b';
+    ctx.beginPath();
+    ctx.arc(ballX, ballY, 4, 0, TAU);
+    ctx.fill();
+
+    ctx.strokeStyle = '#3a3a3a';
+    ctx.lineWidth = 1.2;
+    for (let i = 0; i < 5; i++) {
+      const ang = (i / 5) * TAU;
+      ctx.beginPath();
+      ctx.moveTo(ballX + Math.cos(ang) * 4, ballY + Math.sin(ang) * 4);
+      ctx.lineTo(ballX + Math.cos(ang) * 7, ballY + Math.sin(ang) * 7);
+      ctx.stroke();
+    }
+  }
+
+  /** The Anchorite's staff: a plain haft topped with a steady holy glow. */
+  private drawStaff(ctx: CanvasRenderingContext2D): void {
+    const headX = this.radius * 1.6;
+    const headY = -this.radius * 0.4;
+    ctx.strokeStyle = '#3a2a1e';
+    ctx.lineWidth = 3;
+    ctx.beginPath();
+    ctx.moveTo(-8, 4);
+    ctx.lineTo(headX, headY);
+    ctx.stroke();
+
+    ctx.globalCompositeOperation = 'lighter';
+    const glow = ctx.createRadialGradient(headX, headY, 0, headX, headY, 14);
+    glow.addColorStop(0, '#fff6d0');
+    glow.addColorStop(0.5, this.archetype.accent);
+    glow.addColorStop(1, 'rgba(0,0,0,0)');
+    ctx.fillStyle = glow;
+    ctx.beginPath();
+    ctx.arc(headX, headY, 14, 0, TAU);
+    ctx.fill();
+    ctx.globalCompositeOperation = 'source-over';
   }
 
   private drawOverlays(ctx: CanvasRenderingContext2D, world: World): void {
