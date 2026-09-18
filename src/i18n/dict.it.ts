@@ -601,6 +601,7 @@ export const IT: Record<string, string> = {
   'horde.targetTime': 'sopravvivi {time}',
   'horde.locked': "Supera l'arena {n} per sbloccare",
   'horde.wave': 'ONDATA {n}',
+  'horde.eliteWave': 'ONDATA D’ÉLITE {n}',
   'horde.timeLeft': '{time} rimanenti',
   'horde.arenaName': "Arena dell'Orda — Livello {level}",
   'results.hordeVictoryTitle': "L'ARENA REGGE",

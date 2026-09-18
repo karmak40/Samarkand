@@ -29,7 +29,7 @@ export interface HudState {
   touchActive: boolean;
   /** Present only for a Horde run — replaces the room-progress readout with a
    *  survival countdown and wave counter. */
-  survival?: { elapsed: number; target: number; wave: number; warning: boolean };
+  survival?: { elapsed: number; target: number; wave: number; warning: boolean; elite: boolean };
 }
 
 /**
@@ -185,13 +185,13 @@ function drawCompactCluster(ui: Ui, state: HudState): void {
   y += 16;
 
   if (state.survival) {
-    const waveStyle = waveCounterStyle(state.survival.warning, state.elapsed);
-    ui.text(t('horde.wave', { n: state.survival.wave }), ui.width / 2, y, {
+    const { wave, warning, elite } = state.survival;
+    ui.text(waveCounterLabel(wave, warning, elite), ui.width / 2, y, {
       size: 10,
       align: 'center',
       baseline: 'middle',
       letterSpacing: 1,
-      ...waveStyle,
+      ...waveCounterStyle(warning, elite, state.elapsed),
     });
     y += 14;
 
@@ -460,14 +460,29 @@ function drawStarPath(
 }
 
 /**
- * The Horde wave counter's text style — a plain muted label normally, pulsing
- * bright red for the last `warningLeadSeconds` before a wave lands (see
- * `Game.checkHordeProgress`). Waves can now arrive from any edge of the arena, so
- * this pulse is the player's only advance notice that one is about to.
+ * The Horde wave counter's text style — a plain muted label normally, pulsing for
+ * the last `warningLeadSeconds` before a wave lands (see `Game.checkHordeProgress`):
+ * red for an ordinary wave, gold and a touch more urgent for an elite one (see
+ * `isEliteWave`). Waves can now arrive from any edge of the arena, so this pulse is
+ * the player's only advance notice that one is about to.
  */
-function waveCounterStyle(warning: boolean, elapsedTime: number): { color: string; bold: boolean; alpha: number } {
+function waveCounterStyle(
+  warning: boolean,
+  elite: boolean,
+  elapsedTime: number,
+): { color: string; bold: boolean; alpha: number } {
   if (!warning) return { color: PALETTE.muted, bold: false, alpha: 1 };
-  return { color: PALETTE.bloodBright, bold: true, alpha: 0.55 + 0.45 * Math.sin(elapsedTime * 14) };
+  const speed = elite ? 20 : 14;
+  return {
+    color: elite ? PALETTE.gold : PALETTE.bloodBright,
+    bold: true,
+    alpha: 0.55 + 0.45 * Math.sin(elapsedTime * speed),
+  };
+}
+
+/** "WAVE {n}" normally, "ELITE WAVE {n}" while warning of one — see `waveCounterStyle`. */
+function waveCounterLabel(wave: number, warning: boolean, elite: boolean): string {
+  return warning && elite ? t('horde.eliteWave', { n: wave }) : t('horde.wave', { n: wave });
 }
 
 function drawProgress(ui: Ui, state: HudState): void {
@@ -526,12 +541,12 @@ function drawSurvivalProgress(
   cx: number,
   elapsedTime: number,
 ): void {
-  ui.text(t('horde.wave', { n: survival.wave }), cx, 46, {
+  ui.text(waveCounterLabel(survival.wave, survival.warning, survival.elite), cx, 46, {
     size: 11,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 1.5,
-    ...waveCounterStyle(survival.warning, elapsedTime),
+    ...waveCounterStyle(survival.warning, survival.elite, elapsedTime),
   });
 
   const w = 240;

@@ -53,7 +53,7 @@ import { drawSettings, newSettingsView, type SettingsView } from './ui/settings'
 import { drawTouchControls } from './ui/touch-hud';
 import { PALETTE, Ui } from './ui/widgets';
 import { generateHordeArena } from './world/hordegen';
-import { hordeDifficultyTier, rollHordeWave } from './world/hordewaves';
+import { hordeDifficultyTier, isEliteWave, rollHordeWave } from './world/hordewaves';
 import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './world/roomgen';
  import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
@@ -181,6 +181,8 @@ export class Game {
   private hordeSpawnTimer = 0;
   /** True for the last `warningLeadSeconds` before a wave lands — pulses the HUD. */
   private hordeWarning = false;
+  /** Whether the wave currently being warned about (or just spawned) is an elite one. */
+  private hordeWarningElite = false;
   private hordeSpawnPoints: Vec2[] = [];
   private hordeTargetSeconds = 0;
   /** Which tab and scroll offset the Horde level-select screen is showing. */
@@ -477,6 +479,7 @@ export class Game {
     // of "brace yourself" instead of landing the instant the arena appears.
     this.hordeSpawnTimer = HORDE_WAVE_CONFIG.warningLeadSeconds;
     this.hordeWarning = false;
+    this.hordeWarningElite = false;
     this.hordeTargetSeconds = HORDE_LEVELS.find((l) => l.level === level)?.targetSeconds ?? 0;
 
     const { plan, spawnPoints } = generateHordeArena(level, this.runRng.fork());
@@ -1386,14 +1389,17 @@ export class Game {
     // horn/shake on actual arrival below are what keep that fair.
     if (!this.hordeWarning && this.hordeSpawnTimer <= HORDE_WAVE_CONFIG.warningLeadSeconds) {
       this.hordeWarning = true;
+      this.hordeWarningElite = isEliteWave(this.hordeWaveNumber);
     }
     if (this.hordeSpawnTimer <= 0) {
       this.hordeSpawnTimer += HORDE_WAVE_CONFIG.spawnIntervalSeconds;
       this.hordeWarning = false;
+      const elite = this.hordeWarningElite;
+      this.hordeWarningElite = false;
       const spawns = rollHordeWave(this.hordeElapsed, this.hordeWaveNumber, level, this.hordeSpawnPoints, this.runRng);
       this.hordeWaveNumber++;
       this.spawnHumans(spawns, tier, true);
-      this.camera.shake(5);
+      this.camera.shake(elite ? 9 : 5);
       // Same "this one is different" horn the campaign's reinforcement wave uses —
       // exactly the read a fresh wave needs here too.
       this.sound.bossSpawn(this.monster);
@@ -1553,6 +1559,7 @@ export class Game {
                 target: this.hordeTargetSeconds,
                 wave: this.hordeWaveNumber,
                 warning: this.hordeWarning,
+                elite: this.hordeWarningElite,
               }
             : undefined,
       });

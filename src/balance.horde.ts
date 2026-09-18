@@ -75,4 +75,13 @@ export const HORDE_WAVE_CONFIG = {
    * an unfair ambush — the horn/shake on arrival then tells you it's real.
    */
   warningLeadSeconds: 1.2,
+  /**
+   * Every Nth wave (5th, 10th, 15th, ...) also brings the campaign's own elite-room
+   * champions (`ELITE_CHAMPIONS_EARLY`/`LATE` in balance.ts) alongside a lighter
+   * normal wave, instead of only the usual weighted roster — a mini-boss beat
+   * without inventing new units or risking a full campaign boss's own mechanics.
+   */
+  eliteWaveInterval: 5,
+  /** The normal-roster portion of an elite wave shrinks to this fraction of its usual size. */
+  eliteWaveNormalShare: 0.6,
 };

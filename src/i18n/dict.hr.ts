@@ -601,6 +601,7 @@ export const HR: Record<string, string> = {
   'horde.targetTime': 'preživi {time}',
   'horde.locked': 'Preživi arenu {n} za otključavanje',
   'horde.wave': 'VAL {n}',
+  'horde.eliteWave': 'ELITNI VAL {n}',
   'horde.timeLeft': 'preostalo {time}',
   'horde.arenaName': 'Arena horde — razina {level}',
   'results.hordeVictoryTitle': 'ARENA JE ODOLJELA',

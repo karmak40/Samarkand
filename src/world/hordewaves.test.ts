@@ -1,9 +1,9 @@
 import { describe, expect, it } from 'vitest';
-import { HORDE_LEVELS, HORDE_WAVE_CONFIG } from '../balance';
+import { ELITE_CHAMPIONS_EARLY, HORDE_LEVELS, HORDE_WAVE_CONFIG } from '../balance';
 import { RNG } from '../core/rng';
 import { HUMAN_ARCHETYPES } from '../entities/human';
 import { biomeEligible } from './roomgen';
-import { hordeDifficultyTier, rollHordeWave } from './hordewaves';
+import { hordeDifficultyTier, isEliteWave, rollHordeWave } from './hordewaves';
 
 const SPAWN_POINTS = [
   { x: 2000, y: 100 },
@@ -81,5 +81,29 @@ describe('rollHordeWave', () => {
     const a = rollHordeWave(200, 8, 2, SPAWN_POINTS, new RNG(99));
     const b = rollHordeWave(200, 8, 2, SPAWN_POINTS, new RNG(99));
     expect(a).toEqual(b);
+  });
+
+  it('brings the elite champion roster on an elite wave', () => {
+    const waveNumber = HORDE_WAVE_CONFIG.eliteWaveInterval - 1; // the interval-th wave, 0-based
+    expect(isEliteWave(waveNumber)).toBe(true);
+
+    const spawns = rollHordeWave(60, waveNumber, 1, SPAWN_POINTS, new RNG(5));
+    const ids = spawns.map((s) => s.id);
+    for (const champion of ELITE_CHAMPIONS_EARLY) {
+      expect(ids).toContain(champion);
+    }
+  });
+
+  it('leaves a non-elite wave without the champion roster forced in', () => {
+    expect(isEliteWave(1)).toBe(false);
+  });
+});
+
+describe('isEliteWave', () => {
+  it('lands only on the interval-th wave (1-based)', () => {
+    const interval = HORDE_WAVE_CONFIG.eliteWaveInterval;
+    for (let n = 0; n < interval * 4; n++) {
+      expect(isEliteWave(n)).toBe((n + 1) % interval === 0);
+    }
   });
 });

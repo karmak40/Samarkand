@@ -601,6 +601,7 @@ export const FR: Record<string, string> = {
   'horde.targetTime': 'survivre {time}',
   'horde.locked': "Terminez l'arène {n} pour débloquer",
   'horde.wave': 'VAGUE {n}',
+  'horde.eliteWave': 'VAGUE D’ÉLITE {n}',
   'horde.timeLeft': '{time} restantes',
   'horde.arenaName': 'Arène de la Horde — Niveau {level}',
   'results.hordeVictoryTitle': "L'ARÈNE TIENT",

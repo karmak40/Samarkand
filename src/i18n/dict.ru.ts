@@ -601,6 +601,7 @@ export const RU: Record<string, string> = {
   'horde.targetTime': 'продержаться {time}',
   'horde.locked': 'Пройди арену {n}, чтобы открыть',
   'horde.wave': 'ВОЛНА {n}',
+  'horde.eliteWave': 'ЭЛИТНАЯ ВОЛНА {n}',
   'horde.timeLeft': 'осталось {time}',
   'horde.arenaName': 'Арена орды — уровень {level}',
   'results.hordeVictoryTitle': 'АРЕНА ВЫСТОЯЛА',
