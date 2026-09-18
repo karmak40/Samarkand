@@ -2779,59 +2779,9 @@ export const MONSTER_AURA_TUNING = {
   terrorAuraCourageThreshold: 0.9,
 };
 
-// ---------------------------------------------------------------------------
-// Horde mode: a standalone survival arena, chosen from the main menu. Progress is
-// a permanent ladder in `MetaProgress.hordeLevelUnlocked` — surviving level N
-// unlocks N+1 forever, independent of any single run.
-// ---------------------------------------------------------------------------
-
-/**
- * One tier of the campaign's `ENEMY_TIER_SCALING` roughly doubles every ~9 tiers of
- * compounding HP, so a whole level's difficulty is expressed as a tier *range*
- * (`startTier` here, climbing at `HORDE_WAVE_CONFIG.tierPerMinute` per elapsed
- * minute) rather than a flat number. Levels chain: each one starts exactly where
- * the previous finished (`startTier = (level - 1) * 12`), so level 5 opens at
- * roughly the difficulty a full 12-room biome ends at.
- */
-export const HORDE_LEVELS: readonly { level: number; targetSeconds: number; startTier: number }[] = [
-  { level: 1, targetSeconds: 720, startTier: 0 },
-  { level: 2, targetSeconds: 720, startTier: 12 },
-  { level: 3, targetSeconds: 720, startTier: 24 },
-  { level: 4, targetSeconds: 720, startTier: 36 },
-  { level: 5, targetSeconds: 720, startTier: 48 },
-];
-
-/**
- * Layout for the Horde arena — wide and shallow instead of the campaign's
- * near-square rooms, so buildings read as lanes to march down rather than a
- * village ring. Built entirely from existing `BuildingKind`s (see `hordegen.ts`);
- * no new building types for v1.
- */
-export const HORDE_ARENA_CONFIG = {
-  width: 2400,
-  height: 1100,
-  lanes: 3,
-  buildingsPerLane: [3, 5] as readonly [number, number],
-  palette: ['stronghold', 'watchtower', 'longhouse', 'wall', 'cart'] as readonly BuildingKind[],
-};
-
-/**
- * Live wave spawner tuning. A wave lands every `spawnIntervalSeconds`; its size
- * grows with `waveNumber` up to `maxWaveSize`. Difficulty comes from
- * `tierPerMinute`: one campaign "tier" of `ENEMY_TIER_SCALING` per minute survived,
- * so a level's 12-minute target duration climbs it exactly 12 tiers — the same
- * step `HORDE_LEVELS.startTier` uses between levels, so level 5 ends roughly where
- * a full 12-room campaign biome does.
- */
-export const HORDE_WAVE_CONFIG = {
-  spawnIntervalSeconds: 16,
-  baseWaveSize: 3,
-  sizeGrowthPerWave: 0.12,
-  maxWaveSize: 10,
-  tierPerMinute: 1,
-  /** Same reasoning as `MAX_SUPPORT_PER_ROOM`, scoped to one wave instead of a room. */
-  maxSupportPerWave: 1,
-};
+// Horde mode's own balance numbers live in `balance.horde.ts` now, split out so
+// they're easier to find and tune independently of the campaign sheet above.
+export { HORDE_LEVELS, HORDE_ARENA_CONFIG, HORDE_WAVE_CONFIG } from './balance.horde';
 
 // Re-exported so a consumer that only needs the raw modifier shape doesn't have to
 // know it originally came from the skill-card system.

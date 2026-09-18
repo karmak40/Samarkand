@@ -69,18 +69,9 @@ export function generateHordeArena(level: number, rng: RNG): HordeArena {
     }
   }
 
-  // The monster enters at the left edge, centred — every lane opens onto it.
+  // The monster enters at the left edge, centred.
   const monsterStart: Vec2 = { x: margin + 20, y: height / 2 };
   clearArea(buildings, monsterStart.x, monsterStart.y, 170);
-
-  // Waves march in from the far (right) end, one gate per clear corridor —
-  // including the two outer ones — so a wave visibly pours down a specific lane
-  // rather than materializing in open ground.
-  const spawnPoints: Vec2[] = [];
-  for (let i = 0; i <= lanes; i++) {
-    const y = clamp(bandH * (i * 2) + bandH / 2, margin, height - margin);
-    spawnPoints.push({ x: width - margin, y });
-  }
 
   // Cosmetic only in Horde mode — survival is time-based, not exit-based — but
   // mirrors the campaign's own "opposite the entry" convention for consistency.
@@ -89,6 +80,9 @@ export function generateHordeArena(level: number, rng: RNG): HordeArena {
     y: clamp(height - monsterStart.y, margin, height - margin),
   };
   clearArea(buildings, exit.x, exit.y, 130);
+
+  const spawnPoints = buildSpawnPoints(bounds, monsterStart, margin);
+  for (const point of spawnPoints) clearArea(buildings, point.x, point.y, 80);
 
   const relics = placeRelics(level, 'fortified', bounds, buildings, monsterStart, rng);
 
@@ -111,4 +105,36 @@ export function generateHordeArena(level: number, rng: RNG): HordeArena {
   };
 
   return { plan, spawnPoints };
+}
+
+/**
+ * Wave-spawn gates around the whole perimeter of the arena — every edge, not just
+ * the one opposite the entry, so a Horde fight surrounds the player instead of
+ * assaulting from one direction. Units spawned here already march toward the
+ * monster on their own (the standard alerted-unit chase every human archetype
+ * already has) — this only decides where they first appear.
+ *
+ * A gate that would land on top of the monster's own entry point is dropped
+ * rather than nudged, so the true count can come out a couple short of
+ * `spawnGatesPerEdge * 4` depending on where `monsterStart` sits.
+ */
+function buildSpawnPoints(bounds: Rect, monsterStart: Vec2, margin: number): Vec2[] {
+  const gates = Math.max(1, HORDE_ARENA_CONFIG.spawnGatesPerEdge);
+  const points: Vec2[] = [];
+
+  for (let i = 0; i < gates; i++) {
+    const y = margin + ((bounds.h - margin * 2) * (i + 0.5)) / gates;
+    points.push({ x: margin, y });
+    points.push({ x: bounds.w - margin, y });
+  }
+  for (let i = 0; i < gates; i++) {
+    const x = margin + ((bounds.w - margin * 2) * (i + 0.5)) / gates;
+    points.push({ x, y: margin });
+    points.push({ x, y: bounds.h - margin });
+  }
+
+  // A gate spawned on top of the monster's own entry would be an unfair opening
+  // hit before the player has even had a chance to move.
+  const minDistFromStart = 260;
+  return points.filter((p) => Math.hypot(p.x - monsterStart.x, p.y - monsterStart.y) >= minDistFromStart);
 }

@@ -28,11 +28,15 @@ describe('hordeDifficultyTier', () => {
     }
   });
 
-  it('reaches the next level\'s starting tier by the end of the target duration', () => {
+  it('reaches roughly the next level\'s starting tier by the end of the target duration', () => {
+    // Within a couple tiers, not exact — `startTier` is a hand-picked round number in
+    // balance.horde.ts, not computed from `tierPerMinute`, so a deliberate tweak to
+    // either shouldn't need the other recomputed to five decimal places.
     for (let i = 0; i < HORDE_LEVELS.length - 1; i++) {
       const level = HORDE_LEVELS[i]!;
       const next = HORDE_LEVELS[i + 1]!;
-      expect(hordeDifficultyTier(level.targetSeconds, level.level)).toBeCloseTo(next.startTier, 5);
+      const reached = hordeDifficultyTier(level.targetSeconds, level.level);
+      expect(Math.abs(reached - next.startTier)).toBeLessThan(2);
     }
   });
 });

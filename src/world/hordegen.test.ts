@@ -43,11 +43,24 @@ describe('horde arena shape', () => {
     }
   });
 
-  it('places spawn points on the far side from the monster start', () => {
+  it('keeps every spawn point a fair distance from the monster start', () => {
     for (const { plan, spawnPoints } of arenas) {
       for (const point of spawnPoints) {
-        expect(point.x).toBeGreaterThan(plan.monsterStart.x);
+        const distance = Math.hypot(point.x - plan.monsterStart.x, point.y - plan.monsterStart.y);
+        expect(distance).toBeGreaterThanOrEqual(260);
       }
+    }
+  });
+
+  it('spawns from all four edges of the arena, not just the one opposite the entry', () => {
+    const nearEdge = 0.1; // within 10% of bounds size counts as "on that edge"
+    for (const { plan, spawnPoints } of arenas) {
+      const { w, h } = plan.bounds;
+      // The monster's own entry corner (left edge) can lose a gate or two to the
+      // fairness filter, so only the other three are required unconditionally.
+      expect(spawnPoints.some((p) => p.x > w * (1 - nearEdge))).toBe(true);
+      expect(spawnPoints.some((p) => p.y < h * nearEdge)).toBe(true);
+      expect(spawnPoints.some((p) => p.y > h * (1 - nearEdge))).toBe(true);
     }
   });
 
