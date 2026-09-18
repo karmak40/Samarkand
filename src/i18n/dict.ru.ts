@@ -163,6 +163,7 @@ export const RU: Record<string, string> = {
   'enemy.priest.name': 'Жрец',
   'enemy.knight.name': 'Рыцарь',
   'enemy.ballista.name': 'Баллиста',
+  'enemy.catapult.name': 'Катапульта',
   'enemy.inquisitor.name': 'Инквизитор',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const RU: Record<string, string> = {
   'lair.remaining': 'осталось выкупить на {n} душ',
   'lair.complete': 'ВЫКУПЛЕНО ВСЁ',
   'common.back': 'Назад',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'ОРДА',
+  'horde.progress': 'открыто {level} из {total}',
+  'horde.title': 'ОРДА',
+  'horde.subtitle': 'Портала не будет. Только время — и то, что оно впустит.',
+  'horde.level': 'АРЕНА {n}',
+  'horde.targetTime': 'продержаться {time}',
+  'horde.locked': 'Пройди арену {n}, чтобы открыть',
+  'horde.wave': 'ВОЛНА {n}',
+  'horde.timeLeft': 'осталось {time}',
+  'horde.arenaName': 'Арена орды — уровень {level}',
+  'results.hordeVictoryTitle': 'АРЕНА ВЫСТОЯЛА',
+  'results.hordeVictorySubtitle': 'Ты пережил {waves} волн. Арена {level} покорена.',
+  'results.hordeDefeatSubtitle': 'Тебя остановил: {killer} — на {wave}-й волне.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'ОХОТА ДНЯ',

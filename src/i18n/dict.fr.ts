@@ -163,6 +163,7 @@ export const FR: Record<string, string> = {
   'enemy.priest.name': 'Prêtre',
   'enemy.knight.name': 'Chevalier',
   'enemy.ballista.name': 'Baliste',
+  'enemy.catapult.name': 'Catapulte',
   'enemy.inquisitor.name': 'Inquisiteur',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const FR: Record<string, string> = {
   'lair.remaining': '{n} âmes restantes pour tout acheter',
   'lair.complete': 'TOUT EST DÉBLOQUÉ',
   'common.back': 'Retour',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'LA HORDE',
+  'horde.progress': '{level} sur {total} débloqués',
+  'horde.title': 'LA HORDE',
+  'horde.subtitle': "Aucun portail n'attend à la fin. Seulement l'horloge, et ce qu'elle laisse passer.",
+  'horde.level': 'ARÈNE {n}',
+  'horde.targetTime': 'survivre {time}',
+  'horde.locked': "Terminez l'arène {n} pour débloquer",
+  'horde.wave': 'VAGUE {n}',
+  'horde.timeLeft': '{time} restantes',
+  'horde.arenaName': 'Arène de la Horde — Niveau {level}',
+  'results.hordeVictoryTitle': "L'ARÈNE TIENT",
+  'results.hordeVictorySubtitle': 'Vous avez survécu à {waves} vagues. Arène {level} conquise.',
+  'results.hordeDefeatSubtitle': 'Arrêté par : {killer} — vague {wave}.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'CHASSE DU JOUR',

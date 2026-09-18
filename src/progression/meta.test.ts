@@ -183,6 +183,49 @@ describe('checkpoint', () => {
   });
 });
 
+describe('horde progress', () => {
+  it('starts with only level 1 unlocked', () => {
+    const meta = new MetaProgress();
+    expect(meta.hordeLevelUnlocked).toBe(1);
+  });
+
+  it('ratchets forward on survival', () => {
+    const meta = new MetaProgress();
+    meta.recordHordeResult(1, true);
+    expect(meta.hordeLevelUnlocked).toBe(2);
+
+    meta.recordHordeResult(2, true);
+    expect(meta.hordeLevelUnlocked).toBe(3);
+  });
+
+  it('does not move on death', () => {
+    const meta = new MetaProgress();
+    meta.recordHordeResult(1, false);
+    expect(meta.hordeLevelUnlocked).toBe(1);
+  });
+
+  it('ignores a replay of an already-beaten level', () => {
+    const meta = new MetaProgress();
+    meta.recordHordeResult(1, true);
+    meta.recordHordeResult(1, true);
+    expect(meta.hordeLevelUnlocked).toBe(2);
+  });
+
+  it('round-trips through localStorage', () => {
+    const first = new MetaProgress();
+    first.recordHordeResult(1, true);
+
+    const second = new MetaProgress();
+    expect(second.hordeLevelUnlocked).toBe(2);
+  });
+
+  it('defaults to level 1 on a save from before this feature existed', () => {
+    writeSave({ version: 5, souls: 0, unlocked: [], lifetime: {} });
+    const meta = new MetaProgress();
+    expect(meta.hordeLevelUnlocked).toBe(1);
+  });
+});
+
 describe('persistence', () => {
   it('round-trips through localStorage', () => {
     const first = new MetaProgress();

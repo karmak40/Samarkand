@@ -145,6 +145,8 @@ export interface SaveData {
   deepestBiomeReached: number;
   /** Which biome the next run starts in, capped at `deepestBiomeReached`. */
   selectedStartBiome: number;
+  /** Highest Horde arena level unlocked. Ratchets up only. */
+  hordeLevelUnlocked: number;
   /** Where the next run starts if the last one didn't end in victory. */
   checkpointBiome: number;
   checkpointDepth: number;
@@ -197,6 +199,12 @@ export class MetaProgress implements ContentGate {
    * hunt would be friction, not a decision. Always within `[1, deepestBiomeReached]`.
    */
   selectedStartBiome = 1;
+
+  /**
+   * Highest Horde arena level unlocked, permanently. Ratchets up only — surviving
+   * level N unlocks N+1 forever after; dying doesn't take an unlock away.
+   */
+  hordeLevelUnlocked = 1;
 
   /** Trials earned. Their soul reward is paid on the frame they land, once. */
   readonly achievements = new Set<string>();
@@ -294,6 +302,20 @@ export class MetaProgress implements ContentGate {
     const clamped = Math.min(Math.max(1, Math.round(biome)), this.deepestBiomeReached);
     if (clamped === this.selectedStartBiome) return;
     this.selectedStartBiome = clamped;
+    this.save();
+  }
+
+  // ---- horde mode ------------------------------------------------------------
+
+  /**
+   * Permanently unlock the next Horde arena level.
+   *
+   * Called on survival, not on run end generically — dying to the wave that
+   * follows must not cost the player the unlock they already earned.
+   */
+  recordHordeResult(level: number, survived: boolean): void {
+    if (!survived || level < this.hordeLevelUnlocked) return;
+    this.hordeLevelUnlocked = level + 1;
     this.save();
   }
 
@@ -497,6 +519,7 @@ export class MetaProgress implements ContentGate {
       speciesId: this.speciesId,
       deepestBiomeReached: this.deepestBiomeReached,
       selectedStartBiome: this.selectedStartBiome,
+      hordeLevelUnlocked: this.hordeLevelUnlocked,
       checkpointBiome: this.checkpointBiome,
       checkpointDepth: this.checkpointDepth,
       checkpointBuild: this.checkpointBuild,
@@ -557,6 +580,13 @@ export class MetaProgress implements ContentGate {
       this.selectedStartBiome =
         typeof data.selectedStartBiome === 'number'
           ? Math.min(Math.max(1, Math.floor(data.selectedStartBiome)), this.deepestBiomeReached)
+          : 1;
+
+      // Missing on any save older than this feature — defaults to level 1, same as
+      // a profile that has never touched the Horde mode.
+      this.hordeLevelUnlocked =
+        typeof data.hordeLevelUnlocked === 'number' && data.hordeLevelUnlocked >= 1
+          ? Math.floor(data.hordeLevelUnlocked)
           : 1;
 
       // Missing on any save older than this feature — defaults to no checkpoint,

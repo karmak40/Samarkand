@@ -1,5 +1,6 @@
 import { BASE_STATS, STAT_CEILINGS, STAT_FLOORS } from '../balance';
 import { type DamageType, type PlayerDamageType } from '../combat/damage';
+import { clamp } from '../core/math';
 import { t } from '../i18n';
 
 /**
@@ -331,6 +332,59 @@ export class StatSheet {
     if (this.dirty) this.recompute();
     return { ...this.cache };
   }
+
+  /**
+   * What each of `mods` would resolve to if added on top of the current modifiers,
+   * without touching the live sheet. Used by the card/mutation draft UI to preview a
+   * pick before it's taken.
+   */
+  previewWith(mods: readonly { key: StatKey; flat?: number; mult?: number }[]): Partial<Record<StatKey, number>> {
+    const flat: Partial<Record<StatKey, number>> = {};
+    const mult: Partial<Record<StatKey, number>> = {};
+    for (const mod of this.modifiers) {
+      if (mod.flat) flat[mod.key] = (flat[mod.key] ?? 0) + mod.flat;
+      if (mod.mult) mult[mod.key] = (mult[mod.key] ?? 0) + mod.mult;
+    }
+    for (const mod of mods) {
+      if (mod.flat) flat[mod.key] = (flat[mod.key] ?? 0) + mod.flat;
+      if (mod.mult) mult[mod.key] = (mult[mod.key] ?? 0) + mod.mult;
+    }
+
+    const out: Partial<Record<StatKey, number>> = {};
+    for (const mod of mods) {
+      if (out[mod.key] !== undefined) continue;
+      let value = (this.base[mod.key] + (flat[mod.key] ?? 0)) * (1 + (mult[mod.key] ?? 0));
+      const floor = STAT_FLOORS[mod.key];
+      if (floor !== undefined && value < floor) value = floor;
+      const ceiling = STAT_CEILINGS[mod.key];
+      if (ceiling !== undefined && value > ceiling) value = ceiling;
+      out[mod.key] = value;
+    }
+    return out;
+  }
+}
+
+/**
+ * The value range a stat bar should draw against for `key`: the worst case the track
+ * represents and the best. `referenceValue` (the larger of a before/after pair) sizes
+ * the ceiling for stats with no hard `STAT_CEILINGS` entry, so an uncapped stat like
+ * `damage` still leaves visible headroom instead of always reading "full".
+ */
+export function statBarRange(key: StatKey, referenceValue: number): { worst: number; best: number } {
+  const base = BASE_STATS[key];
+  const floor = STAT_FLOORS[key] ?? 0;
+  if (LOWER_IS_BETTER.has(key)) {
+    return { worst: Math.max(base, referenceValue), best: floor };
+  }
+  const worst = Math.min(0, floor);
+  const best = STAT_CEILINGS[key] ?? Math.max(base * 3, referenceValue * 1.15, floor * 3, worst + 1);
+  return { worst, best };
+}
+
+/** Maps a stat value into a 0..1 bar fraction over a range from `statBarRange`. */
+export function statBarFraction(value: number, range: { worst: number; best: number }): number {
+  if (range.worst === range.best) return 1;
+  return clamp((value - range.worst) / (range.best - range.worst), 0, 1);
 }
 
 /** Format a stat for display, respecting percent/integer conventions. */

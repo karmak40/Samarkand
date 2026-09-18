@@ -163,6 +163,7 @@ export const HR: Record<string, string> = {
   'enemy.priest.name': 'Svećenik',
   'enemy.knight.name': 'Vitez',
   'enemy.ballista.name': 'Balista',
+  'enemy.catapult.name': 'Katapult',
   'enemy.inquisitor.name': 'Inkvizitor',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const HR: Record<string, string> = {
   'lair.remaining': 'preostalo {n} duša za otključati sve',
   'lair.complete': 'SVE OTKLJUČANO',
   'common.back': 'Natrag',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'HORDA',
+  'horde.progress': 'otključano {level} od {total}',
+  'horde.title': 'HORDA',
+  'horde.subtitle': 'Na kraju ne čeka portal. Samo sat — i ono što propusti.',
+  'horde.level': 'ARENA {n}',
+  'horde.targetTime': 'preživi {time}',
+  'horde.locked': 'Preživi arenu {n} za otključavanje',
+  'horde.wave': 'VAL {n}',
+  'horde.timeLeft': 'preostalo {time}',
+  'horde.arenaName': 'Arena horde — razina {level}',
+  'results.hordeVictoryTitle': 'ARENA JE ODOLJELA',
+  'results.hordeVictorySubtitle': 'Preživio si {waves} valova. Arena {level} je tvoja.',
+  'results.hordeDefeatSubtitle': 'Zaustavio te: {killer} — val {wave}.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'DNEVNI LOV',

@@ -1,11 +1,11 @@
 import { Ambience } from './audio/ambience';
 import { AudioEngine } from './audio/engine';
 import { SoundBank } from './audio/sfx';
-import { BUILDING_HP_SCALE_PER_ROOM_INDEX, ON_KILL_EFFECTS } from './balance';
+import { BUILDING_HP_SCALE_PER_ROOM_INDEX, HORDE_LEVELS, HORDE_WAVE_CONFIG, ON_KILL_EFFECTS } from './balance';
 import { type AdResult, type AdService, SimulatedAdService } from './core/ads';
 import { Camera } from './core/camera';
 import { Input } from './core/input';
-import { clamp, TAU } from './core/math';
+import { clamp, TAU, type Vec2 } from './core/math';
 import { RNG } from './core/rng';
 import { Building } from './entities/building';
 import { Human } from './entities/human';
@@ -46,11 +46,14 @@ import {
   type MarketOffer,
 } from './ui/run-screens';
 import { drawAchievements } from './ui/achievements';
+import { drawHordeMenu } from './ui/horde';
 import { drawLair } from './ui/lair';
 import { drawReviveOffer, newReviveView, type ReviveView } from './ui/revive';
 import { drawSettings, newSettingsView, type SettingsView } from './ui/settings';
 import { drawTouchControls } from './ui/touch-hud';
 import { PALETTE, Ui } from './ui/widgets';
+import { generateHordeArena } from './world/hordegen';
+import { hordeDifficultyTier, rollHordeWave } from './world/hordewaves';
 import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './world/roomgen';
  import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
@@ -80,7 +83,9 @@ type GameState =
   | 'cursed'
   | 'pause'
   | 'revive'
-  | 'results';
+  | 'results'
+  | 'hordeMenu'
+  | 'hordePlaying';
 
 /**
  * Top-level game object: owns the loop, the state machine and the run lifecycle.
@@ -137,6 +142,12 @@ export class Game {
   private readonly visitedNodes = new Set<number>();
   /** Arena plans keyed by node id — only fighting stops need one. */
   private plansByNode = new Map<number, RoomPlan>();
+  /**
+   * The plan for whichever arena is actually live right now, set by `enterArena`.
+   * The campaign looks its plan up from `plansByNode`/`currentNodeId`, but Horde
+   * has neither — this field is what `currentPlan` actually reads, for both.
+   */
+  private activePlan: RoomPlan | null = null;
   private mapTime = 0;
   /** Which biome's content (roster, terrain, boss) the active map uses. */
   private biome: 1 | 2 | 3 = 1;
@@ -160,6 +171,18 @@ export class Game {
    * carries the war-camp's continuation offset for the *whole run's* numbering.
    */
   private biomeStartDepth = 0;
+
+  // --- horde mode -------------------------------------------------------------
+  /** Non-null exactly while a Horde run is active; also the level being attempted. */
+  private hordeLevel: number | null = null;
+  private hordeElapsed = 0;
+  private hordeWaveNumber = 0;
+  /** Counts down to the next wave; a fresh wave resets it, not zeroes it. */
+  private hordeSpawnTimer = 0;
+  private hordeSpawnPoints: Vec2[] = [];
+  private hordeTargetSeconds = 0;
+  /** Which tab and scroll offset the Horde level-select screen is showing. */
+  private readonly hordeMenuView = { scroll: 0 };
 
   private marketOffers: MarketOffer[] = [];
   private cursedOffers: CursedOffer[] = [];
@@ -291,7 +314,10 @@ export class Game {
    */
   private watchFocus(): void {
     const pause = (): void => {
-      if (this.state === 'playing') this.state = 'pause';
+      if (this.state === 'playing' || this.state === 'hordePlaying') {
+        this.pauseReturnState = this.state;
+        this.state = 'pause';
+      }
     };
 
     window.addEventListener('blur', pause);
@@ -316,13 +342,12 @@ export class Game {
   // ---- run lifecycle -------------------------------------------------------
 
   /**
-   * Start a run.
-   *
-   * Everything random in a run is forked from this one seed, so passing the daily
-   * seed is all it takes to give every player the identical run — the map, the
-   * settlements, the relics and the order cards come up in.
+   * Everything a run needs reset before it, shared by the campaign and Horde: a
+   * fresh RNG/tracker/skill pool, a fresh world and monster, every piece of
+   * transient run state. What differs between the two starts *after* this —
+   * `beginRun` goes on to pick a biome/map, `beginHordeRun` a single arena.
    */
-  private beginRun(seed = (Math.random() * 0xffffffff) >>> 0, daily = false): void {
+  private resetRunState(seed: number, daily: boolean): void {
     this.ads.notifyGameplayStart();
     this.isDailyRun = daily;
     this.earnedTrials = [];
@@ -348,6 +373,18 @@ export class Game {
     this.controlsHintClearedAt = null;
     this.reviveAdUsed = false;
     this.reviveView.phase = 'offer';
+  }
+
+  /**
+   * Start a campaign run.
+   *
+   * Everything random in a run is forked from this one seed, so passing the daily
+   * seed is all it takes to give every player the identical run — the map, the
+   * settlements, the relics and the order cards come up in.
+   */
+  private beginRun(seed = (Math.random() * 0xffffffff) >>> 0, daily = false): void {
+    this.resetRunState(seed, daily);
+    this.hordeLevel = null;
 
     // A daily is compared against every other player on the same seed, so it
     // always starts at the true beginning regardless of a pending checkpoint.
@@ -425,12 +462,29 @@ export class Game {
     this.state = 'map';
   }
 
+  /**
+   * Start a Horde run: one arena, a live wave spawner instead of a map, and no
+   * portal — see `checkHordeProgress`/`enterArena`.
+   */
+  private beginHordeRun(level: number): void {
+    this.resetRunState((Math.random() * 0xffffffff) >>> 0, false);
+    this.hordeLevel = level;
+    this.hordeElapsed = 0;
+    this.hordeWaveNumber = 0;
+    this.hordeSpawnTimer = 0;
+    this.hordeTargetSeconds = HORDE_LEVELS.find((l) => l.level === level)?.targetSeconds ?? 0;
+
+    const { plan, spawnPoints } = generateHordeArena(level, this.runRng.fork());
+    this.hordeSpawnPoints = spawnPoints;
+    this.enterArena(plan, Math.floor(hordeDifficultyTier(0, level)));
+    this.state = 'hordePlaying';
+  }
+
   // ---- map navigation ------------------------------------------------------
 
   /** The arena plan for wherever the player currently is, if it is a fight. */
   private get currentPlan(): RoomPlan | null {
-    if (this.currentNodeId === null) return null;
-    return this.plansByNode.get(this.currentNodeId) ?? null;
+    return this.activePlan;
   }
 
   /**
@@ -681,7 +735,19 @@ export class Game {
     const plan = this.plansByNode.get(nodeId);
     if (!plan) return;
     const index = this.difficultyBase + this.runMap.nodes[nodeId]!.depth;
+    this.enterArena(plan, index);
+  }
+
+  /**
+   * Turns a `RoomPlan` into a live arena: world reset, buildings instanced,
+   * garrison spawned, monster placed. Shared by the campaign's `loadRoom` (which
+   * looks its plan up from `plansByNode`) and Horde's `beginHordeRun` (which
+   * generates one on the spot) — everything past "I have a plan and an index" is
+   * identical between the two.
+   */
+  private enterArena(plan: RoomPlan, index: number): void {
     this.roomIndex = index;
+    this.activePlan = plan;
 
     this.world.reset(plan.bounds, plan.wallThickness);
     this.renderer.terrain.build(plan);
@@ -912,6 +978,13 @@ export class Game {
     this.ads.notifyGameplayStop();
     const earned = Math.floor(this.monster.soulsThisRun);
     this.soulsAtRunStart = earned;
+    // Permanent the instant the run is scored, regardless of which of the several
+    // places a Horde run can end landed it here — death, a declined revive, or
+    // reaching the target duration (the only place `outcome` is actually set to
+    // 'victory' for Horde; see `checkHordeProgress`).
+    if (this.hordeLevel !== null) {
+      this.meta.recordHordeResult(this.hordeLevel, this.tracker.outcome === 'victory');
+    }
     this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun });
     this.resultsView.scroll = 0;
     this.state = 'results';
@@ -933,7 +1006,7 @@ export class Game {
     if (result === 'completed') {
       this.reviveAdUsed = true;
       this.monster.revive(this.world, 0.5, t('effect.adRevive'), () => this.sound.secondWind());
-      this.state = 'playing';
+      this.state = this.hordeLevel !== null ? 'hordePlaying' : 'playing';
     } else {
       this.finishRun();
     }
@@ -967,7 +1040,7 @@ export class Game {
       // would work on glass at all.
       this.input.setTouchContext(
         this.meta.settings.touchControls !== 'off',
-        this.state === 'playing' ? 'play' : 'ui',
+        this.state === 'playing' || this.state === 'hordePlaying' ? 'play' : 'ui',
       );
 
       // One reading of the notch per frame, handed to both the half that hit-tests
@@ -1040,10 +1113,12 @@ export class Game {
       case 'lair':
       case 'trials':
       case 'settings':
+      case 'hordeMenu':
         this.menuTime += delta;
         return;
 
       case 'playing':
+      case 'hordePlaying':
         this.updatePlaying(delta);
         return;
 
@@ -1075,16 +1150,20 @@ export class Game {
     }
   }
 
+  /** Shared by `'playing'` and `'hordePlaying'` — both just step the simulation. */
   private updatePlaying(delta: number): void {
     if (this.input.wasPressed('stats')) this.showBuildSheet = !this.showBuildSheet;
     // Claimed, or the pause screen drawn later this same frame would read the very
     // same press and resume immediately.
     if (this.input.consumePress('pause')) {
-      this.pauseReturnState = 'playing';
+      this.pauseReturnState = this.state;
       this.state = 'pause';
       return;
     }
 
+    // Captured up front: `step()` can change `this.state` itself (death, a level
+    // banked mid-fight), and the loop must stop the instant it does either way.
+    const activeState = this.state;
     this.accumulator += delta;
     let steps = 0;
 
@@ -1092,7 +1171,7 @@ export class Game {
       this.accumulator -= FIXED_STEP;
       steps++;
       this.step(FIXED_STEP);
-      if (this.state !== 'playing') break;
+      if (this.state !== activeState) break;
     }
 
     // If we fell too far behind, drop the backlog rather than spiral.
@@ -1196,7 +1275,8 @@ export class Game {
     // never between one fixed step and the next.
     this.bossAlive = world.humans.some((h) => h.alive && h.archetype.role === 'boss');
 
-    this.checkRoomProgress();
+    if (this.hordeLevel !== null) this.checkHordeProgress(simDt);
+    else this.checkRoomProgress();
   }
 
   /**
@@ -1280,6 +1360,40 @@ export class Game {
     }
   }
 
+  /**
+   * Horde's win condition: there is no portal to walk to, only the clock. Waves
+   * land on a timer and levelling can't wait for a door that doesn't exist, so a
+   * banked level is drafted the instant it's earned — `state === 'cards'` already
+   * freezes the whole simulation (see `update()`'s switch), which pauses the wave
+   * clock and spawn timer along with everything else for free.
+   */
+  private checkHordeProgress(dt: number): void {
+    const level = this.hordeLevel;
+    if (level === null) return;
+
+    this.hordeElapsed += dt;
+    const tier = hordeDifficultyTier(this.hordeElapsed, level);
+    this.roomIndex = Math.floor(tier);
+
+    this.hordeSpawnTimer -= dt;
+    if (this.hordeSpawnTimer <= 0) {
+      this.hordeSpawnTimer += HORDE_WAVE_CONFIG.spawnIntervalSeconds;
+      const spawns = rollHordeWave(this.hordeElapsed, this.hordeWaveNumber, level, this.hordeSpawnPoints, this.runRng);
+      this.hordeWaveNumber++;
+      this.spawnHumans(spawns, tier, true);
+    }
+
+    if (this.monster.pendingLevels > 0) {
+      this.offerCards();
+      return;
+    }
+
+    if (this.hordeElapsed >= this.hordeTargetSeconds) {
+      this.tracker.outcome = 'victory';
+      this.finishRun();
+    }
+  }
+
   // ---- draw ----------------------------------------------------------------
 
   private draw(delta: number): void {
@@ -1316,6 +1430,7 @@ export class Game {
       const action = drawMainMenu(this.ui, this.meta, this.menuTime, this.touchActive());
       if (action === 'start') this.beginRun();
       if (action === 'daily') this.beginRun(dailySeed(), true);
+      if (action === 'horde') this.state = 'hordeMenu';
       if (action === 'stats') this.state = 'lifetime';
       if (action === 'lair') this.state = 'lair';
       if (action === 'trials') this.state = 'trials';
@@ -1330,6 +1445,15 @@ export class Game {
     if (this.state === 'lair') {
       drawMenuBackdrop(this.ui, this.menuTime);
       if (drawLair(this.ui, this.input, this.meta, this.lairView, this.menuTime) === 'back') this.state = 'menu';
+      this.applyCursor();
+      return;
+    }
+
+    if (this.state === 'hordeMenu') {
+      drawMenuBackdrop(this.ui, this.menuTime);
+      const result = drawHordeMenu(this.ui, this.input, this.meta, this.hordeMenuView);
+      if (result.back) this.state = 'menu';
+      if (result.play >= 1) this.beginHordeRun(result.play);
       this.applyCursor();
       return;
     }
@@ -1406,6 +1530,10 @@ export class Game {
         bossName: boss ? boss.archetype.name : null,
         bossHealth: boss ? boss.healthFraction : 0,
         touchActive: this.touchActive(),
+        survival:
+          this.hordeLevel !== null
+            ? { elapsed: this.hordeElapsed, target: this.hordeTargetSeconds, wave: this.hordeWaveNumber }
+            : undefined,
       });
 
       if (this.roomIntroTimer > 0) {
@@ -1416,6 +1544,7 @@ export class Game {
 
     switch (this.state) {
       case 'playing':
+      case 'hordePlaying':
         if (this.showBuildSheet) {
           drawBuildSheet(this.ui, this.monster, this.tracker, this.skillPool.takenList);
         }
@@ -1466,11 +1595,16 @@ export class Game {
         const action = drawResults(this.ui, this.input, this.tracker, this.soulsAtRunStart, this.meta, {
           daily: this.isDailyRun,
           earned: this.earnedTrials,
+          horde: this.hordeLevel !== null ? { level: this.hordeLevel, wave: this.hordeWaveNumber } : undefined,
         }, this.resultsView);
         // "Again" after a daily replays the same day's seed — that is the whole
-        // point of a daily: the run stays fixed, only you change.
+        // point of a daily: the run stays fixed, only you change. "Again" after a
+        // Horde attempt replays the same level, win or lose — the ladder only
+        // moves forward on a win (`recordHordeResult`), so a loss just gets
+        // another go at the same rung.
         if (action === 'again') {
-          if (this.isDailyRun) this.beginRun(dailySeed(), true);
+          if (this.hordeLevel !== null) this.beginHordeRun(this.hordeLevel);
+          else if (this.isDailyRun) this.beginRun(dailySeed(), true);
           else this.beginRun();
         }
         if (action === 'menu') this.state = 'menu';
@@ -1553,6 +1687,7 @@ export class Game {
       rerollCost,
       souls: this.monster.souls,
       canReroll: true,
+      stats: this.monster.stats,
     });
 
     if (result.rerolled && this.monster.souls >= rerollCost) {
@@ -1588,13 +1723,19 @@ export class Game {
     this.monster.pendingLevels = Math.max(0, this.monster.pendingLevels - 1);
     // Several levels can be banked at once; keep drafting until they are spent.
     if (this.monster.pendingLevels > 0 && this.offerCards()) return;
-    // Reached only via the portal-entry hook now — resume the room-completion
-    // sequence rather than the fight, which is already over by this point.
+
+    // Horde drafts mid-fight — there is no room to complete, just a wave clock to
+    // unpause. The campaign only ever reaches this screen at the portal, with the
+    // fight already over, so it resumes the room-completion sequence instead.
+    if (this.hordeLevel !== null) {
+      this.state = 'hordePlaying';
+      return;
+    }
     this.completeRoom();
   }
 
   private drawMutationScreen(): void {
-    const picked = drawMutationSelect(this.ui, this.input, this.pendingMutations);
+    const picked = drawMutationSelect(this.ui, this.input, this.pendingMutations, this.monster.stats);
     if (picked < 0) return;
 
     const mutation = this.pendingMutations[picked];
@@ -1662,7 +1803,12 @@ export class Game {
   }
 
   private applyCursor(): void {
-    const wanted = this.ui.hoveringInteractive ? 'pointer' : this.state === 'playing' ? 'crosshair' : 'default';
+    const wanted =
+      this.ui.hoveringInteractive
+        ? 'pointer'
+        : this.state === 'playing' || this.state === 'hordePlaying'
+          ? 'crosshair'
+          : 'default';
     if (this.renderer.canvas.style.cursor !== wanted) {
       this.renderer.canvas.style.cursor = wanted;
     }
@@ -1751,6 +1897,15 @@ export class Game {
   debugBeginRun(seed?: number, daily = false): number {
     this.beginRun(seed ?? (daily ? dailySeed() : undefined), daily);
     return this.tracker.seed;
+  }
+
+  /**
+   * Dev: jump straight into a Horde run, bypassing the menu and level-select —
+   * the robust equivalent of clicking through for a mode with no map to click
+   * pixel-coordinates on.
+   */
+  debugStartHorde(level = 1): void {
+    this.beginHordeRun(level);
   }
 
   /** Dev: what the profile has earned, and where today's daily stands. */
@@ -1842,6 +1997,10 @@ export class Game {
       seed: this.tracker ? this.tracker.seed : 0,
       daily: this.isDailyRun,
       room: this.roomIndex,
+      hordeLevel: this.hordeLevel,
+      hordeElapsed: Number(this.hordeElapsed.toFixed(1)),
+      hordeTargetSeconds: this.hordeTargetSeconds,
+      hordeWaveNumber: this.hordeWaveNumber,
       humansAlive: this.world ? this.world.livingHumans : 0,
       humansTotal: this.humansAtRoomStart,
       hp: this.monster ? Math.round(this.monster.hp) : 0,

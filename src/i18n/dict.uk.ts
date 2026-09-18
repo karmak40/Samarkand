@@ -163,6 +163,7 @@ export const UK: Record<string, string> = {
   'enemy.priest.name': 'Жрець',
   'enemy.knight.name': 'Лицар',
   'enemy.ballista.name': 'Баліста',
+  'enemy.catapult.name': 'Катапульта',
   'enemy.inquisitor.name': 'Інквізитор',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const UK: Record<string, string> = {
   'lair.remaining': 'лишилося викупити за {n} душ',
   'lair.complete': 'ВИКУПЛЕНО ВСЕ',
   'common.back': 'Назад',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'ОРДА',
+  'horde.progress': 'відкрито {level} із {total}',
+  'horde.title': 'ОРДА',
+  'horde.subtitle': 'Порталу наприкінці не буде. Лише час — і те, що він впустить.',
+  'horde.level': 'АРЕНА {n}',
+  'horde.targetTime': 'протримайся {time}',
+  'horde.locked': 'Пройди арену {n}, щоб відкрити',
+  'horde.wave': 'ХВИЛЯ {n}',
+  'horde.timeLeft': 'залишилось {time}',
+  'horde.arenaName': 'Арена орди — рівень {level}',
+  'results.hordeVictoryTitle': 'АРЕНА ВИСТОЯЛА',
+  'results.hordeVictorySubtitle': 'Ти пережив {waves} хвиль. Арена {level} підкорена.',
+  'results.hordeDefeatSubtitle': 'Тебе зупинив: {killer} — на {wave}-й хвилі.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'ПОЛЮВАННЯ ДНЯ',

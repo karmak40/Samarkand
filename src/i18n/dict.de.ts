@@ -163,6 +163,7 @@ export const DE: Record<string, string> = {
   'enemy.priest.name': 'Priester',
   'enemy.knight.name': 'Ritter',
   'enemy.ballista.name': 'Balliste',
+  'enemy.catapult.name': 'Katapult',
   'enemy.inquisitor.name': 'Inquisitor',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const DE: Record<string, string> = {
   'lair.remaining': 'noch {n} Seelen für alles',
   'lair.complete': 'ALLES FREIGESCHALTET',
   'common.back': 'Zurück',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'DIE HORDE',
+  'horde.progress': '{level} von {total} freigeschaltet',
+  'horde.title': 'DIE HORDE',
+  'horde.subtitle': 'Kein Portal wartet am Ende. Nur die Uhr — und was sie durchlässt.',
+  'horde.level': 'ARENA {n}',
+  'horde.targetTime': '{time} überleben',
+  'horde.locked': 'Arena {n} bezwingen, um freizuschalten',
+  'horde.wave': 'WELLE {n}',
+  'horde.timeLeft': 'noch {time}',
+  'horde.arenaName': 'Horden-Arena — Stufe {level}',
+  'results.hordeVictoryTitle': 'DIE ARENA HÄLT STAND',
+  'results.hordeVictorySubtitle': 'Du hast {waves} Wellen überstanden. Arena {level} gehört dir.',
+  'results.hordeDefeatSubtitle': 'Gestoppt von: {killer} — Welle {wave}.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'JAGD DES TAGES',

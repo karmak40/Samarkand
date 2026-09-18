@@ -1,3 +1,4 @@
+import { HORDE_LEVELS } from '../balance';
 import { DAMAGE_INFO, DAMAGE_TYPES } from '../combat/damage';
 import type { Input } from '../core/input';
 import { clamp, type Rect, TAU } from '../core/math';
@@ -12,8 +13,16 @@ import { type Curse, getCurse } from '../progression/curses';
 import { dailySeed, formatCountdown, secondsUntilNextDaily, seedLabel } from '../progression/daily';
 import { type Mutation } from '../progression/evolution';
 import { type MetaProgress } from '../progression/meta';
-import { RARITY, tagLabel, type SkillCard } from '../progression/skills';
-import { formatStat, LOWER_IS_BETTER, statLabel, type StatKey } from '../progression/stats';
+import { RARITY, tagLabel, type RawModifier, type SkillCard } from '../progression/skills';
+import {
+  formatStat,
+  LOWER_IS_BETTER,
+  statBarFraction,
+  statBarRange,
+  statLabel,
+  type StatKey,
+  type StatSheet,
+} from '../progression/stats';
 import type { RunStats } from '../stats/tracker';
 import { drawCurseList } from './run-screens';
 import { type CardSlot, formatNumber, formatTime, layoutCardSlots, PALETTE, rect, type Ui } from './widgets';
@@ -34,7 +43,14 @@ export function drawCardSelect(
   ui: Ui,
   input: Input,
   cards: readonly SkillCard[],
-  context: { title: string; subtitle: string; rerollCost: number; souls: number; canReroll: boolean },
+  context: {
+    title: string;
+    subtitle: string;
+    rerollCost: number;
+    souls: number;
+    canReroll: boolean;
+    stats: StatSheet;
+  },
 ): CardChoiceResult {
   ui.scrim(0.82);
 
@@ -56,6 +72,14 @@ export function drawCardSelect(
     italic: true,
     maxWidth: ui.width - 48,
   });
+
+  // The full stat sidebar needs its own ~300px column; on anything narrower than
+  // that plus a usable card row, it's dropped rather than squeezed in. Cards are
+  // laid out in the width that remains, then shifted right past it.
+  const fullWidth = ui.width;
+  const sidebarReserved = SIDEBAR_W + SIDEBAR_GAP + SIDEBAR_MARGIN;
+  const showSidebar = fullWidth >= sidebarReserved + 640;
+  if (showSidebar) ui.width = fullWidth - sidebarReserved;
 
   // Below this, three cards can't hold a floor width wide enough to read a
   // description in without the row running off both edges of the screen — they
@@ -83,11 +107,30 @@ export function drawCardSelect(
       bottomMargin: context.canReroll ? 110 : 50,
     },
   });
+  ui.width = fullWidth;
+
+  const contentOffsetX = showSidebar && !layout.stacked ? sidebarReserved : 0;
+  const contentCenterX = contentOffsetX + (fullWidth - contentOffsetX) / 2;
   const cardsBottom = layout.bottom;
+
+  // Preview the hovered card's stat changes in the sidebar before drawing anything
+  // interactive, so hover order doesn't matter — `isHovered` alone has no side effects.
+  let hoveredCard: SkillCard | undefined;
+  if (!layout.stacked) {
+    for (let i = 0; i < cards.length; i++) {
+      if (ui.isHovered(shiftRect(layout.slots[i]!.bounds, contentOffsetX))) {
+        hoveredCard = cards[i];
+        break;
+      }
+    }
+  }
+  if (contentOffsetX > 0) {
+    drawStatSidebar(ui, context.stats, hoveredCard?.modifiers, SIDEBAR_MARGIN, 140, SIDEBAR_W, ui.height - 40);
+  }
 
   if (!layout.stacked) {
     cards.forEach((card, i) => {
-      const slotBounds = layout.slots[i]!.bounds;
+      const slotBounds = shiftRect(layout.slots[i]!.bounds, contentOffsetX);
       const zone = ui.hitZone(slotBounds);
       const hovered = zone.hovered;
       const style = RARITY[card.rarity];
@@ -184,7 +227,7 @@ export function drawCardSelect(
 
   // Reroll.
   if (context.canReroll) {
-    const buttonRect = rect(ui.width / 2 - 90, cardsBottom + 22, 180, 42);
+    const buttonRect = rect(contentCenterX - 90, cardsBottom + 22, 180, 42);
     const affordable = context.souls >= context.rerollCost;
     if (
       ui.button(buttonRect, t('cardDraft.reroll'), {
@@ -263,6 +306,105 @@ function drawStackedCards(
   });
 }
 
+const SIDEBAR_W = 260;
+const SIDEBAR_GAP = 30;
+const SIDEBAR_MARGIN = 24;
+
+/** Shifts a rect horizontally — used to slide the card grid right of the sidebar. */
+function shiftRect(r: Rect, dx: number): Rect {
+  return dx === 0 ? r : rect(r.x + dx, r.y, r.w, r.h);
+}
+
+/** The core build stats shown in the draft sidebar, in the same grouping as the build sheet. */
+const SIDEBAR_STATS: readonly StatKey[] = [
+  'maxHp',
+  'armor',
+  'dodge',
+  'lifesteal',
+  'hpRegen',
+  'damage',
+  'attackSpeed',
+  'critChance',
+  'critDamage',
+  'armorPen',
+  'moveSpeed',
+  'projectiles',
+  'pierce',
+  'range',
+];
+
+/**
+ * Full stat sidebar for the card/mutation draft screens — every core stat as a thin
+ * before/after bar, red fill for the current value. When `preview` (the hovered
+ * pick's modifiers) touches a stat, its row lights up and a gold ghost segment shows
+ * what taking that pick would add, both read against the same `statBarRange` so the
+ * two bars stay comparable. Dropped entirely on windows too narrow to fit it — see
+ * `showSidebar` at the call site.
+ */
+function drawStatSidebar(
+  ui: Ui,
+  stats: StatSheet,
+  preview: readonly RawModifier[] | undefined,
+  x: number,
+  y: number,
+  w: number,
+  bottom: number,
+): void {
+  ui.panel(rect(x, y, w, bottom - y), { fill: 'rgba(12,11,15,0.9)' });
+
+  const pad = 18;
+  const innerX = x + pad;
+  const innerW = w - pad * 2;
+  let cy = y + pad + 8;
+
+  ui.heading(t('heading.stats'), innerX, cy, innerW);
+  cy += 28;
+
+  const previewValues = preview && preview.length > 0 ? stats.previewWith(preview) : undefined;
+  const previewKeys = new Set((preview ?? []).map((m) => m.key));
+
+  const rowH = clamp((bottom - pad - cy) / SIDEBAR_STATS.length, 16, 30);
+
+  for (const key of SIDEBAR_STATS) {
+    const before = stats.get(key);
+    const after = previewValues?.[key] ?? before;
+    const touched = previewKeys.has(key);
+    const improved = touched && (LOWER_IS_BETTER.has(key) ? after < before : after > before);
+
+    ui.text(statLabel(key), innerX, cy, {
+      size: 11.5,
+      color: touched ? PALETTE.ink : PALETTE.muted,
+      baseline: 'middle',
+    });
+    ui.text(
+      improved ? `${formatStat(key, before)} → ${formatStat(key, after)}` : formatStat(key, before),
+      innerX + innerW,
+      cy,
+      {
+        size: 11.5,
+        color: improved ? PALETTE.good : PALETTE.dim,
+        align: 'right',
+        baseline: 'middle',
+        bold: improved,
+      },
+    );
+
+    const range = statBarRange(key, Math.max(before, after));
+    const beforeFrac = statBarFraction(before, range);
+    const afterFrac = statBarFraction(after, range);
+    ui.bar(rect(innerX, cy + 9, innerW, 5), Math.min(beforeFrac, afterFrac), {
+      color: touched ? PALETTE.blood : 'rgba(168,35,42,0.55)',
+      background: 'rgba(0,0,0,0.5)',
+      ghost: Math.max(beforeFrac, afterFrac),
+      ghostColor: PALETTE.gold,
+      border: false,
+      radius: 2,
+    });
+
+    cy += rowH;
+  }
+}
+
 /** A generated glyph for each card, so cards are distinguishable at a glance. */
 function drawCardSigil(
   ui: Ui,
@@ -321,6 +463,7 @@ export function drawMutationSelect(
   ui: Ui,
   input: Input,
   mutations: readonly Mutation[],
+  stats: StatSheet,
 ): number {
   ui.scrim(0.88);
 
@@ -343,6 +486,11 @@ export function drawMutationSelect(
 
   let picked = -1;
 
+  const fullWidth = ui.width;
+  const sidebarReserved = SIDEBAR_W + SIDEBAR_GAP + SIDEBAR_MARGIN;
+  const showSidebar = fullWidth >= sidebarReserved + 640;
+  if (showSidebar) ui.width = fullWidth - sidebarReserved;
+
   // Same overflow as the card draft, same fix: below this width three cards can't
   // stay wide enough to read, so they stack into one column instead.
   const layout = layoutCardSlots(ui, mutations.length, {
@@ -350,6 +498,22 @@ export function drawMutationSelect(
     grid: { minW: 140, maxW: 300, sideMargin: 140, minH: 180, maxH: 300, heightMargin: 320, gap: 28, centerOffset: 20 },
     stacked: { margin: 20, gap: 10, top: 150, minRowH: 84, maxRowH: 150, bottomMargin: 50 },
   });
+  ui.width = fullWidth;
+
+  const contentOffsetX = showSidebar && !layout.stacked ? sidebarReserved : 0;
+
+  let hoveredMutation: Mutation | undefined;
+  if (!layout.stacked) {
+    for (let i = 0; i < mutations.length; i++) {
+      if (ui.isHovered(shiftRect(layout.slots[i]!.bounds, contentOffsetX))) {
+        hoveredMutation = mutations[i];
+        break;
+      }
+    }
+  }
+  if (contentOffsetX > 0) {
+    drawStatSidebar(ui, stats, hoveredMutation?.modifiers, SIDEBAR_MARGIN, 150, SIDEBAR_W, ui.height - 40);
+  }
 
   if (layout.stacked) {
     mutations.forEach((mutation, i) => {
@@ -389,7 +553,7 @@ export function drawMutationSelect(
     });
   } else {
     mutations.forEach((mutation, i) => {
-      const slotBounds = layout.slots[i]!.bounds;
+      const slotBounds = shiftRect(layout.slots[i]!.bounds, contentOffsetX);
       const zone = ui.hitZone(slotBounds);
       const hovered = zone.hovered;
       const bounds = rect(slotBounds.x, slotBounds.y - (hovered ? 8 : 0), slotBounds.w, slotBounds.h);
@@ -463,13 +627,18 @@ export function drawResults(
   tracker: RunStats,
   soulsEarned: number,
   meta: MetaProgress,
-  context: { daily: boolean; earned: readonly AchievementDef[] } = { daily: false, earned: [] },
+  context: {
+    daily: boolean;
+    earned: readonly AchievementDef[];
+    /** Set only for a Horde run — swaps the "N settlements" copy for wave/level wording. */
+    horde?: { level: number; wave: number };
+  } = { daily: false, earned: [] },
   view: ResultsView = newResultsView(),
 ): ResultsAction {
   ui.scrim(0.93);
 
   const victory = tracker.outcome === 'victory';
-  const title = victory ? t('results.victoryTitle') : t('results.defeatTitle');
+  const title = victory && context.horde ? t('results.hordeVictoryTitle') : victory ? t('results.victoryTitle') : t('results.defeatTitle');
   const accent = victory ? PALETTE.gold : PALETTE.blood;
 
   ui.fittedText(title, ui.width / 2, 56, {
@@ -481,9 +650,13 @@ export function drawResults(
     maxWidth: ui.width - 48,
   });
 
-  const subtitle = victory
-    ? t('results.victorySubtitle', { n: tracker.roomsCleared })
-    : t('results.defeatSubtitle', { killer: tracker.killedBy || t('results.unknown'), room: tracker.roomsCleared + 1 });
+  const subtitle = context.horde
+    ? victory
+      ? t('results.hordeVictorySubtitle', { waves: context.horde.wave, level: context.horde.level })
+      : t('results.hordeDefeatSubtitle', { killer: tracker.killedBy || t('results.unknown'), wave: context.horde.wave })
+    : victory
+      ? t('results.victorySubtitle', { n: tracker.roomsCleared })
+      : t('results.defeatSubtitle', { killer: tracker.killedBy || t('results.unknown'), room: tracker.roomsCleared + 1 });
   ui.fittedText(subtitle, ui.width / 2, 88, {
     size: 14,
     color: PALETTE.muted,
@@ -924,6 +1097,7 @@ export type MenuAction =
   | 'none'
   | 'start'
   | 'daily'
+  | 'horde'
   | 'stats'
   | 'lair'
   | 'trials'
@@ -992,6 +1166,17 @@ export function drawMainMenu(ui: Ui, meta: MetaProgress, time: number, touchActi
 
   if (ui.button(rect(bx, by, buttonW, 42), t('menu.daily'), { accent: '#8fd6a8', size: 15, sub: dailySubtitle(meta) })) {
     action = 'daily';
+  }
+  by += 54;
+
+  if (
+    ui.button(rect(bx, by, buttonW, 42), t('menu.horde'), {
+      accent: PALETTE.bloodBright,
+      size: 15,
+      sub: t('horde.progress', { level: Math.min(meta.hordeLevelUnlocked, HORDE_LEVELS.length), total: HORDE_LEVELS.length }),
+    })
+  ) {
+    action = 'horde';
   }
   by += 54;
 

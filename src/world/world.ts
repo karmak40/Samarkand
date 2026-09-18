@@ -581,6 +581,76 @@ export class World {
   }
 
   /**
+   * `explode()`'s mirror image: radial damage against the monster instead of
+   * the humans/buildings around it. For attacks a defender throws at the
+   * player — currently just a catapult shot landing — where a near miss
+   * should still splash rather than a stray shot doing nothing.
+   */
+  explodeOnMonster(
+    x: number,
+    y: number,
+    radius: number,
+    packets: DamagePacket[],
+    sourceLabel: string,
+    options: {
+      falloffMin?: number;
+      statuses?: StatusApplication[];
+      knockback?: number;
+      color?: string;
+      shake?: number;
+    } = {},
+  ): void {
+    const {
+      falloffMin = 0.4,
+      statuses = [],
+      knockback = 120,
+      color = '#ff7b31',
+      shake = radius * 0.02,
+    } = options;
+
+    this.particles.ring(x, y, color, radius, 0.32);
+    this.particles.emit({
+      count: Math.min(34, 10 + Math.floor(radius / 6)),
+      x,
+      y,
+      color,
+      shape: 'ember',
+      speed: [radius * 1.2, radius * 3.4],
+      size: [2, 5],
+      life: [0.25, 0.6],
+      additive: true,
+      drag: 4,
+    });
+    this.decals.scorch(x, y, radius * 0.7);
+    this.camera.shake(shake);
+    this.sound.explosion({ x, y }, radius / 160);
+
+    const monster = this.monster;
+    if (!monster.alive) return;
+    const d = Math.hypot(monster.x - x, monster.y - y);
+    if (d > radius) return;
+
+    const falloff = falloffMin + (1 - falloffMin) * (1 - Math.min(1, d / radius));
+    const scaled = packets.map((p) => ({ type: p.type, amount: p.amount * falloff }));
+
+    monster.takeDamage(
+      {
+        packets: scaled,
+        sourceLabel,
+        kind: 'explosion',
+        knockback,
+        dirX: monster.x - x,
+        dirY: monster.y - y,
+        dodgeable: false,
+      },
+      this,
+      null,
+    );
+
+    for (const status of statuses) monster.statuses.apply(status);
+  }
+
+  /**
    * Lightning that hops between nearby humans, losing damage per hop.
    * The first target is not damaged here — the caller already hit it.
    */

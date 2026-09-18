@@ -318,11 +318,11 @@ function centred(cx: number, cy: number, w: number, h: number): Rect {
   return { x: cx - w / 2, y: cy - h / 2, w, h };
 }
 
-function pushBuilding(list: PlannedBuilding[], building: PlannedBuilding): void {
+export function pushBuilding(list: PlannedBuilding[], building: PlannedBuilding): void {
   list.push(building);
 }
 
-function buildingSize(kind: BuildingKind, rng: RNG): { w: number; h: number } {
+export function buildingSize(kind: BuildingKind, rng: RNG): { w: number; h: number } {
   switch (kind) {
     case 'hut':
       return { w: rng.range(52, 70), h: rng.range(44, 58) };
@@ -356,7 +356,7 @@ function buildingSize(kind: BuildingKind, rng: RNG): { w: number; h: number } {
 }
 
 /** Delete every structure whose rect comes within `radius` of a point. */
-function clearArea(buildings: PlannedBuilding[], x: number, y: number, radius: number): void {
+export function clearArea(buildings: PlannedBuilding[], x: number, y: number, radius: number): void {
   for (let i = buildings.length - 1; i >= 0; i--) {
     const r = buildings[i]!.rect;
     const nearestX = clamp(x, r.x, r.x + r.w);
@@ -365,7 +365,7 @@ function clearArea(buildings: PlannedBuilding[], x: number, y: number, radius: n
   }
 }
 
-function overlapsAny(rect: Rect, buildings: PlannedBuilding[], padding: number): boolean {
+export function overlapsAny(rect: Rect, buildings: PlannedBuilding[], padding: number): boolean {
   const padded: Rect = {
     x: rect.x - padding,
     y: rect.y - padding,
@@ -420,7 +420,7 @@ function addPalisade(buildings: PlannedBuilding[], bounds: Rect, rng: RNG): void
  * free win — and away from each other, so collecting one means crossing contested
  * ground rather than hoovering up a pile.
  */
-function placeRelics(
+export function placeRelics(
   index: number,
   kind: RoomKind,
   bounds: Rect,
@@ -499,7 +499,7 @@ function pickEntry(bounds: Rect, buildings: PlannedBuilding[], rng: RNG): Vec2 {
  * feel like an entirely different place, not the war-camp with three new
  * units mixed in, so `minBiome >= 3` means "only ever this exact biome."
  */
-function biomeEligible(a: HumanArchetype, biome: number): boolean {
+export function biomeEligible(a: HumanArchetype, biome: number): boolean {
   if (a.minBiome && a.minBiome >= 3) return biome === a.minBiome;
   return biome <= 2;
 }
@@ -762,7 +762,7 @@ const OPAQUE_KINDS = new Set<BuildingKind>([
   'wall',
 ]);
 
-function insideAnyBuilding(x: number, y: number, buildings: PlannedBuilding[]): boolean {
+export function insideAnyBuilding(x: number, y: number, buildings: PlannedBuilding[]): boolean {
   for (const b of buildings) {
     const r = b.rect;
     if (x > r.x - 14 && x < r.x + r.w + 14 && y > r.y - 14 && y < r.y + r.h + 14) return true;

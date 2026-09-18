@@ -163,6 +163,7 @@ export const EN: Record<string, string> = {
   'enemy.priest.name': 'Priest',
   'enemy.knight.name': 'Knight',
   'enemy.ballista.name': 'Ballista',
+  'enemy.catapult.name': 'Catapult',
   'enemy.inquisitor.name': 'Inquisitor',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const EN: Record<string, string> = {
   'lair.remaining': '{n} souls left to buy everything',
   'lair.complete': 'EVERYTHING UNLOCKED',
   'common.back': 'Back',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': 'THE HORDE',
+  'horde.progress': '{level} of {total} unlocked',
+  'horde.title': 'THE HORDE',
+  'horde.subtitle': 'No portal waits at the end. Only the clock, and what it lets through.',
+  'horde.level': 'ARENA {n}',
+  'horde.targetTime': 'survive {time}',
+  'horde.locked': 'Clear arena {n} to unlock',
+  'horde.wave': 'WAVE {n}',
+  'horde.timeLeft': '{time} left',
+  'horde.arenaName': 'Horde Arena — Level {level}',
+  'results.hordeVictoryTitle': 'THE ARENA HOLDS',
+  'results.hordeVictorySubtitle': 'You outlasted {waves} waves. Arena {level} is yours.',
+  'results.hordeDefeatSubtitle': 'Stopped by: {killer} — wave {wave}.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'DAILY HUNT',

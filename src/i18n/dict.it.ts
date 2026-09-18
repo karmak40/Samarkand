@@ -163,6 +163,7 @@ export const IT: Record<string, string> = {
   'enemy.priest.name': 'Sacerdote',
   'enemy.knight.name': 'Cavaliere',
   'enemy.ballista.name': 'Balista',
+  'enemy.catapult.name': 'Catapulta',
   'enemy.inquisitor.name': 'Inquisitore',
 
   // ---- buildings ----------------------------------------------------------------
@@ -590,6 +591,21 @@ export const IT: Record<string, string> = {
   'lair.remaining': 'restano {n} anime per sbloccare tutto',
   'lair.complete': 'TUTTO SBLOCCATO',
   'common.back': 'Indietro',
+
+  // ---- horde mode --------------------------------------------------------------
+  'menu.horde': "L'ORDA",
+  'horde.progress': '{level} di {total} sbloccati',
+  'horde.title': "L'ORDA",
+  'horde.subtitle': 'Nessun portale attende alla fine. Solo il tempo, e ciò che lascia passare.',
+  'horde.level': 'ARENA {n}',
+  'horde.targetTime': 'sopravvivi {time}',
+  'horde.locked': "Supera l'arena {n} per sbloccare",
+  'horde.wave': 'ONDATA {n}',
+  'horde.timeLeft': '{time} rimanenti',
+  'horde.arenaName': "Arena dell'Orda — Livello {level}",
+  'results.hordeVictoryTitle': "L'ARENA REGGE",
+  'results.hordeVictorySubtitle': "Hai resistito a {waves} ondate. L'arena {level} è tua.",
+  'results.hordeDefeatSubtitle': 'Fermato da: {killer} — ondata {wave}.',
 
   // ---- daily seed ------------------------------------------------------------
   'menu.daily': 'CACCIA DEL GIORNO',

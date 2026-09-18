@@ -27,6 +27,9 @@ export interface HudState {
   bossHealth: number;
   /** Whether the player is on the on-screen stick rather than a keyboard. */
   touchActive: boolean;
+  /** Present only for a Horde run — replaces the room-progress readout with a
+   *  survival countdown and wave counter. */
+  survival?: { elapsed: number; target: number; wave: number };
 }
 
 /**
@@ -180,31 +183,57 @@ function drawCompactCluster(ui: Ui, state: HudState): void {
     maxWidth: w,
   });
   y += 16;
-  ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), ui.width / 2, y, {
-    size: 10,
-    color: PALETTE.muted,
-    align: 'center',
-    baseline: 'middle',
-    letterSpacing: 1,
-  });
-  y += 14;
 
-  const defenderW = Math.min(200, w);
-  ui.bar(rect(ui.width / 2 - defenderW / 2, y, defenderW, 5),
-    state.humansTotal > 0 ? state.humansAlive / state.humansTotal : 0,
-    { color: '#8b2a30', radius: 2 },
-  );
-  y += 16;
+  if (state.survival) {
+    ui.text(t('horde.wave', { n: state.survival.wave }), ui.width / 2, y, {
+      size: 10,
+      color: PALETTE.muted,
+      align: 'center',
+      baseline: 'middle',
+      letterSpacing: 1,
+    });
+    y += 14;
 
-  const label = state.cleared ? t('hud.cleared') : t('hud.remaining', { n: state.humansAlive });
-  ui.text(label, ui.width / 2, y, {
-    size: 11,
-    color: state.cleared ? PALETTE.gold : PALETTE.muted,
-    align: 'center',
-    baseline: 'middle',
-    bold: state.cleared,
-  });
-  y += 18;
+    const survivalW = Math.min(200, w);
+    const fraction = state.survival.target > 0 ? clamp(state.survival.elapsed / state.survival.target, 0, 1) : 0;
+    ui.bar(rect(ui.width / 2 - survivalW / 2, y, survivalW, 5), fraction, { color: PALETTE.blood, radius: 2 });
+    y += 16;
+
+    const remaining = Math.max(0, state.survival.target - state.survival.elapsed);
+    ui.text(t('horde.timeLeft', { time: formatTime(remaining) }), ui.width / 2, y, {
+      size: 11,
+      color: PALETTE.muted,
+      align: 'center',
+      baseline: 'middle',
+    });
+    y += 18;
+  } else {
+    ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), ui.width / 2, y, {
+      size: 10,
+      color: PALETTE.muted,
+      align: 'center',
+      baseline: 'middle',
+      letterSpacing: 1,
+    });
+    y += 14;
+
+    const defenderW = Math.min(200, w);
+    ui.bar(rect(ui.width / 2 - defenderW / 2, y, defenderW, 5),
+      state.humansTotal > 0 ? state.humansAlive / state.humansTotal : 0,
+      { color: '#8b2a30', radius: 2 },
+    );
+    y += 16;
+
+    const label = state.cleared ? t('hud.cleared') : t('hud.remaining', { n: state.humansAlive });
+    ui.text(label, ui.width / 2, y, {
+      size: 11,
+      color: state.cleared ? PALETTE.gold : PALETTE.muted,
+      align: 'center',
+      baseline: 'middle',
+      bold: state.cleared,
+    });
+    y += 18;
+  }
 
   // The run's headline numbers, condensed to one line rather than a four-row column.
   const line = [
@@ -448,6 +477,11 @@ function drawProgress(ui: Ui, state: HudState): void {
     maxWidth: centerRoom,
   });
 
+  if (state.survival) {
+    drawSurvivalProgress(ui, state.survival, cx);
+    return;
+  }
+
   ui.text(t('hud.roomProgress', { i: state.roomIndex + 1, n: state.totalRooms }), cx, 46, {
     size: 11,
     color: PALETTE.muted,
@@ -470,6 +504,34 @@ function drawProgress(ui: Ui, state: HudState): void {
     baseline: 'middle',
     bold: state.cleared,
     letterSpacing: state.cleared ? 1.5 : 0,
+  });
+}
+
+/** Same slot `drawProgress` uses for room-progress — a countdown and wave count instead. */
+function drawSurvivalProgress(
+  ui: Ui,
+  survival: NonNullable<HudState['survival']>,
+  cx: number,
+): void {
+  ui.text(t('horde.wave', { n: survival.wave }), cx, 46, {
+    size: 11,
+    color: PALETTE.muted,
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 1.5,
+  });
+
+  const w = 240;
+  const barRect = rect(cx - w / 2, 58, w, 6);
+  const fraction = survival.target > 0 ? clamp(survival.elapsed / survival.target, 0, 1) : 0;
+  ui.bar(barRect, fraction, { color: PALETTE.blood, radius: 2 });
+
+  const remaining = Math.max(0, survival.target - survival.elapsed);
+  ui.text(t('horde.timeLeft', { time: formatTime(remaining) }), cx, 76, {
+    size: 12,
+    color: PALETTE.muted,
+    align: 'center',
+    baseline: 'middle',
   });
 }
 

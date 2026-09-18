@@ -35,8 +35,15 @@ const FLEE_WALL_AVOID_STRENGTH = 1.8;
  * instead of staying frozen where the tower used to be. Slower than a
  * standard archer (146): someone who just lost their emplacement, not built
  * to sprint.
+ *
+ * The catapult is never mounted at all (see `HUMAN_ARCHETYPES.catapult`), so
+ * for it this speed isn't a fallback — it's the only speed the crew ever
+ * uses, wheeling the engine into position between shots.
  */
 const GROUNDED_TURRET_SPEED = 110;
+
+/** Splash radius of a catapult shot's impact — see `releaseAttack`'s `onExpire`. */
+const CATAPULT_BLAST_RADIUS = 100;
 
 export type HumanRole = 'civilian' | 'melee' | 'ranged' | 'support' | 'turret' | 'boss';
 
@@ -52,6 +59,7 @@ export type HumanId =
   | 'ballista'
   | 'rider'
   | 'siegeEngine'
+  | 'catapult'
   | 'inquisitor'
   | 'warlord'
   | 'pyromancer'
@@ -1050,25 +1058,38 @@ export class Human extends Combatant {
     const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
 
     if (a.role === 'ranged' || a.role === 'support' || a.role === 'turret' || a.role === 'boss') {
-      const shape = a.id === 'crossbowman' ? 'bolt' : a.id === 'ballista' ? 'bolt' : a.id === 'archer' ? 'arrow' : 'orb';
-      const speed = a.id === 'ballista' ? 700 : a.id === 'crossbowman' ? 620 : 430;
+      const isCatapult = a.id === 'catapult';
+      const shape = a.id === 'crossbowman' ? 'bolt' : a.id === 'ballista' ? 'bolt' : a.id === 'archer' ? 'arrow' : isCatapult ? 'rock' : 'orb';
+      const speed = a.id === 'ballista' ? 700 : a.id === 'crossbowman' ? 620 : isCatapult ? 210 : 430;
 
       world.spawnProjectile({
         x: this.x + Math.cos(angle) * (this.radius + 6),
         y: this.y + Math.sin(angle) * (this.radius + 6),
         angle,
         speed,
-        packets,
+        // A catapult's shell carries no damage of its own — the whole hit is the
+        // blast `onExpire` triggers on landing, so a near-miss still splashes
+        // instead of every stray shot doing nothing.
+        packets: isCatapult ? [] : packets,
         faction: 'human',
         sourceLabel: a.name,
-        radius: a.id === 'ballista' ? 8 : 5,
+        radius: isCatapult ? 12 : a.id === 'ballista' ? 8 : 5,
         range: a.attackRange + 120,
-        color: a.role === 'support' || a.role === 'boss' ? '#ffe9a8' : '#d8cbb0',
-        glow: a.role === 'support' || a.role === 'boss' ? '#fffdf0' : '#fff6e0',
+        color: isCatapult ? '#6f665a' : a.role === 'support' || a.role === 'boss' ? '#ffe9a8' : '#d8cbb0',
+        glow: isCatapult ? '#ff9a4a' : a.role === 'support' || a.role === 'boss' ? '#fffdf0' : '#fff6e0',
         shape,
-        statuses: a.onHitStatuses,
+        statuses: isCatapult ? undefined : a.onHitStatuses,
         owner: this,
-        knockback: 30,
+        knockback: isCatapult ? 0 : 30,
+        onExpire: isCatapult
+          ? (w, proj) => {
+              w.explodeOnMonster(proj.x, proj.y, CATAPULT_BLAST_RADIUS, packets, a.name, {
+                knockback: 160,
+                color: '#ff9a4a',
+                statuses: a.onHitStatuses,
+              });
+            }
+          : undefined,
       });
 
       world.sound.enemyShot(this);
@@ -1342,10 +1363,11 @@ export class Human extends Combatant {
 
     const flash = this.hitFlash;
     const tint = this.statuses.tint();
-    const mounted = a.id === 'rider' || a.id === 'khagan';
+    const mounted = a.id === 'rider' || a.id === 'khagan' || a.id === 'catapult';
 
     if (mounted) {
-      this.drawMount(ctx);
+      if (a.id === 'catapult') this.drawCatapultBase(ctx);
+      else this.drawMount(ctx);
     } else {
       // Legs: two simple strokes swinging out of phase.
       const legSwing = Math.sin(this.stride * 2) * this.radius * 0.55;
@@ -1489,6 +1511,73 @@ export class Human extends Combatant {
   }
 
   /**
+   * The catapult's wheeled carriage, drawn in place of legs the same way
+   * `drawMount` replaces them with a horse — the machine, not the operator
+   * standing at it, is what has to read as "catapult" at a glance. The
+   * throwing arm lives here rather than in `drawWeapon` so the one silhouette
+   * (carriage, wheels and arm together) tells the whole story, and its swing
+   * still telegraphs the shot the same way every other weapon's does.
+   */
+  private drawCatapultBase(ctx: CanvasRenderingContext2D): void {
+    const r = this.radius;
+
+    // Wheels sit low and wide, clear of the torso ellipse drawn over this (see
+    // `draw()`) — the outer rim is the lighter tone so it still reads against a
+    // dark arena floor instead of the operator's silhouette swallowing it.
+    for (const side of [-1, 1] as const) {
+      ctx.fillStyle = '#8a6a42';
+      ctx.beginPath();
+      ctx.arc(side * r * 1.05, r * 1.2, r * 0.62, 0, TAU);
+      ctx.fill();
+      ctx.fillStyle = '#241d16';
+      ctx.beginPath();
+      ctx.arc(side * r * 1.05, r * 1.2, r * 0.26, 0, TAU);
+      ctx.fill();
+    }
+
+    // A low wooden hopper between the wheels, for the arm to pivot on.
+    ctx.fillStyle = '#6b4f30';
+    ctx.beginPath();
+    ctx.moveTo(-r * 1.3, r * 1.35);
+    ctx.lineTo(r * 1.3, r * 1.35);
+    ctx.lineTo(r * 0.55, r * 0.4);
+    ctx.lineTo(-r * 0.55, r * 0.4);
+    ctx.closePath();
+    ctx.fill();
+    ctx.strokeStyle = '#2e2114';
+    ctx.lineWidth = 1.4;
+    ctx.stroke();
+
+    // Throwing arm: a dark counterweight at the short end, a rock cradled in a
+    // pale sling at the long one — the same rock colour the projectile itself
+    // uses, so the silhouette telegraphs "about to launch a rock" even before
+    // the wind-up starts. Swings up through the wind-up exactly like a hand
+    // weapon would, so the telegraph reads the same way at a glance, and its far
+    // end travels well outside the torso drawn over this at (0,0).
+    const swing = this.state === 'windup' ? -1.4 + this.windupProgress * 2.0 : -0.6;
+    ctx.save();
+    ctx.rotate(this.facing);
+    ctx.translate(0, -r * 0.25);
+    ctx.rotate(swing);
+    ctx.strokeStyle = '#4a3620';
+    ctx.lineWidth = r * 0.3;
+    ctx.lineCap = 'round';
+    ctx.beginPath();
+    ctx.moveTo(-r * 0.75, 0);
+    ctx.lineTo(r * 2.1, 0);
+    ctx.stroke();
+    ctx.fillStyle = '#241d16';
+    ctx.beginPath();
+    ctx.arc(-r * 0.75, 0, r * 0.4, 0, TAU);
+    ctx.fill();
+    ctx.fillStyle = '#6f665a';
+    ctx.beginPath();
+    ctx.arc(r * 2.1, 0, r * 0.44, 0, TAU);
+    ctx.fill();
+    ctx.restore();
+  }
+
+  /**
    * A fan of accent-coloured cloth trailing down from the shoulders, drawn
    * before the torso so only its fringe peeks past — a ranged defender's
    * light cloak, or a boss's grander one.
@@ -1588,6 +1677,10 @@ export class Human extends Combatant {
       case 'ballista':
       case 'siegeEngine':
         this.drawCrossbow(ctx);
+        break;
+      case 'catapult':
+        // No separate hand weapon — the throwing arm is the machine drawn by
+        // `drawCatapultBase` in place of legs, not a prop the operator holds.
         break;
       case 'rider':
         this.drawLance(ctx);

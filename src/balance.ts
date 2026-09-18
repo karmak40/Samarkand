@@ -363,6 +363,44 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     courage: 1,
   },
 
+  /**
+   * The Catapult: a wheeled siege engine that lobs an exploding rock instead
+   * of aiming a bolt.
+   *
+   * Never mounted on a building (see `roomgen.ts`'s `planSpawns`) — it's
+   * fielded straight from the war-camp's roster like any other unit, and its
+   * `speed: 0` is a placeholder the same way a ballista's is: `Human.update()`
+   * treats an unmounted turret as already "dropped", so it always moves at
+   * `GROUNDED_TURRET_SPEED` while it repositions between shots.
+   */
+  catapult: {
+    id: 'catapult',
+    get name() { return t('enemy.catapult.name'); },
+    role: 'turret',
+    enabled: true,
+    hp: 200,
+    armor: 28,
+    resist: { poison: 0.9, frost: 0.5 },
+    speed: 0,
+    radius: 20,
+    damage: [{ type: 'physical', amount: 34 }],
+    attackRange: 520,
+    preferredRange: 520,
+    attackCooldown: 4.4,
+    windup: 1.6,
+    recover: 1,
+    souls: 13,
+    knockbackResist: 8,
+    tunic: '#4a3d2c',
+    accent: '#8a6a3c',
+    spawnWeight: 5,
+    minDepth: 2,
+    minBiome: 2,
+    bloodChance: 0,
+    relicChance: 0.12,
+    courage: 1,
+  },
+
   inquisitor: {
     id: 'inquisitor',
     get name() { return t('enemy.inquisitor.name'); },
@@ -630,6 +668,7 @@ export const SPAWN_COST: Record<HumanId, number> = {
   ballista: 7,
   rider: 5,
   siegeEngine: 10,
+  catapult: 9,
   inquisitor: 0,
   warlord: 0,
   pyromancer: 0,
@@ -2738,6 +2777,60 @@ export const MONSTER_AURA_TUNING = {
   terrorAuraDuration: 1.2,
   /** Units this brave or braver hold the line instead of breaking. */
   terrorAuraCourageThreshold: 0.9,
+};
+
+// ---------------------------------------------------------------------------
+// Horde mode: a standalone survival arena, chosen from the main menu. Progress is
+// a permanent ladder in `MetaProgress.hordeLevelUnlocked` — surviving level N
+// unlocks N+1 forever, independent of any single run.
+// ---------------------------------------------------------------------------
+
+/**
+ * One tier of the campaign's `ENEMY_TIER_SCALING` roughly doubles every ~9 tiers of
+ * compounding HP, so a whole level's difficulty is expressed as a tier *range*
+ * (`startTier` here, climbing at `HORDE_WAVE_CONFIG.tierPerMinute` per elapsed
+ * minute) rather than a flat number. Levels chain: each one starts exactly where
+ * the previous finished (`startTier = (level - 1) * 12`), so level 5 opens at
+ * roughly the difficulty a full 12-room biome ends at.
+ */
+export const HORDE_LEVELS: readonly { level: number; targetSeconds: number; startTier: number }[] = [
+  { level: 1, targetSeconds: 720, startTier: 0 },
+  { level: 2, targetSeconds: 720, startTier: 12 },
+  { level: 3, targetSeconds: 720, startTier: 24 },
+  { level: 4, targetSeconds: 720, startTier: 36 },
+  { level: 5, targetSeconds: 720, startTier: 48 },
+];
+
+/**
+ * Layout for the Horde arena — wide and shallow instead of the campaign's
+ * near-square rooms, so buildings read as lanes to march down rather than a
+ * village ring. Built entirely from existing `BuildingKind`s (see `hordegen.ts`);
+ * no new building types for v1.
+ */
+export const HORDE_ARENA_CONFIG = {
+  width: 2400,
+  height: 1100,
+  lanes: 3,
+  buildingsPerLane: [3, 5] as readonly [number, number],
+  palette: ['stronghold', 'watchtower', 'longhouse', 'wall', 'cart'] as readonly BuildingKind[],
+};
+
+/**
+ * Live wave spawner tuning. A wave lands every `spawnIntervalSeconds`; its size
+ * grows with `waveNumber` up to `maxWaveSize`. Difficulty comes from
+ * `tierPerMinute`: one campaign "tier" of `ENEMY_TIER_SCALING` per minute survived,
+ * so a level's 12-minute target duration climbs it exactly 12 tiers — the same
+ * step `HORDE_LEVELS.startTier` uses between levels, so level 5 ends roughly where
+ * a full 12-room campaign biome does.
+ */
+export const HORDE_WAVE_CONFIG = {
+  spawnIntervalSeconds: 16,
+  baseWaveSize: 3,
+  sizeGrowthPerWave: 0.12,
+  maxWaveSize: 10,
+  tierPerMinute: 1,
+  /** Same reasoning as `MAX_SUPPORT_PER_ROOM`, scoped to one wave instead of a room. */
+  maxSupportPerWave: 1,
 };
 
 // Re-exported so a consumer that only needs the raw modifier shape doesn't have to
