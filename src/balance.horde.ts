@@ -68,4 +68,11 @@ export const HORDE_WAVE_CONFIG = {
   tierPerMinute: 1.4,
   /** Same reasoning as `MAX_SUPPORT_PER_ROOM`, scoped to one wave instead of a room. */
   maxSupportPerWave: 2,
+  /**
+   * How long the wave counter pulses before a wave actually lands. Waves now spawn
+   * from gates on every edge of the arena (see `spawnGatesPerEdge`), so a beat of
+   * warning before they appear is what keeps that feeling like pressure rather than
+   * an unfair ambush — the horn/shake on arrival then tells you it's real.
+   */
+  warningLeadSeconds: 1.2,
 };

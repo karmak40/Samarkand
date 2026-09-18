@@ -29,7 +29,7 @@ export interface HudState {
   touchActive: boolean;
   /** Present only for a Horde run — replaces the room-progress readout with a
    *  survival countdown and wave counter. */
-  survival?: { elapsed: number; target: number; wave: number };
+  survival?: { elapsed: number; target: number; wave: number; warning: boolean };
 }
 
 /**
@@ -185,12 +185,13 @@ function drawCompactCluster(ui: Ui, state: HudState): void {
   y += 16;
 
   if (state.survival) {
+    const waveStyle = waveCounterStyle(state.survival.warning, state.elapsed);
     ui.text(t('horde.wave', { n: state.survival.wave }), ui.width / 2, y, {
       size: 10,
-      color: PALETTE.muted,
       align: 'center',
       baseline: 'middle',
       letterSpacing: 1,
+      ...waveStyle,
     });
     y += 14;
 
@@ -458,6 +459,17 @@ function drawStarPath(
   ctx.closePath();
 }
 
+/**
+ * The Horde wave counter's text style — a plain muted label normally, pulsing
+ * bright red for the last `warningLeadSeconds` before a wave lands (see
+ * `Game.checkHordeProgress`). Waves can now arrive from any edge of the arena, so
+ * this pulse is the player's only advance notice that one is about to.
+ */
+function waveCounterStyle(warning: boolean, elapsedTime: number): { color: string; bold: boolean; alpha: number } {
+  if (!warning) return { color: PALETTE.muted, bold: false, alpha: 1 };
+  return { color: PALETTE.bloodBright, bold: true, alpha: 0.55 + 0.45 * Math.sin(elapsedTime * 14) };
+}
+
 function drawProgress(ui: Ui, state: HudState): void {
   const cx = ui.width / 2;
 
@@ -478,7 +490,7 @@ function drawProgress(ui: Ui, state: HudState): void {
   });
 
   if (state.survival) {
-    drawSurvivalProgress(ui, state.survival, cx);
+    drawSurvivalProgress(ui, state.survival, cx, state.elapsed);
     return;
   }
 
@@ -512,13 +524,14 @@ function drawSurvivalProgress(
   ui: Ui,
   survival: NonNullable<HudState['survival']>,
   cx: number,
+  elapsedTime: number,
 ): void {
   ui.text(t('horde.wave', { n: survival.wave }), cx, 46, {
     size: 11,
-    color: PALETTE.muted,
     align: 'center',
     baseline: 'middle',
     letterSpacing: 1.5,
+    ...waveCounterStyle(survival.warning, elapsedTime),
   });
 
   const w = 240;

@@ -179,6 +179,8 @@ export class Game {
   private hordeWaveNumber = 0;
   /** Counts down to the next wave; a fresh wave resets it, not zeroes it. */
   private hordeSpawnTimer = 0;
+  /** True for the last `warningLeadSeconds` before a wave lands — pulses the HUD. */
+  private hordeWarning = false;
   private hordeSpawnPoints: Vec2[] = [];
   private hordeTargetSeconds = 0;
   /** Which tab and scroll offset the Horde level-select screen is showing. */
@@ -471,7 +473,10 @@ export class Game {
     this.hordeLevel = level;
     this.hordeElapsed = 0;
     this.hordeWaveNumber = 0;
-    this.hordeSpawnTimer = 0;
+    // Starts at the warning lead rather than zero: even the first wave gets a beat
+    // of "brace yourself" instead of landing the instant the arena appears.
+    this.hordeSpawnTimer = HORDE_WAVE_CONFIG.warningLeadSeconds;
+    this.hordeWarning = false;
     this.hordeTargetSeconds = HORDE_LEVELS.find((l) => l.level === level)?.targetSeconds ?? 0;
 
     const { plan, spawnPoints } = generateHordeArena(level, this.runRng.fork());
@@ -1376,11 +1381,22 @@ export class Game {
     this.roomIndex = Math.floor(tier);
 
     this.hordeSpawnTimer -= dt;
+    // A beat of warning before a wave actually lands — it can now arrive from any
+    // edge of the arena, so a pulse on the HUD counter (see `drawHud`) plus the
+    // horn/shake on actual arrival below are what keep that fair.
+    if (!this.hordeWarning && this.hordeSpawnTimer <= HORDE_WAVE_CONFIG.warningLeadSeconds) {
+      this.hordeWarning = true;
+    }
     if (this.hordeSpawnTimer <= 0) {
       this.hordeSpawnTimer += HORDE_WAVE_CONFIG.spawnIntervalSeconds;
+      this.hordeWarning = false;
       const spawns = rollHordeWave(this.hordeElapsed, this.hordeWaveNumber, level, this.hordeSpawnPoints, this.runRng);
       this.hordeWaveNumber++;
       this.spawnHumans(spawns, tier, true);
+      this.camera.shake(5);
+      // Same "this one is different" horn the campaign's reinforcement wave uses —
+      // exactly the read a fresh wave needs here too.
+      this.sound.bossSpawn(this.monster);
     }
 
     if (this.monster.pendingLevels > 0) {
@@ -1532,7 +1548,12 @@ export class Game {
         touchActive: this.touchActive(),
         survival:
           this.hordeLevel !== null
-            ? { elapsed: this.hordeElapsed, target: this.hordeTargetSeconds, wave: this.hordeWaveNumber }
+            ? {
+                elapsed: this.hordeElapsed,
+                target: this.hordeTargetSeconds,
+                wave: this.hordeWaveNumber,
+                warning: this.hordeWarning,
+              }
             : undefined,
       });
 
