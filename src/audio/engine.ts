@@ -60,6 +60,9 @@ const FALLOFF = 900;
 export class AudioEngine {
   private ctx: AudioContext | null = null;
   private master: GainNode | null = null;
+  /** The last node before the speakers — what a recording taps. */
+  private output: AudioNode | null = null;
+  private capture: MediaStreamAudioDestinationNode | null = null;
   private buses: Record<Bus, GainNode> | null = null;
   private noiseBuffer: AudioBuffer | null = null;
 
@@ -98,6 +101,23 @@ export class AudioEngine {
     return this.ctx;
   }
 
+  /**
+   * The finished mix as a `MediaStream`, for reels mode's recorder.
+   *
+   * Tapped after the limiter, so the file sounds exactly like the speakers — master
+   * volume and mute included. Null until the context exists (the first user gesture)
+   * or where the browser has no stream destination.
+   */
+  captureStream(): MediaStream | null {
+    if (!this.ctx || !this.output) return null;
+    if (!this.capture) {
+      if (typeof this.ctx.createMediaStreamDestination !== 'function') return null;
+      this.capture = this.ctx.createMediaStreamDestination();
+      this.output.connect(this.capture);
+    }
+    return this.capture.stream;
+  }
+
   busNode(bus: Bus): GainNode | null {
     return this.buses ? this.buses[bus] : null;
   }
@@ -128,6 +148,7 @@ export class AudioEngine {
       limiter.attack.value = 0.003;
       limiter.release.value = 0.18;
       limiter.connect(this.ctx.destination);
+      this.output = limiter;
 
       this.master = this.ctx.createGain();
       this.master.gain.value = this.muted ? 0 : this.masterVolume;

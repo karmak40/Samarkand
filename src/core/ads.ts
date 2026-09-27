@@ -14,6 +14,8 @@ import type { AdMobPlugin } from '@capacitor-community/admob';
 export type AdResult = 'completed' | 'declined' | 'unavailable';
 
 export interface AdService {
+  /** Short network name, for analytics' ad events (`admob`, `poki`, …). */
+  readonly sdkName: string;
   /** Checked before the offer is even shown — no point asking for something that can't be delivered. */
   isRewardedAdAvailable(): boolean;
   /** Resolves once the ad finishes, fails, or the player backs out of it. */
@@ -40,6 +42,7 @@ export interface AdService {
  * chosen, in one place.
  */
 export class SimulatedAdService implements AdService {
+  readonly sdkName = 'simulated';
   constructor(private readonly delayMs = 1500) {}
 
   isRewardedAdAvailable(): boolean {
@@ -57,6 +60,7 @@ export class SimulatedAdService implements AdService {
 
 /** Never has anything to offer. The safe default for a build with no ad network at all. */
 export class NoAdsService implements AdService {
+  readonly sdkName = 'none';
   isRewardedAdAvailable(): boolean {
     return false;
   }
@@ -119,6 +123,7 @@ declare global {
  * is how their own docs say to test locally); ads simply never fire.
  */
 export class CrazyGamesAdService implements AdService {
+  readonly sdkName = 'crazygames';
   private sdk: CrazyGamesSdk | null = null;
 
   async init(): Promise<void> {
@@ -178,6 +183,7 @@ declare global {
 
 /** Poki's SDK. Same shape as the CrazyGames adapter, translated to Poki's own calls. */
 export class PokiAdService implements AdService {
+  readonly sdkName = 'poki';
   private sdk: PokiSdk | null = null;
 
   async init(): Promise<void> {
@@ -252,6 +258,7 @@ const TEST_REWARDED_AD_UNIT_ID = 'ca-app-pub-3940256099942544/5224354917';
  * the "Реклама" section in README.md for how to find a device's ID.
  */
 export class AdMobAdService implements AdService {
+  readonly sdkName = 'admob';
   private plugin: AdMobPlugin | null = null;
   private events: typeof import('@capacitor-community/admob') | null = null;
   private loaded = false;

@@ -7,6 +7,17 @@ import type { World } from '../world/world';
 import { hexAlpha } from './monster-render';
 import { Terrain } from './terrain';
 
+/** See `Renderer.setFixedViewport`. */
+export interface FixedViewport {
+  /** Logical (CSS-pixel) size the game lays itself out in. */
+  width: number;
+  height: number;
+  /** Backing-store width in device pixels; height follows the same ratio. */
+  pixelWidth: number;
+  /** Insets the HUD keeps clear of, in logical pixels. */
+  safe: Insets;
+}
+
 /**
  * Owns the canvas, the device-pixel-ratio dance and the draw order.
  *
@@ -36,6 +47,21 @@ export class Renderer {
   safe: Insets = NO_INSETS;
 
   private dpr = 1;
+
+  /**
+   * A frame size that ignores the element's own rect, for reels mode (`?reels`).
+   *
+   * Normally the layout is whatever the window happens to be, which is right for a
+   * player and wrong for a video: every recording would frame the fight differently
+   * depending on the monitor it was shot on. Fixed, the arena and the HUD lay out at
+   * the same logical size every time and only the backing store is scaled to the
+   * export resolution. The element can then be shown at any size that fits the
+   * window — `Input` is told the ratio, so clicks still land where they are drawn.
+   */
+  private fixed: FixedViewport | null = null;
+
+  /** Multiplies the automatic zoom — reels mode's "closer / wider" framing. */
+  zoomScale = 1;
 
   private observer: ResizeObserver | null = null;
   private onOrientation: (() => void) | null = null;
@@ -77,14 +103,34 @@ export class Renderer {
     }
   }
 
+  /** Pin the logical frame and backing store to exact sizes, or `null` to follow the window again. */
+  setFixedViewport(viewport: FixedViewport | null): void {
+    this.fixed = viewport;
+    this.resize();
+  }
+
+  /** Logical pixels per displayed CSS pixel — 1 unless a fixed viewport is shown scaled. */
+  get viewScale(): number {
+    if (!this.fixed) return 1;
+    const rect = this.canvas.getBoundingClientRect();
+    return rect.width > 0 ? this.fixed.width / rect.width : 1;
+  }
+
   /** Re-read the element size and rescale the backing store. */
   resize(): void {
-    // Cap DPR at 2: beyond that the fill-rate cost outweighs the sharpness gain.
-    this.dpr = Math.min(2, window.devicePixelRatio || 1);
-    const rect = this.canvas.getBoundingClientRect();
-    this.width = Math.max(1, Math.round(rect.width));
-    this.height = Math.max(1, Math.round(rect.height));
-    this.safe = readSafeAreaInsets();
+    if (this.fixed) {
+      this.width = this.fixed.width;
+      this.height = this.fixed.height;
+      this.dpr = this.fixed.pixelWidth / this.fixed.width;
+      this.safe = this.fixed.safe;
+    } else {
+      // Cap DPR at 2: beyond that the fill-rate cost outweighs the sharpness gain.
+      this.dpr = Math.min(2, window.devicePixelRatio || 1);
+      const rect = this.canvas.getBoundingClientRect();
+      this.width = Math.max(1, Math.round(rect.width));
+      this.height = Math.max(1, Math.round(rect.height));
+      this.safe = readSafeAreaInsets();
+    }
 
     const bw = Math.round(this.width * this.dpr);
     const bh = Math.round(this.height * this.dpr);
@@ -113,6 +159,7 @@ export class Renderer {
    * cheaper than shipping a game that renders into a single pixel.
    */
   private syncSize(): void {
+    if (this.fixed) return;
     const rect = this.canvas.getBoundingClientRect();
     const w = Math.max(1, Math.round(rect.width));
     const h = Math.max(1, Math.round(rect.height));
@@ -172,7 +219,7 @@ export class Renderer {
     const MIN_VIEW_WIDTH = 460;
     const widthZoom = this.width / MIN_VIEW_WIDTH;
 
-    camera.zoom = clamp(Math.min(heightZoom, widthZoom), 0.6, 2.4);
+    camera.zoom = clamp(Math.min(heightZoom, widthZoom), 0.6, 2.4) * this.zoomScale;
   }
 
   drawWorld(world: World, camera: Camera, exit: Vec2 | null, exitOpen: boolean): void {

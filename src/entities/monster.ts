@@ -550,6 +550,7 @@ export class Monster extends Combatant {
   protected override onDeath(world: World, ctx: DeathContext): void {
     world.tracker.outcome = 'death';
     world.tracker.killedBy = ctx.sourceLabel;
+    world.tracker.killerId = (ctx.killer as { archetype?: { id: string } } | null)?.archetype?.id ?? 'unknown';
     world.camera.shake(20);
     world.camera.freeze(0.35);
     world.sound.death();

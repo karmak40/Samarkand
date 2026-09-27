@@ -248,12 +248,20 @@ export class MetaProgress implements ContentGate {
     return unlock !== undefined && !this.unlocked.has(unlockId) && this.souls >= unlock.price;
   }
 
+  /**
+   * Told about every lair purchase — the analytics' souls sink. A hook rather than
+   * a call from the lair screen, because two different rows there can buy (a body
+   * buys and equips), and this is the one place both end up.
+   */
+  onPurchase: ((unlockId: string, price: number) => void) | null = null;
+
   buy(unlockId: string): boolean {
     const unlock = getUnlock(unlockId);
     if (!unlock || this.unlocked.has(unlockId) || this.souls < unlock.price) return false;
 
     this.souls -= unlock.price;
     this.unlocked.add(unlockId);
+    this.onPurchase?.(unlockId, unlock.price);
     // Buying the last locked thing completes a trial; claim it here rather than
     // making the player finish another run before the shelf reads as full.
     this.claimAchievements(null);

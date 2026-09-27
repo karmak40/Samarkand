@@ -33,6 +33,14 @@ export interface Settings {
   showFrameCost: boolean;
   /** On-screen stick and buttons. Menus stay tappable whatever this says. */
   touchControls: TouchControlsMode;
+  /**
+   * Anonymous play statistics (see `core/analytics.ts` and PRIVACY.md). Opt-in:
+   * off until the player says yes to the first-launch question (`ui/consent.ts`),
+   * and switchable either way in settings afterwards.
+   */
+  analytics: boolean;
+  /** Whether that question has been answered — it is asked once, never again. */
+  analyticsAsked: boolean;
   /** Code -> action. Only the rebindable actions ever differ from the defaults. */
   bindings: Record<string, ActionName>;
 }
@@ -63,6 +71,8 @@ export function defaultSettings(): Settings {
     damageNumbers: true,
     showFrameCost: false,
     touchControls: 'auto',
+    analytics: false,
+    analyticsAsked: false,
     bindings: { ...DEFAULT_BINDINGS },
   };
 }
@@ -85,6 +95,12 @@ export function sanitizeSettings(raw: unknown): Settings {
   if (typeof data.damageNumbers === 'boolean') settings.damageNumbers = data.damageNumbers;
   if (typeof data.showFrameCost === 'boolean') settings.showFrameCost = data.showFrameCost;
   if (isTouchMode(data.touchControls)) settings.touchControls = data.touchControls;
+  if (typeof data.analytics === 'boolean') settings.analytics = data.analytics;
+  if (typeof data.analyticsAsked === 'boolean') settings.analyticsAsked = data.analyticsAsked;
+  // A yes is only a yes if it was asked for. A save claiming consent without the
+  // question on record (hand-edited, or from an unreleased build that defaulted to
+  // on) goes back to asking.
+  if (!settings.analyticsAsked) settings.analytics = false;
 
   const bindings = sanitizeBindings(data.bindings);
   if (bindings) settings.bindings = bindings;

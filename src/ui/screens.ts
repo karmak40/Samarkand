@@ -31,6 +31,7 @@ import { type CardSlot, formatNumber, formatTime, layoutCardSlots, PALETTE, rect
 export interface CardChoiceResult {
   picked: number;
   rerolled: boolean;
+  adRerolled: boolean;
 }
 
 /**
@@ -50,11 +51,19 @@ export function drawCardSelect(
     souls: number;
     canReroll: boolean;
     stats: StatSheet;
+    /**
+     * A second, ad-gated reroll — sold only at the market, where a draft is a paid
+     * good rather than a level's own reward, so the souls-vs-ad trade actually means
+     * something. `pending` covers the gap while the ad plays: the button below turns
+     * into a status line rather than staying clickable, the same way `revive.ts`
+     * keeps a settled ad from being requested twice.
+     */
+    adReroll?: { available: boolean; pending: boolean };
   },
 ): CardChoiceResult {
   ui.scrim(0.82);
 
-  const result: CardChoiceResult = { picked: -1, rerolled: false };
+  const result: CardChoiceResult = { picked: -1, rerolled: false, adRerolled: false };
 
   ui.fittedText(context.title, ui.width / 2, 78, {
     size: 30,
@@ -104,7 +113,7 @@ export function drawCardSelect(
       top: 140,
       minRowH: 76,
       maxRowH: 128,
-      bottomMargin: context.canReroll ? 110 : 50,
+      bottomMargin: context.canReroll ? (context.adReroll ? 156 : 110) : 50,
     },
   });
   ui.width = fullWidth;
@@ -225,18 +234,39 @@ export function drawCardSelect(
   if (input.wasPressed('slot2') && cards.length > 1) result.picked = 1;
   if (input.wasPressed('slot3') && cards.length > 2) result.picked = 2;
 
-  // Reroll.
+  // Reroll: souls always buy one, an ad buys one for free where the market allows it.
+  // Side by side where the two 180px buttons fit next to each other; stacked below
+  // one another on anything narrower (the same width that stacks the cards above).
   if (context.canReroll) {
-    const buttonRect = rect(contentCenterX - 90, cardsBottom + 22, 180, 42);
+    const showAdReroll = context.adReroll !== undefined;
+    const sideBySide = showAdReroll && !layout.stacked;
+    const soulsRect = sideBySide
+      ? rect(contentCenterX - 190, cardsBottom + 22, 180, 42)
+      : rect(contentCenterX - 90, cardsBottom + 22, 180, 42);
     const affordable = context.souls >= context.rerollCost;
     if (
-      ui.button(buttonRect, t('cardDraft.reroll'), {
+      ui.button(soulsRect, t('cardDraft.reroll'), {
         disabled: !affordable,
         sub: t('unit.souls', { n: context.rerollCost }),
         accent: '#9fd7ff',
       })
     ) {
       result.rerolled = true;
+    }
+
+    if (context.adReroll) {
+      const adRect = sideBySide
+        ? rect(contentCenterX + 10, cardsBottom + 22, 180, 42)
+        : rect(contentCenterX - 90, cardsBottom + 74, 180, 42);
+      const label = context.adReroll.pending ? t('cardDraft.adRerollWatching') : t('cardDraft.adReroll');
+      if (
+        ui.button(adRect, label, {
+          disabled: !context.adReroll.available || context.adReroll.pending,
+          accent: PALETTE.gold,
+        })
+      ) {
+        result.adRerolled = true;
+      }
     }
   }
 

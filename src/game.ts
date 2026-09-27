@@ -3,6 +3,7 @@ import { AudioEngine } from './audio/engine';
 import { SoundBank } from './audio/sfx';
 import { BUILDING_HP_SCALE_PER_ROOM_INDEX, HORDE_LEVELS, HORDE_WAVE_CONFIG, ON_KILL_EFFECTS } from './balance';
 import { type AdResult, type AdService, SimulatedAdService } from './core/ads';
+import { type AnalyticsService, biomeTag, NoAnalytics, RecordingAnalytics, roomTag } from './core/analytics';
 import { Camera } from './core/camera';
 import { Input } from './core/input';
 import { clamp, TAU, type Vec2 } from './core/math';
@@ -20,7 +21,7 @@ import { type CheckpointBuild, MetaProgress } from './progression/meta';
 import { EFFECTS_SCALE, SHAKE_SCALE } from './progression/settings';
 import { type UnlockCategory } from './progression/gate';
 import { getCard, type SkillCard, SkillPool } from './progression/skills';
-import { Renderer } from './render/renderer';
+import { type FixedViewport, Renderer } from './render/renderer';
 import { RunStats } from './stats/tracker';
 import { drawHud } from './ui/hud';
 import {
@@ -46,6 +47,7 @@ import {
   type MarketOffer,
 } from './ui/run-screens';
 import { drawAchievements } from './ui/achievements';
+import { drawConsent } from './ui/consent';
 import { drawHordeMenu } from './ui/horde';
 import { drawLair } from './ui/lair';
 import { drawReviveOffer, newReviveView, type ReviveView } from './ui/revive';
@@ -58,7 +60,7 @@ import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './w
  import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
 
-/** Whole-run room count: two biomes, each `BIOME_ROOMS` deep, back to back. */
+/** Whole-run room count: three biomes, each `BIOME_ROOMS` deep, back to back. */
 const TOTAL_DEPTHS = BIOME_ROOMS * 3;
 const FIXED_STEP = 1 / 60;
 const MAX_STEPS_PER_FRAME = 5;
@@ -68,6 +70,22 @@ const BROKEN_FRAME_LIMIT = 60;
 const ROOM_INTRO_DURATION = 2.4;
 /** Seconds of total inactivity after which a room is force-cleared. */
 const STALL_TIMEOUT = 45;
+
+/**
+ * Presentation knobs for reels mode (`?reels`, see `src/reels/`) — things a promo
+ * video wants and a player never should. Inert at their defaults, and nothing in the
+ * game itself ever changes them; only the reels controller does.
+ */
+export interface CinemaOptions {
+  /** Reels mode is on at all: on-screen touch controls are never drawn. */
+  active: boolean;
+  /** No HUD, room titles or pause icon — just the arena. */
+  hideHud: boolean;
+  /** Multiplies real time before it reaches the simulation; below 1 is slow motion. */
+  timeScale: number;
+  /** The monster's health is topped up every tick, so a take is never cut short by death. */
+  immortal: boolean;
+}
 
 type GameState =
   | 'menu'
@@ -120,11 +138,22 @@ export class Game {
    */
   private readonly ads: AdService;
   private reviveAdUsed = false;
+
+  /**
+   * Play statistics — injected for the same reason `ads` is. The progression path of
+   * the room being fought (`campaign › biome1 › room04`) is kept while a room is live,
+   * so the room that ends a run can be reported as the one that failed.
+   */
+  private readonly analytics: AnalyticsService;
+  private roomProgress: string[] | null = null;
+  /** Set when the player walks out (pause → menu), so the run is reported as quit, not lost. */
+  private quitting = false;
   private readonly reviveView: ReviveView = newReviveView();
   /** Seconds spent in the revive offer, for the "ad playing" pulse. */
   private reviveElapsed = 0;
 
   private state: GameState = 'menu';
+  readonly cinema: CinemaOptions = { active: false, hideHud: false, timeScale: 1, immortal: false };
   /** Toggled with Tab during play. */
   private showBuildSheet = false;
 
@@ -220,6 +249,15 @@ export class Game {
 
   private pendingCards: SkillCard[] = [];
   private pendingMutations: Mutation[] = [];
+  /** Whether the market's ad-gated reroll is currently waiting on `showRewardedAd()`. */
+  private cardAdRerollPending = false;
+  /**
+   * Whether this market draft has already had its one ad reroll. Without a cap, a
+   * free reroll that is always there turns the souls-priced one next to it into a
+   * button nobody presses — watch ads until the right card comes up. Reset per draft,
+   * not per run: every draft the market sells gets its own one.
+   */
+  private cardAdRerollUsed = false;
 
   private hurtFlash = 0;
   private lastHp = 0;
@@ -261,8 +299,14 @@ export class Game {
   /** Smoothed cost of a frame in milliseconds, for the optional readout. */
   private frameCostMs = 0;
 
-  constructor(canvas: HTMLCanvasElement, ads: AdService = new SimulatedAdService()) {
+  constructor(
+    canvas: HTMLCanvasElement,
+    ads: AdService = new SimulatedAdService(),
+    analytics: AnalyticsService = new NoAnalytics(),
+  ) {
     this.ads = ads;
+    this.analytics = analytics;
+    this.meta.onPurchase = (unlockId, price) => analytics.resource('sink', 'souls', price, 'unlock', unlockId);
     this.renderer = new Renderer(canvas);
     this.input = new Input(canvas);
     this.ui = new Ui(this.renderer.ctx);
@@ -296,6 +340,8 @@ export class Game {
   private applySettings(): void {
     const settings = this.meta.settings;
     this.camera.shakeScale = SHAKE_SCALE[settings.shake];
+    // Takes shot for a promo video aren't play — reels mode never reports.
+    this.analytics.setEnabled(settings.analytics && !this.cinema.active);
 
     if (this.world) {
       this.world.particles.densityScale = EFFECTS_SCALE[settings.effects];
@@ -372,11 +418,31 @@ export class Game {
     this.pendingCards = [];
     this.pendingMutations = [];
     this.cardsReturnState = null;
+    this.cardAdRerollPending = false;
+    this.cardAdRerollUsed = false;
     Object.assign(this.mapView, initMapViewState());
     this.hurtFlash = 0;
     this.controlsHintClearedAt = null;
     this.reviveAdUsed = false;
     this.reviveView.phase = 'offer';
+    this.roomProgress = null;
+    this.quitting = false;
+  }
+
+  /** The top level of every progression path: which mode this run is. */
+  private get runMode(): 'campaign' | 'daily' | 'horde' {
+    return this.hordeLevel !== null ? 'horde' : this.isDailyRun ? 'daily' : 'campaign';
+  }
+
+  /** Progression path of the run as a whole — `campaign`, or `horde › level3`. */
+  private get runProgress(): string[] {
+    return this.hordeLevel !== null ? ['horde', `level${this.hordeLevel}`] : [this.runMode];
+  }
+
+  private reportRunStart(): void {
+    this.analytics.progression('start', this.runProgress);
+    const where = this.hordeLevel !== null ? 'arena' : biomeTag(this.biome);
+    this.analytics.design(['run', 'start', this.runMode, this.meta.speciesId, where]);
   }
 
   /**
@@ -416,6 +482,7 @@ export class Game {
       // run is fully reproducible — including which branches were on offer.
       this.generateBiome(1, 0, TOTAL_DEPTHS);
     }
+    this.reportRunStart();
   }
 
   /**
@@ -486,6 +553,7 @@ export class Game {
     this.hordeSpawnPoints = spawnPoints;
     this.enterArena(plan, Math.floor(hordeDifficultyTier(0, level)));
     this.state = 'hordePlaying';
+    this.reportRunStart();
   }
 
   // ---- map navigation ------------------------------------------------------
@@ -515,6 +583,8 @@ export class Game {
       case 'boss':
         this.loadRoom(nodeId);
         this.state = 'playing';
+        this.roomProgress = [this.runMode, biomeTag(this.biome), roomTag(node.depth + this.biomeStartDepth)];
+        this.analytics.progression('start', this.roomProgress);
         break;
 
       case 'market':
@@ -819,6 +889,12 @@ export class Game {
 
   private completeRoom(): void {
     this.tracker.endRoom(this.monster.healthFraction);
+    if (this.roomProgress) {
+      // Score is the health left, in percent: a room everyone clears on 5% is a wall,
+      // one they clear on 95% is filler — the pass rate alone can't tell those apart.
+      this.analytics.progression('complete', this.roomProgress, Math.round(this.monster.healthFraction * 100));
+      this.roomProgress = null;
+    }
 
     // Skill cards come from levelling, which the player spends whenever they like.
     // Depth only gates evolution, which is a bigger, rarer decision.
@@ -870,12 +946,14 @@ export class Game {
 
     this.monster.souls -= offer.price;
     offer.sold = true;
+    this.analytics.design(['market', 'buy', offer.kind], offer.price);
     this.sound.cardPick();
 
     switch (offer.kind) {
       case 'card':
         // Nested draft: remember to come back here rather than to the arena.
         this.cardsReturnState = 'market';
+        this.cardAdRerollUsed = false;
         if (!this.openCardDraft()) this.cardsReturnState = null;
         break;
 
@@ -942,6 +1020,8 @@ export class Game {
 
     this.skillPool.acquire(offer.card, this.monster.stats);
     this.tracker.recordSkill(offer.card.id, offer.card.name, offer.card.rarity);
+    this.analytics.design(['card', 'pick', 'cursed', offer.card.id]);
+    this.analytics.design(['curse', 'take', offer.curse.id]);
 
     applyCurse(offer.curse, this.monster.stats);
     this.monster.curses.add(offer.curse.id);
@@ -994,8 +1074,36 @@ export class Game {
       this.meta.recordHordeResult(this.hordeLevel, this.tracker.outcome === 'victory');
     }
     this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun });
+    this.reportRunEnd(earned);
     this.resultsView.scroll = 0;
     this.state = 'results';
+  }
+
+  /**
+   * Everything a finished run tells analytics. One place, because a run can end from
+   * half a dozen call sites (death, declined revive, retreat from pause or the map,
+   * Horde's clock) and every one of them funnels through `finishRun`.
+   */
+  private reportRunEnd(soulsEarned: number): void {
+    const a = this.analytics;
+    const outcome = this.quitting ? 'quit' : this.tracker.outcome === 'victory' ? 'victory' : 'death';
+    const status = outcome === 'victory' ? 'complete' : 'fail';
+
+    if (this.roomProgress) {
+      a.progression('fail', this.roomProgress);
+      this.roomProgress = null;
+    }
+    // Score: rooms cleared for the campaign, seconds survived for Horde — the one
+    // number that says how far this attempt got.
+    const score = this.hordeLevel !== null ? Math.floor(this.hordeElapsed) : this.tracker.roomsCleared;
+    a.progression(status, this.runProgress, score);
+    a.design(['run', 'end', this.runMode, outcome], Math.round(this.tracker.elapsed));
+    if (outcome === 'death') a.design(['run', 'killer', this.runMode, this.tracker.killerId || 'unknown']);
+    if (this.hordeLevel !== null) a.design(['horde', 'wave', `level${this.hordeLevel}`], this.hordeWaveNumber);
+    a.resource('source', 'souls', soulsEarned, 'run', this.runMode);
+    for (const trial of this.earnedTrials) a.design(['trial', trial.id]);
+    // Real players' hardware, which is the thing the two dev machines can't show.
+    a.design(['perf', 'frame_ms', this.touchActive() ? 'touch' : 'desktop'], Math.round(this.frameCostMs * 10) / 10);
   }
 
   /**
@@ -1011,6 +1119,7 @@ export class Game {
   private resolveRevive(result: AdResult): void {
     if (this.state !== 'revive') return;
 
+    this.reportAdResult(result, 'revive');
     if (result === 'completed') {
       this.reviveAdUsed = true;
       this.monster.revive(this.world, 0.5, t('effect.adRevive'), () => this.sound.secondWind());
@@ -1036,7 +1145,7 @@ export class Game {
     const rawDelta = (nowMs - this.lastFrameMs) / 1000;
     this.lastFrameMs = nowMs;
     // Clamp so an alt-tab doesn't fast-forward the simulation.
-    const delta = Math.min(0.25, rawDelta);
+    const delta = Math.min(0.25, rawDelta) * this.cinema.timeScale;
 
     const started = performance.now();
 
@@ -1055,7 +1164,7 @@ export class Game {
       // touches and the half that draws what they hit. Splitting that would be the
       // same bug as a touch button drawn somewhere other than where it is tested.
       const safe = this.renderer.safe;
-      this.input.setSafeArea(safe);
+      this.input.setSafeArea(safe, this.renderer.viewScale);
       this.ui.frame(this.input, this.renderer.safeWidth, this.renderer.safeHeight, {
         x: -safe.left,
         y: -safe.top,
@@ -1103,6 +1212,7 @@ export class Game {
     if (message !== this.lastFrameError) {
       this.lastFrameError = message;
       console.error(`[samarkand] frame failed (${this.frameErrors} total):`, error);
+      this.analytics.error(message);
     }
 
     // Still failing a second later: whatever is broken is broken every frame, and the
@@ -1219,6 +1329,8 @@ export class Game {
     // Hit-stop freezes the simulation for a few frames on heavy hits.
     const simDt = this.camera.consumeHitStop(dt);
     if (simDt <= 0) return;
+
+    if (this.cinema.immortal && this.monster.alive) this.monster.hp = this.monster.maxHp;
 
     world.time += simDt;
     this.tracker.tick(simDt);
@@ -1443,6 +1555,18 @@ export class Game {
 
   private drawFrame(delta: number): void {
 
+    if (this.state === 'menu' && this.needsConsent) {
+      drawMenuBackdrop(this.ui, this.menuTime);
+      const answer = drawConsent(this.ui);
+      if (answer !== 'none') {
+        this.meta.settings.analytics = answer === 'allow';
+        this.meta.settings.analyticsAsked = true;
+        this.meta.save();
+      }
+      this.applyCursor();
+      return;
+    }
+
     if (this.state === 'menu') {
       // The menu widget edits the profile directly; push the result into the mix.
       this.audio.setVolume(this.meta.volume);
@@ -1522,7 +1646,7 @@ export class Game {
     // the first fight there is no world to draw at all.
     if (this.state === 'map' || this.state === 'market' || this.state === 'cursed') {
       this.drawBetweenStops();
-      this.drawPauseIcon();
+      if (!this.cinema.hideHud) this.drawPauseIcon();
       this.applyCursor();
       return;
     }
@@ -1536,7 +1660,7 @@ export class Game {
 
       const boss = this.world.humans.find((h) => h.alive && h.archetype.role === 'boss');
 
-      drawHud(this.ui, {
+      if (!this.cinema.hideHud) drawHud(this.ui, {
         monster: this.monster,
         tracker: this.tracker,
         roomIndex: this.roomIndex,
@@ -1564,7 +1688,7 @@ export class Game {
             : undefined,
       });
 
-      if (this.roomIntroTimer > 0) {
+      if (this.roomIntroTimer > 0 && !this.cinema.hideHud) {
         const progress = 1 - this.roomIntroTimer / ROOM_INTRO_DURATION;
         drawRoomIntro(this.ui, plan.name, this.roomIndex, progress);
       }
@@ -1576,7 +1700,7 @@ export class Game {
         if (this.showBuildSheet) {
           drawBuildSheet(this.ui, this.monster, this.tracker, this.skillPool.takenList);
         }
-        drawTouchControls(this.ui, this.input, this.meta.settings.touchControls);
+        if (!this.cinema.active) drawTouchControls(this.ui, this.input, this.meta.settings.touchControls);
         break;
 
       case 'cards':
@@ -1597,6 +1721,7 @@ export class Game {
         if (action === 'menu') {
           this.tracker.outcome = 'death';
           this.tracker.killedBy = t('source.retreat');
+          this.quitting = true;
           this.finishRun();
         }
         break;
@@ -1607,6 +1732,7 @@ export class Game {
         if (action === 'watch') {
           this.reviveView.phase = 'watching';
           this.reviveElapsed = 0;
+          this.analytics.ad('show', 'revive', this.ads.sdkName);
           // A real network's promise is more likely to reject on failure than resolve
           // with a sentinel — caught the same way, so a rejected ad ends the run
           // instead of leaving the offer screen stuck waiting forever.
@@ -1615,7 +1741,10 @@ export class Game {
             .then((result) => this.resolveRevive(result))
             .catch(() => this.resolveRevive('unavailable'));
         }
-        if (action === 'decline') this.finishRun();
+        if (action === 'decline') {
+          this.analytics.design(['ad', 'revive', 'declined']);
+          this.finishRun();
+        }
         break;
       }
 
@@ -1675,6 +1804,7 @@ export class Game {
           // still counts for lifetime stats and souls; it just skips the screen.
           this.tracker.outcome = 'death';
           this.tracker.killedBy = t('source.retreat');
+          this.quitting = true;
           this.finishRun();
           this.state = 'menu';
         }
@@ -1706,6 +1836,10 @@ export class Game {
   private drawCardScreen(): void {
     const rerollCost = 20 + this.roomIndex * 12;
     const remaining = this.monster.pendingLevels;
+    // The ad reroll only makes sense on a draft the market sold — a level-up draft
+    // is already free, so trading an ad for a second free reroll there would just be
+    // a way to skip the souls cost this same draft charges everywhere else.
+    const atMarket = this.cardsReturnState === 'market';
     const result = drawCardSelect(this.ui, this.input, this.pendingCards, {
       title: t('cardDraft.title', { n: this.monster.level - remaining + 1 }),
       subtitle:
@@ -1716,15 +1850,34 @@ export class Game {
       souls: this.monster.souls,
       canReroll: true,
       stats: this.monster.stats,
+      adReroll: atMarket
+        ? {
+            available: !this.cardAdRerollUsed && !this.cardAdRerollPending && this.ads.isRewardedAdAvailable(),
+            pending: this.cardAdRerollPending,
+          }
+        : undefined,
     });
 
     if (result.rerolled && this.monster.souls >= rerollCost) {
       this.monster.souls -= rerollCost;
-      this.pendingCards = this.skillPool.draw(3, {
-        taken: new Map(),
-        stats: this.monster.stats,
-        depth: this.roomIndex,
-      });
+      this.analytics.design(['card', 'reroll', 'souls'], rerollCost);
+      this.rerollPendingCards();
+      return;
+    }
+
+    if (
+      result.adRerolled &&
+      atMarket &&
+      !this.cardAdRerollUsed &&
+      !this.cardAdRerollPending &&
+      this.ads.isRewardedAdAvailable()
+    ) {
+      this.cardAdRerollPending = true;
+      this.analytics.ad('show', 'reroll', this.ads.sdkName);
+      this.ads
+        .showRewardedAd()
+        .then((adResult) => this.resolveCardAdReroll(adResult))
+        .catch(() => this.resolveCardAdReroll('unavailable'));
       return;
     }
 
@@ -1736,6 +1889,7 @@ export class Game {
     this.sound.cardPick();
     this.skillPool.acquire(card, this.monster.stats);
     this.tracker.recordSkill(card.id, card.name, card.rarity);
+    this.analytics.design(['card', 'pick', atMarket ? 'market' : 'level', card.id]);
     // Max-HP changes from a card grant the new health immediately.
     this.monster.syncMaxHp(true);
     this.pendingCards = [];
@@ -1762,6 +1916,39 @@ export class Game {
     this.completeRoom();
   }
 
+  private rerollPendingCards(): void {
+    this.pendingCards = this.skillPool.draw(3, {
+      taken: new Map(),
+      stats: this.monster.stats,
+      depth: this.roomIndex,
+    });
+  }
+
+  /**
+   * Called once the market's ad-reroll promise settles.
+   *
+   * Guarded on the state still being 'cards' for the same reason `resolveRevive` is:
+   * a frame error or a menu bail can have moved the player on by the time a real
+   * network's video finishes.
+   */
+  private resolveCardAdReroll(result: AdResult): void {
+    this.cardAdRerollPending = false;
+    this.reportAdResult(result, 'reroll');
+    if (this.state !== 'cards') return;
+    // Spent only by an ad actually watched to the end — a skipped or failed one
+    // leaves the offer standing, since the player got nothing for it.
+    if (result === 'completed') {
+      this.cardAdRerollUsed = true;
+      this.rerollPendingCards();
+    }
+  }
+
+  /** 'declined' is the player closing the ad early — not a failure to show one. */
+  private reportAdResult(result: AdResult, placement: 'revive' | 'reroll'): void {
+    if (result === 'completed') this.analytics.ad('rewarded', placement, this.ads.sdkName);
+    else if (result === 'unavailable') this.analytics.ad('failed', placement, this.ads.sdkName);
+  }
+
   private drawMutationScreen(): void {
     const picked = drawMutationSelect(this.ui, this.input, this.pendingMutations, this.monster.stats);
     if (picked < 0) return;
@@ -1770,6 +1957,7 @@ export class Game {
     if (!mutation) return;
 
     this.monster.applyMutation(mutation, this.world);
+    this.analytics.design(['mutation', 'pick', mutation.id]);
     this.pendingMutations = [];
     this.returnToMap();
   }
@@ -1783,6 +1971,7 @@ export class Game {
    * because their hardware happens to also have a touchscreen.
    */
   private touchActive(): boolean {
+    if (this.cinema.active) return false;
     const mode = this.meta.settings.touchControls;
     if (mode === 'off') return false;
     if (mode === 'auto') return this.input.touchDetected;
@@ -1842,6 +2031,84 @@ export class Game {
     }
   }
 
+  // ---- reels mode ------------------------------------------------------------
+  //
+  // The public surface `src/reels/` drives. Kept here rather than reaching into
+  // private state from outside: every one of these has to leave the run in a state
+  // the rest of the game already knows how to be in.
+
+  get canvas(): HTMLCanvasElement {
+    return this.renderer.canvas;
+  }
+
+  setFixedViewport(viewport: FixedViewport | null): void {
+    this.renderer.setFixedViewport(viewport);
+  }
+
+  setZoomScale(scale: number): void {
+    this.renderer.zoomScale = scale;
+  }
+
+  /** The game's audio as a stream to record, or null before the first gesture. */
+  captureAudio(): MediaStream | null {
+    this.audio.unlock();
+    return this.audio.captureStream();
+  }
+
+  /**
+   * Drop straight into a fight: a fresh campaign run on `biome`, entered at the
+   * first arena stop at `depth` (clamped; the last depth is the boss). Ignores the
+   * checkpoint and the preferred start biome on purpose — a take should start where
+   * it was asked to, not wherever the profile last left off.
+   */
+  startReelsScene(biome: 1 | 2 | 3, depth: number): void {
+    this.resetRunState((Math.random() * 0xffffffff) >>> 0, false);
+    this.hordeLevel = null;
+    this.generateBiome(biome, (biome - 1) * BIOME_ROOMS, TOTAL_DEPTHS);
+    const wanted = clamp(Math.round(depth), 0, BIOME_ROOMS - 1);
+    const nodeId = this.runMap.byDepth[wanted]?.find((id) => isArenaNode(this.runMap.nodes[id]!.kind));
+    if (nodeId !== undefined) this.enterNode(nodeId);
+  }
+
+  startReelsHorde(level: number): void {
+    this.beginHordeRun(level);
+  }
+
+  /** Whether there is a live monster for `reelsEvolve`/`reelsEmpower` to act on. */
+  get inArena(): boolean {
+    return this.currentPlan !== null && (this.state === 'playing' || this.state === 'hordePlaying');
+  }
+
+  /**
+   * Grow the monster without stopping for drafts: `cards` random skill cards and
+   * `mutations` random mutations, applied through their normal paths. Mutations are
+   * the ones that matter on camera — they are what reshape the silhouette.
+   */
+  reelsEvolve(cards: number, mutations: number): void {
+    if (!this.inArena) return;
+    for (let i = 0; i < cards; i++) {
+      const card = this.skillPool.draw(1, { taken: new Map(), stats: this.monster.stats, depth: this.roomIndex })[0];
+      if (card) this.skillPool.acquire(card, this.monster.stats);
+    }
+    const offered = drawMutations(this.runRng, this.monster.mutations, this.monster.stats, mutations, this.meta);
+    for (const mutation of offered) this.monster.applyMutation(mutation, this.world);
+    this.monster.syncMaxHp(true);
+  }
+
+  /** Strong enough to wade through any room on camera — same numbers as `debugBuff`. */
+  reelsEmpower(): void {
+    if (this.inArena) this.debugBuff();
+  }
+
+  /**
+   * The statistics question is still open: asked on the title screen, before the
+   * first run, and only in a build that has somewhere to send statistics. Reels
+   * mode skips it — the take would open on a dialog.
+   */
+  private get needsConsent(): boolean {
+    return this.analytics.configured && !this.meta.settings.analyticsAsked && !this.cinema.active;
+  }
+
   /** Exposed for the boot screen. */
   get isRunning(): boolean {
     return this.running;
@@ -1897,6 +2164,11 @@ export class Game {
     if (biome === 3) this.generateBiome(3, BIOME_ROOMS * 2, TOTAL_DEPTHS);
     else if (biome === 2) this.generateBiome(2, BIOME_ROOMS, TOTAL_DEPTHS);
     else this.generateBiome(1, 0, TOTAL_DEPTHS);
+  }
+
+  /** Dev: the analytics events recorded this session (dev builds without GameAnalytics keys). */
+  debugAnalytics(): readonly string[] {
+    return this.analytics instanceof RecordingAnalytics ? this.analytics.events : [];
   }
 
   /** Dev: bank souls, for exercising the lair without grinding runs. */

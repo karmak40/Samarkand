@@ -1,10 +1,11 @@
 /// <reference types="vitest/config" />
 import { defineConfig, type Plugin } from 'vite';
 import { fileURLToPath, URL } from 'node:url';
-import { mkdirSync, writeFileSync } from 'node:fs';
+import { mkdirSync, readFileSync, writeFileSync } from 'node:fs';
 import { dirname, join } from 'node:path';
 
 const projectRoot = fileURLToPath(new URL('.', import.meta.url));
+const appVersion = (JSON.parse(readFileSync(join(projectRoot, 'package.json'), 'utf8')) as { version: string }).version;
 
 /**
  * Dev-only endpoint that writes a canvas snapshot to disk.
@@ -55,6 +56,9 @@ function screenshotEndpoint(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [screenshotEndpoint()],
+  define: {
+    __APP_VERSION__: JSON.stringify(appVersion),
+  },
   resolve: {
     alias: {
       '@': fileURLToPath(new URL('./src', import.meta.url)),

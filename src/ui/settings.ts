@@ -19,10 +19,12 @@ export interface SettingsView {
   rebinding: ActionName | null;
   /** Whether the language dropdown is expanded. */
   languageOpen: boolean;
+  /** Pixels scrolled — the list outgrew a 720px-tall window once privacy joined it. */
+  scroll: number;
 }
 
 export function newSettingsView(): SettingsView {
-  return { rebinding: null, languageOpen: false };
+  return { rebinding: null, languageOpen: false, scroll: 0 };
 }
 
 /**
@@ -87,7 +89,23 @@ export function drawSettings(
 
   const panelW = Math.min(560, ui.width - 60);
   const x = (ui.width - panelW) / 2;
-  let y = 106;
+
+  // Everything between the subtitle and the Back button scrolls; both of those stay put.
+  const viewTop = 100;
+  const viewBottom = ui.height - 54;
+  const viewH = Math.max(60, viewBottom - viewTop);
+  const ctx = ui.ctx;
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(ui.bleed.x, viewTop, ui.bleed.w, viewH);
+  ctx.clip();
+  ui.hitClip = rect(ui.bleed.x, viewTop, ui.bleed.w, viewH);
+  const endScrollArea = (): void => {
+    ctx.restore();
+    ui.hitClip = null;
+  };
+
+  let y = viewTop + 6 - view.scroll;
 
   const commit = (): void => meta.save();
 
@@ -152,6 +170,7 @@ export function drawSettings(
   // option above it. Escape closes the dropdown first rather than leaving the whole
   // screen, matching how it already backs out of a key capture below.
   if (view.languageOpen) {
+    endScrollArea();
     if (input.consumePress('pause')) view.languageOpen = false;
     return 'none';
   }
@@ -190,7 +209,9 @@ export function drawSettings(
     commit();
   }
 
-  const columns = panelW >= 460 ? 2 : 1;
+  // Two columns down to phone width: one column of six rows ran the list under the
+  // Back button on a phone, and a narrow cell just shows the first key of each.
+  const columns = panelW >= 280 ? 2 : 1;
   const cellW = (panelW - (columns - 1) * 10) / columns;
   const cellH = 34;
 
@@ -207,6 +228,42 @@ export function drawSettings(
     color: PALETTE.dim,
     baseline: 'middle',
   });
+  y += 16;
+
+  // --- privacy ----------------------------------------------------------------
+  y = section(ui, x, y + 6, panelW, t('settings.section.privacy'));
+  y = choiceRow<boolean>(ui, x, y, panelW, {
+    label: t('settings.analytics'),
+    hint: t('settings.analytics.hint'),
+    options: [true, false],
+    current: settings.analytics,
+    labelOf: (value) => t(value ? 'common.on' : 'common.off'),
+    onPick: (value) => {
+      settings.analytics = value;
+      // Choosing here answers the first-launch question too.
+      settings.analyticsAsked = true;
+      commit();
+    },
+  });
+
+  endScrollArea();
+
+  // Sign only, like the lair and the results: a wheel notch and a converted touch
+  // drag report very different magnitudes for one step.
+  const contentH = y + view.scroll - viewTop + 6;
+  const maxScroll = Math.max(0, contentH - viewH);
+  if (input.wheel !== 0 && !view.rebinding) view.scroll += (input.wheel > 0 ? 1 : -1) * 60;
+  view.scroll = clamp(view.scroll, 0, maxScroll);
+
+  if (maxScroll > 0) {
+    const trackX = Math.min(ui.width - 8, x + panelW + 14);
+    const thumbH = Math.max(24, (viewH * viewH) / contentH);
+    const thumbY = viewTop + (viewH - thumbH) * (view.scroll / maxScroll);
+    ctx.fillStyle = 'rgba(148,138,118,0.18)';
+    ctx.fillRect(trackX, viewTop, 4, viewH);
+    ctx.fillStyle = 'rgba(216,161,58,0.6)';
+    ctx.fillRect(trackX, thumbY, 4, thumbH);
+  }
 
   // --- footer -----------------------------------------------------------------
   let action: SettingsAction = 'none';
@@ -473,7 +530,7 @@ function bindingRow(
   });
 
   ui.text(
-    waiting ? t('settings.pressKey') : codes.map(keyLabel).join(' / '),
+    waiting ? t('settings.pressKey') : (bounds.w < 220 ? codes.slice(0, 1) : codes).map(keyLabel).join(' / '),
     bounds.x + bounds.w - 12,
     bounds.y + bounds.h / 2,
     {

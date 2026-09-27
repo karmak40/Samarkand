@@ -165,3 +165,23 @@ describe('rebinding', () => {
     }
   });
 });
+
+describe('analytics consent', () => {
+  it('starts off and unasked — nothing is sent before the player says yes', () => {
+    expect(defaultSettings().analytics).toBe(false);
+    expect(defaultSettings().analyticsAsked).toBe(false);
+  });
+
+  it('keeps an answered choice across a save round-trip, either way', () => {
+    for (const analytics of [true, false]) {
+      const saved = JSON.parse(JSON.stringify({ ...defaultSettings(), analytics, analyticsAsked: true })) as unknown;
+      expect(sanitizeSettings(saved)).toMatchObject({ analytics, analyticsAsked: true });
+    }
+  });
+
+  it('never treats consent as given unless the question was answered', () => {
+    expect(sanitizeSettings({ analytics: true }).analytics).toBe(false);
+    expect(sanitizeSettings({ analytics: true, analyticsAsked: 'yes' }).analytics).toBe(false);
+    expect(sanitizeSettings({ shake: 'low' })).toMatchObject({ analytics: false, analyticsAsked: false });
+  });
+});

@@ -125,6 +125,11 @@ export class Input {
    * arrives dozens of times a second and each read would force a style resolve.
    */
   private safe: Insets = NO_INSETS;
+  /**
+   * Logical pixels per displayed CSS pixel. 1 everywhere except reels mode, where
+   * the canvas is laid out at a fixed size and shown scaled to fit the window.
+   */
+  private viewScale = 1;
 
   /** The touch steering the monster, if any, with where it landed and where it is now. */
   private stickTouch: number | null = null;
@@ -173,8 +178,8 @@ export class Input {
 
     const onMouseMove = (e: MouseEvent) => {
       const rect = this.target.getBoundingClientRect();
-      this.mouse.x = e.clientX - rect.left - this.safe.left;
-      this.mouse.y = e.clientY - rect.top - this.safe.top;
+      this.mouse.x = (e.clientX - rect.left) * this.viewScale - this.safe.left;
+      this.mouse.y = (e.clientY - rect.top) * this.viewScale - this.safe.top;
     };
 
     const onMouseDown = (e: MouseEvent) => {
@@ -210,8 +215,8 @@ export class Input {
     // the steering pad is the whole screen, so the stick should appear under the
     // thumb wherever the thumb is, even out there.
     const localOf = (touch: Touch, bounds: DOMRect): Vec2 => ({
-      x: touch.clientX - bounds.left - this.safe.left,
-      y: touch.clientY - bounds.top - this.safe.top,
+      x: (touch.clientX - bounds.left) * this.viewScale - this.safe.left,
+      y: (touch.clientY - bounds.top) * this.viewScale - this.safe.top,
     });
 
     const onTouchStart = (e: TouchEvent) => {
@@ -226,8 +231,8 @@ export class Input {
       // The same box `drawTouchControls` lays the buttons out in — it is handed
       // `ui.width`/`ui.height`, which are the safe area, not the glass.
       this.layout = touchLayout(
-        bounds.width - this.safe.left - this.safe.right,
-        bounds.height - this.safe.top - this.safe.bottom,
+        bounds.width * this.viewScale - this.safe.left - this.safe.right,
+        bounds.height * this.viewScale - this.safe.top - this.safe.bottom,
       );
 
       for (const touch of Array.from(e.changedTouches)) {
@@ -367,8 +372,9 @@ export class Input {
    * there is a single answer per frame and no chance of the hit test and the drawing
    * disagreeing about where the notch is.
    */
-  setSafeArea(safe: Insets): void {
+  setSafeArea(safe: Insets, viewScale = 1): void {
     this.safe = safe;
+    this.viewScale = viewScale;
   }
 
   /**

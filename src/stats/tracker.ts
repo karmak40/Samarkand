@@ -122,6 +122,13 @@ export class RunStats {
 
   outcome: 'in-progress' | 'victory' | 'death' = 'in-progress';
   killedBy = '';
+  /**
+   * `killedBy` in a form that doesn't change with the language: the killer's
+   * archetype id (`archer`, `inquisitor`), or `unknown` when nothing is credited
+   * (a burn outlasting whoever lit it). For analytics — a dashboard grouping deaths
+   * by a translated label would split every enemy seven ways.
+   */
+  killerId = '';
 
   constructor(seed: number) {
     this.seed = seed;

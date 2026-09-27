@@ -403,7 +403,15 @@ export class Ui {
 
   // ---- interaction ---------------------------------------------------------
 
+  /**
+   * While set, nothing outside this rect can be hovered or clicked. For scrolled
+   * content: a row scrolled up under a fixed header is clipped from view, and must be
+   * clipped from the pointer too, or a click on the header would land on it.
+   */
+  hitClip: Rect | null = null;
+
   isHovered(rect: Rect): boolean {
+    if (this.hitClip && !rectContains(this.hitClip, this.mouseX, this.mouseY)) return false;
     return rectContains(rect, this.mouseX, this.mouseY);
   }
 
