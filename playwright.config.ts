@@ -1,17 +1,17 @@
 import { defineConfig, devices } from '@playwright/test';
 
 /**
- * Cross-browser smoke tests.
+ * Both servers are built as if no GameAnalytics keys existed, whatever sits in the
+ * developer's `.env.production.local`. With keys, the game opens on the statistics
+ * consent dialog instead of the title screen — so the same suite would test a
+ * different first screen on a machine with keys than in CI without them.
  *
- * These run against the *built* bundle, not the dev server: what a player downloads
- * is transpiled and minified, and a syntax level the build target allows but a browser
- * does not is exactly the failure this is here to catch.
- *
- * Three engines because the game is a single canvas driven by hand-written code —
- * there is no framework absorbing the differences. Text metrics, audio construction
- * and device pixel ratio all behave differently across Blink, Gecko and WebKit, and
- * none of it shows up in a unit test.
+ * Not by blanking the variables: Windows has no empty environment variables, so a
+ * blank value is simply absent and Vite reads the file again. `vite.config.ts`
+ * instead skips the `.env` files altogether when this flag is set.
  */
+const NO_ANALYTICS_KEYS = { SAMARKAND_E2E: '1' };
+
 export default defineConfig({
   testDir: './e2e',
   fullyParallel: true,
@@ -49,12 +49,14 @@ export default defineConfig({
       url: 'http://127.0.0.1:4173',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+      env: NO_ANALYTICS_KEYS,
     },
     {
       command: 'npx vite dev --port 5174 --strictPort --host 127.0.0.1',
       url: 'http://127.0.0.1:5174',
       reuseExistingServer: !process.env.CI,
       timeout: 120_000,
+      env: NO_ANALYTICS_KEYS,
     },
   ],
 });

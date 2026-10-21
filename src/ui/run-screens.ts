@@ -96,6 +96,12 @@ export function drawRunMap(
     time: number;
     /** Which half of the run this map belongs to — the war-camp reads the terrain too. */
     biome: 1 | 2 | 3;
+    /**
+     * Layers of this biome already behind the player when the map was generated (a
+     * run resumed from a checkpoint gets a shortened map) — added back so the depth
+     * readout counts against the whole biome, not just what is left of it.
+     */
+    depthOffset?: number;
   },
 ): RunMapResult {
   const margin = 70;
@@ -105,6 +111,10 @@ export function drawRunMap(
   const laneH = (bottom - top) / Math.max(1, map.lanes - 1);
   const logicalW = margin * 2 + stepX * Math.max(0, map.depths - 1);
   const maxScrollX = Math.max(0, logicalW - ui.width);
+  // A short map (few layers, or a wide screen) is centred instead of hugging the
+  // left edge with an empty void beside it.
+  const originX = Math.max(0, (ui.width - logicalW) / 2);
+  const paintedW = Math.max(logicalW, ui.width);
 
   // Re-center whenever where the player stands changes (a fresh map, or just arrived
   // after a room) — otherwise a long map could open scrolled away from the one node
@@ -145,11 +155,11 @@ export function drawRunMap(
   view.scrollX = clamp(view.scrollX, 0, maxScrollX);
 
   const position = (node: MapNode): { x: number; y: number } => ({
-    x: margin + node.depth * stepX - view.scrollX,
+    x: originX + margin + node.depth * stepX - view.scrollX,
     y: top + node.lane * laneH,
   });
 
-  ui.ctx.drawImage(mapBackdrop(map, logicalW, ui.height, context.biome), -view.scrollX, 0);
+  ui.ctx.drawImage(mapBackdrop(map, paintedW, ui.height, context.biome), -view.scrollX, 0);
 
   // A painted map is busy everywhere, unlike the plain dark screens elsewhere — the
   // title needs a banner under it, not just an outline, or it gets lost over a green
@@ -299,8 +309,8 @@ export function drawRunMap(
 
   ui.text(
     t('map.depth', {
-      n: (context.currentNodeId !== null ? map.nodes[context.currentNodeId]!.depth + 1 : 1),
-      total: map.depths,
+      n: (context.currentNodeId !== null ? map.nodes[context.currentNodeId]!.depth + 1 : 1) + (context.depthOffset ?? 0),
+      total: map.depths + (context.depthOffset ?? 0),
     }),
     ui.width / 2,
     bottom + 46,

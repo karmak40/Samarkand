@@ -1795,6 +1795,7 @@ export class Game {
           visited: this.visitedNodes,
           time: this.mapTime,
           biome: this.biome,
+          depthOffset: this.biomeStartDepth,
         });
         if (mapResult.picked >= 0 && reachable.some((node) => node.id === mapResult.picked)) {
           this.enterNode(mapResult.picked);

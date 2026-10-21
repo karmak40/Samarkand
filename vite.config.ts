@@ -56,6 +56,10 @@ function screenshotEndpoint(): Plugin {
 export default defineConfig({
   base: './',
   plugins: [screenshotEndpoint()],
+  // The e2e suite builds from no `.env` files at all (see playwright.config.ts), so
+  // a developer's GameAnalytics keys can't put a consent dialog in front of the
+  // screen every test expects. `e2e/` holds no `.env` files; that is the point.
+  envDir: process.env.SAMARKAND_E2E ? join(projectRoot, 'e2e') : projectRoot,
   define: {
     __APP_VERSION__: JSON.stringify(appVersion),
   },
