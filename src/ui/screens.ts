@@ -13,7 +13,7 @@ import { type Curse, getCurse } from '../progression/curses';
 import { dailySeed, formatCountdown, secondsUntilNextDaily, seedLabel } from '../progression/daily';
 import { type Mutation } from '../progression/evolution';
 import { type MetaProgress } from '../progression/meta';
-import { RARITY, tagLabel, type RawModifier, type SkillCard } from '../progression/skills';
+import { getCard, RARITY, tagLabel, type RawModifier, type SkillCard } from '../progression/skills';
 import {
   formatStat,
   LOWER_IS_BETTER,
@@ -661,7 +661,7 @@ export function drawResults(
     daily: boolean;
     earned: readonly AchievementDef[];
     /** Set only for a Horde run — swaps the "N settlements" copy for wave/level wording. */
-    horde?: { level: number; wave: number };
+    horde?: { level: number; wave: number; newRecord?: boolean };
   } = { daily: false, earned: [] },
   view: ResultsView = newResultsView(),
 ): ResultsAction {
@@ -696,22 +696,35 @@ export function drawResults(
     maxWidth: ui.width - 48,
   });
 
-  // The seed, so a run worth talking about can be handed to someone else.
-  ui.fittedText(
-    context.daily
-      ? t('results.dailySeed', { seed: seedLabel(tracker.seed) })
-      : t('results.seed', { seed: seedLabel(tracker.seed) }),
-    ui.width / 2,
-    108,
-    {
-      size: 12,
-      color: context.daily ? '#8fd6a8' : PALETTE.dim,
+  // The seed, so a run worth talking about can be handed to someone else — except
+  // after a Horde personal best, which is the news worth that line instead.
+  if (context.horde?.newRecord) {
+    ui.fittedText(t('results.hordeRecord', { level: context.horde.level }), ui.width / 2, 108, {
+      size: 13,
+      color: PALETTE.gold,
       align: 'center',
       baseline: 'middle',
-      letterSpacing: 1,
+      bold: true,
+      letterSpacing: 2,
       maxWidth: ui.width - 48,
-    },
-  );
+    });
+  } else {
+    ui.fittedText(
+      context.daily
+        ? t('results.dailySeed', { seed: seedLabel(tracker.seed) })
+        : t('results.seed', { seed: seedLabel(tracker.seed) }),
+      ui.width / 2,
+      108,
+      {
+        size: 12,
+        color: context.daily ? '#8fd6a8' : PALETTE.dim,
+        align: 'center',
+        baseline: 'middle',
+        letterSpacing: 1,
+        maxWidth: ui.width - 48,
+      },
+    );
+  }
 
   const top = 124;
   const buttonY = ui.height - 62;
@@ -1429,8 +1442,19 @@ function drawMenuAtmosphere(ui: Ui, time: number): void {
 
 // ---------------------------------------------------------------------------
 
-/** Lifetime record screen. */
-export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
+/** Below this the chronicle's three columns stack into one scrollable column. */
+const CHRONICLE_COLUMNS_WIDTH = 960;
+/** ...and below this height a column can't hold its longest section. */
+const CHRONICLE_COLUMNS_HEIGHT = 600;
+
+/**
+ * Lifetime record screen.
+ *
+ * Three sections — the campaign's totals and records, the Horde's, and the
+ * player's habits — side by side when there is room, else one scrollable column,
+ * the same trade the results screen makes.
+ */
+export function drawLifetime(ui: Ui, input: Input, meta: MetaProgress, view: { scroll: number }): MenuAction {
   ui.scrim(0.94);
 
   ui.fittedText(t('menu.chronicle').toUpperCase(), ui.width / 2, 56, {
@@ -1442,16 +1466,95 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
     maxWidth: ui.width - 48,
   });
 
-  const l = meta.lifetime;
-  const margin = 60;
-  const columnW = (ui.width - margin * 2 - 40) / 2;
+  const sections = [drawChronicleTotals, drawChronicleHorde, drawChronicleHabits];
   const top = 108;
+  const bottom = ui.height - 96;
 
-  // Left column: totals.
-  ui.panel(rect(margin, top, columnW, ui.height - top - 110), { fill: 'rgba(12,11,15,0.85)' });
-  let y = top + 30;
-  const x = margin + 24;
-  const w = columnW - 48;
+  if (ui.width >= CHRONICLE_COLUMNS_WIDTH && ui.height >= CHRONICLE_COLUMNS_HEIGHT) {
+    const margin = 40;
+    const gap = 24;
+    const columnW = (ui.width - margin * 2 - gap * 2) / 3;
+    sections.forEach((draw, i) => {
+      const bounds = rect(margin + i * (columnW + gap), top, columnW, bottom - top);
+      ui.panel(bounds, { fill: 'rgba(12,11,15,0.85)' });
+      ui.ctx.save();
+      ui.ctx.beginPath();
+      ui.ctx.rect(bounds.x, bounds.y, bounds.w, bounds.h);
+      ui.ctx.clip();
+      draw(ui, meta, bounds.x + 24, bounds.y + 30, bounds.w - 48);
+      ui.ctx.restore();
+    });
+  } else {
+    drawChronicleStacked(ui, input, meta, view, sections, top, bottom);
+  }
+
+  // Sized to the screen rather than fixed at 180: on a phone two fixed buttons
+  // either side of centre ran off both edges.
+  const buttonW = Math.min(180, (ui.width - 48 - 20) / 2);
+  let action: MenuAction = 'none';
+  if (ui.button(rect(ui.width / 2 - 10 - buttonW, ui.height - 74, buttonW, 44), t('lifetime.back'), { accent: '#9fd7ff' })) {
+    action = 'back';
+  }
+  if (
+    ui.button(rect(ui.width / 2 + 10, ui.height - 74, buttonW, 44), t('lifetime.resetAll'), {
+      accent: PALETTE.blood,
+    })
+  ) {
+    action = 'reset';
+  }
+  if (input.consumePress('pause')) action = 'back';
+
+  return action;
+}
+
+type ChronicleSection = (ui: Ui, meta: MetaProgress, x: number, y: number, w: number) => number;
+
+/** The narrow layout: every section in one clipped, scrollable column. */
+function drawChronicleStacked(
+  ui: Ui,
+  input: Input,
+  meta: MetaProgress,
+  view: { scroll: number },
+  sections: readonly ChronicleSection[],
+  viewTop: number,
+  viewBottom: number,
+): void {
+  const ctx = ui.ctx;
+  const viewH = Math.max(60, viewBottom - viewTop);
+  const gap = 22;
+
+  ctx.save();
+  ctx.beginPath();
+  ctx.rect(0, viewTop, ui.width, viewH);
+  ctx.clip();
+  let cursorY = viewTop + 14 - view.scroll;
+  let totalHeight = 14;
+  for (const draw of sections) {
+    const h = draw(ui, meta, 20, cursorY, ui.width - 40) + gap;
+    cursorY += h;
+    totalHeight += h;
+  }
+  ctx.restore();
+
+  const maxScroll = Math.max(0, totalHeight - viewH);
+  // Sign only, as on the results screen: wheel and touch-drag magnitudes disagree.
+  if (input.wheel !== 0) view.scroll += (input.wheel > 0 ? 1 : -1) * 72;
+  view.scroll = clamp(view.scroll, 0, maxScroll);
+
+  if (maxScroll > 0) {
+    const thumbH = Math.max(24, (viewH * viewH) / totalHeight);
+    const thumbY = viewTop + (viewH - thumbH) * (view.scroll / maxScroll);
+    ctx.fillStyle = 'rgba(148,138,118,0.18)';
+    ctx.fillRect(ui.width - 9, viewTop, 4, viewH);
+    ctx.fillStyle = 'rgba(216,161,58,0.6)';
+    ctx.fillRect(ui.width - 9, thumbY, 4, thumbH);
+  }
+}
+
+/** Every chronicle section draws from (x, y) down and returns the height it used. */
+function drawChronicleTotals(ui: Ui, meta: MetaProgress, x: number, top: number, w: number): number {
+  const l = meta.lifetime;
+  let y = top;
 
   ui.heading(t('heading.total'), x, y, w);
   y += 26;
@@ -1489,15 +1592,56 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
     y += 23;
   }
 
-  // Right column: preferences.
-  const rx = margin + columnW + 40;
-  ui.panel(rect(rx, top, columnW, ui.height - top - 110), { fill: 'rgba(12,11,15,0.85)' });
-  let ry = top + 30;
-  const rxi = rx + 24;
-  const rw = columnW - 48;
+  return y - top;
+}
 
-  ui.heading(t('heading.elements'), rxi, ry, rw);
-  ry += 24;
+/** The Horde's own ledger: attempts, the ladder, and a best per arena. */
+function drawChronicleHorde(ui: Ui, meta: MetaProgress, x: number, top: number, w: number): number {
+  const l = meta.lifetime;
+  const best = meta.hordeBest();
+  let y = top;
+
+  ui.heading(t('horde.title'), x, y, w, PALETTE.blood);
+  y += 26;
+
+  const rows: Array<[string, string, string]> = [
+    [t('lifetime.runs'), `${l.hordeRuns}`, PALETTE.ink],
+    [t('lifetime.victories'), `${l.hordeVictories}`, PALETTE.ink],
+    [t('lifetime.hordeLadder'), `${meta.hordeLevelsBeaten} / ${HORDE_LEVELS.length}`, PALETTE.ink],
+    [t('lifetime.hordeLongest'), formatTime(best.seconds), PALETTE.gold],
+    [t('lifetime.hordeBestWave'), `${best.wave}`, PALETTE.gold],
+    [t('lifetime.mostKills'), `${best.kills}`, PALETTE.gold],
+  ];
+  for (const [label, value, color] of rows) {
+    ui.statRow(label, value, x, y, w, { color });
+    y += 23;
+  }
+
+  y += 16;
+  ui.heading(t('heading.arenas'), x, y, w);
+  y += 26;
+
+  for (const entry of HORDE_LEVELS) {
+    const record = meta.hordeRecords[entry.level];
+    const locked = entry.level > meta.hordeLevelUnlocked;
+    const value = record
+      ? t('lifetime.arenaBest', { time: formatTime(record.bestSeconds), wave: record.bestWave })
+      : '—';
+    const color = record && record.bestSeconds >= entry.targetSeconds ? PALETTE.good : PALETTE.ink;
+    ui.statRow(t('lifetime.arena', { n: entry.level }), value, x, y, w, { size: 13, color, muted: locked });
+    y += 21;
+  }
+
+  return y - top;
+}
+
+/** How the player likes to hunt: elements, victims, favourite cards, nemesis. */
+function drawChronicleHabits(ui: Ui, meta: MetaProgress, x: number, top: number, w: number): number {
+  const l = meta.lifetime;
+  let y = top;
+
+  ui.heading(t('heading.elements'), x, y, w);
+  y += 24;
 
   const totalElemental = DAMAGE_TYPES.reduce((sum, t) => sum + l.damageByType[t], 0);
   const segments = DAMAGE_TYPES.filter((t) => l.damageByType[t] > 0).map((t) => ({
@@ -1505,71 +1649,63 @@ export function drawLifetime(ui: Ui, meta: MetaProgress): MenuAction {
     color: DAMAGE_INFO[t].color,
     type: t,
   }));
-  ui.stackedBar(rect(rxi, ry, rw, 12), segments);
-  ry += 24;
+  ui.stackedBar(rect(x, y, w, 12), segments);
+  y += 24;
 
   for (const segment of segments.sort((a, b) => b.value - a.value).slice(0, 6)) {
     const share = totalElemental > 0 ? segment.value / totalElemental : 0;
-    ui.swatch(rxi + 5, ry, segment.color, 4);
-    ui.text(DAMAGE_INFO[segment.type].name, rxi + 16, ry, {
+    ui.swatch(x + 5, y, segment.color, 4);
+    ui.text(DAMAGE_INFO[segment.type].name, x + 16, y, {
       size: 13,
       color: PALETTE.muted,
       baseline: 'middle',
     });
-    ui.text(`${(share * 100).toFixed(0)}%`, rxi + rw, ry, {
+    ui.text(`${(share * 100).toFixed(0)}%`, x + w, y, {
       size: 13,
       color: segment.color,
       align: 'right',
       baseline: 'middle',
       bold: true,
     });
-    ry += 20;
+    y += 20;
   }
 
-  ry += 14;
-  ui.heading(t('heading.victims'), rxi, ry, rw);
-  ry += 24;
+  y += 14;
+  ui.heading(t('heading.victims'), x, y, w);
+  y += 24;
 
-  const kills = Object.entries(l.killsByEnemy).sort((a, b) => b[1] - a[1]).slice(0, 8);
+  // Six, not eight: with the Horde column beside it this one has to fit a 720-high
+  // screen with every list full.
+  const kills = Object.entries(l.killsByEnemy).sort((a, b) => b[1] - a[1]).slice(0, 6);
   for (const [id, count] of kills) {
-    ui.statRow(enemyName(id), `${count}`, rxi, ry, rw, { size: 13 });
-    ry += 20;
+    ui.statRow(enemyName(id), `${count}`, x, y, w, { size: 13 });
+    y += 20;
   }
 
-  ry += 14;
-  ui.heading(t('heading.favoriteSkills'), rxi, ry, rw);
-  ry += 24;
+  y += 14;
+  ui.heading(t('heading.favoriteSkills'), x, y, w);
+  y += 24;
 
-  const skills = Object.entries(l.skillPicks).sort((a, b) => b[1] - a[1]).slice(0, 6);
+  const skills = Object.entries(l.skillPicks).sort((a, b) => b[1] - a[1]).slice(0, 5);
   for (const [id, count] of skills) {
-    ui.statRow(id, `×${count}`, rxi, ry, rw, { size: 13, color: '#9fd7ff' });
-    ry += 20;
+    ui.statRow(getCard(id)?.name ?? id, `×${count}`, x, y, w, { size: 13, color: '#9fd7ff' });
+    y += 20;
   }
 
   const nemesis = meta.nemesis();
   if (nemesis) {
-    ry += 14;
-    ui.text(t('lifetime.nemesis', { name: nemesis.name, count: nemesis.count }), rxi, ry, {
+    y += 14;
+    ui.text(t('lifetime.nemesis', { name: nemesis.name, count: nemesis.count }), x, y, {
       size: 13,
       color: PALETTE.bad,
       baseline: 'middle',
       italic: true,
+      maxWidth: w,
     });
+    y += 10;
   }
 
-  let action: MenuAction = 'none';
-  if (ui.button(rect(ui.width / 2 - 200, ui.height - 74, 180, 44), t('lifetime.back'), { accent: '#9fd7ff' })) {
-    action = 'back';
-  }
-  if (
-    ui.button(rect(ui.width / 2 + 20, ui.height - 74, 180, 44), t('lifetime.resetAll'), {
-      accent: PALETTE.blood,
-    })
-  ) {
-    action = 'reset';
-  }
-
-  return action;
+  return y - top;
 }
 
 function enemyName(id: string): string {
@@ -1881,6 +2017,63 @@ export function drawRoomIntro(ui: Ui, name: string, index: number, progress: num
     alpha: clamp(alpha, 0, 1),
     outline: true,
     maxWidth: ui.width - 48,
+  });
+}
+
+/**
+ * The boss-kill beat drawn over the arena: a flash that bleaches the frame for
+ * an instant, a vignette that closes in while time is slowed, and the boss's
+ * name with its verdict underneath. `progress` runs 0 → 1 over the whole beat.
+ */
+export function drawBossSlain(ui: Ui, name: string, progress: number, color: string): void {
+  const ctx = ui.ctx;
+  const p = clamp(progress, 0, 1);
+
+  // Flash: sharp in the first instant, gone well before the text settles.
+  const flash = Math.max(0, 1 - p / 0.12) * 0.45;
+  if (flash > 0) {
+    ctx.fillStyle = `rgba(255,244,220,${flash})`;
+    ctx.fillRect(-ui.width, -ui.height, ui.width * 3, ui.height * 3);
+  }
+
+  // Vignette closes while the world is slowed, then lets go.
+  const hold = p < 0.15 ? p / 0.15 : p > 0.75 ? (1 - p) / 0.25 : 1;
+  const vignette = clamp(hold, 0, 1) * 0.55;
+  if (vignette > 0) {
+    const r = Math.hypot(ui.width, ui.height) / 2;
+    const grad = ctx.createRadialGradient(ui.width / 2, ui.height / 2, r * 0.35, ui.width / 2, ui.height / 2, r);
+    grad.addColorStop(0, 'rgba(0,0,0,0)');
+    grad.addColorStop(1, `rgba(8,4,4,${vignette})`);
+    ctx.fillStyle = grad;
+    ctx.fillRect(0, 0, ui.width, ui.height);
+  }
+
+  // Text arrives just after the flash, holds, and fades with the vignette.
+  const textAlpha = clamp(p < 0.1 ? 0 : p < 0.22 ? (p - 0.1) / 0.12 : p > 0.8 ? (1 - p) / 0.2 : 1, 0, 1);
+  if (textAlpha <= 0) return;
+  // A slight settle: the title lands a little large and eases to its size.
+  const settle = 1 + Math.max(0, 0.22 - p) * 0.6;
+  const y = ui.height * 0.3;
+
+  ui.fittedText(name.toUpperCase(), ui.width / 2, y, {
+    size: Math.round(40 * settle),
+    color: color,
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 10,
+    alpha: textAlpha,
+    outline: true,
+    bold: true,
+    maxWidth: ui.width - 48,
+  });
+  ui.text(t('bossSlain.verdict'), ui.width / 2, y + 40, {
+    size: 15,
+    color: PALETTE.ink,
+    align: 'center',
+    baseline: 'middle',
+    letterSpacing: 8,
+    alpha: textAlpha,
+    outline: true,
   });
 }
 

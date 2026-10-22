@@ -2,7 +2,7 @@ import {
   ARENA_WALL_THICKNESS,
   BIOME_1_BOSS_WEIGHTS,
   BIOME_ROOM_COUNT,
-  CATHEDRAL_BOSS_ID,
+  CATHEDRAL_BOSS_WEIGHTS,
   CATHEDRAL_CHAMPIONS_EARLY,
   CATHEDRAL_CHAMPIONS_LATE,
   CIVILIAN_FALLOFF_FLOOR,
@@ -252,14 +252,15 @@ export function generateRoom(
 
   // --- defenders -----------------------------------------------------------
   // Drawn from the run seed, so the finale differs between runs and every player
-  // on a daily seed faces the same one. The war-camp's and the Cathedral's
-  // bosses are fixed rather than rolled — each is the run's real ending at the
-  // point it's reached, not one of three interchangeable finales the way the
-  // first biome's boss is.
+  // on a daily seed faces the same one. The war-camp's boss is fixed rather than
+  // rolled; the first biome's and the Cathedral's each come from their own pool.
   const bossId: HumanId | null =
     kind === 'boss'
       ? biome === 3
-        ? CATHEDRAL_BOSS_ID
+        ? rng.pickWeighted(
+            Object.keys(CATHEDRAL_BOSS_WEIGHTS) as HumanId[],
+            (id) => CATHEDRAL_BOSS_WEIGHTS[id] ?? 0,
+          )
         : biome === 2
           ? WARCAMP_BOSS_ID
           : rng.pickWeighted(

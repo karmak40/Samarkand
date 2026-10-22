@@ -31,6 +31,8 @@ export interface Settings {
   damageNumbers: boolean;
   /** Frame cost in the corner, for anyone diagnosing a stutter. */
   showFrameCost: boolean;
+  /** Tutorial lessons and one-time tips during a run. */
+  tips: boolean;
   /** On-screen stick and buttons. Menus stay tappable whatever this says. */
   touchControls: TouchControlsMode;
   /**
@@ -70,6 +72,7 @@ export function defaultSettings(): Settings {
     effects: 'full',
     damageNumbers: true,
     showFrameCost: false,
+    tips: true,
     touchControls: 'auto',
     analytics: false,
     analyticsAsked: false,
@@ -94,6 +97,7 @@ export function sanitizeSettings(raw: unknown): Settings {
   if (isEffectsLevel(data.effects)) settings.effects = data.effects;
   if (typeof data.damageNumbers === 'boolean') settings.damageNumbers = data.damageNumbers;
   if (typeof data.showFrameCost === 'boolean') settings.showFrameCost = data.showFrameCost;
+  if (typeof data.tips === 'boolean') settings.tips = data.tips;
   if (isTouchMode(data.touchControls)) settings.touchControls = data.touchControls;
   if (typeof data.analytics === 'boolean') settings.analytics = data.analytics;
   if (typeof data.analyticsAsked === 'boolean') settings.analyticsAsked = data.analyticsAsked;

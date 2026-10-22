@@ -89,6 +89,8 @@ export class Monster extends Combatant {
   private form: MonsterBody = createBaseBody();
 
   private readonly boons: ActiveBoon[] = [];
+  /** Relics picked up this run, counting refreshes — the tutorial watches it. */
+  boonsTaken = 0;
 
   souls = 0;
   /** Souls banked this run, before the meta screen converts them. */
@@ -271,6 +273,7 @@ export class Monster extends Combatant {
    * stacking a second copy of its modifiers.
    */
   grantBoon(def: BoonDef, world: World): void {
+    this.boonsTaken++;
     const existing = this.boons.find((b) => b.def.id === def.id);
     if (existing) {
       existing.remaining = def.duration;

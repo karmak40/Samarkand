@@ -35,6 +35,7 @@ import {
   drawResults,
   newResultsView,
   type ResultsView,
+  drawBossSlain,
   drawRoomIntro,
 } from './ui/screens';
 import {
@@ -57,7 +58,20 @@ import { PALETTE, Ui } from './ui/widgets';
 import { generateHordeArena } from './world/hordegen';
 import { hordeDifficultyTier, isEliteWave, rollHordeWave } from './world/hordewaves';
 import { BIOME_ROOMS, generateRoom, type PlannedSpawn, type RoomPlan } from './world/roomgen';
- import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
+ import {
+  baselineOf,
+  type Lesson,
+  LESSON_DONE_SECONDS,
+  type LessonBaseline,
+  lessonComplete,
+  nextLesson,
+  relativeTo,
+  STEPS,
+  type TutorialContext,
+} from './progression/tutorial';
+import { keyLabel } from './ui/settings';
+import { type CoachCard } from './ui/tutorial';
+import { generateRunMap, isArenaNode, reachableFrom, type RunMap } from './world/runmap';
 import { World } from './world/world';
 
 /** Whole-run room count: three biomes, each `BIOME_ROOMS` deep, back to back. */
@@ -68,6 +82,27 @@ const MAX_STEPS_PER_FRAME = 5;
 /** Consecutive failed frames before the game gives up on the current screen. */
 const BROKEN_FRAME_LIMIT = 60;
 const ROOM_INTRO_DURATION = 2.4;
+
+/**
+ * The boss-kill beat, in real seconds. Simulation time is slowed for the first
+ * part of it (see `bossKillTimeScale`) and the banner plays over all of it.
+ */
+const BOSS_KILL_DURATION = 2.8;
+/** Simulation speed at the instant of the kill; eases back to 1 from here. */
+const BOSS_KILL_MIN_TIME_SCALE = 0.12;
+/** Real seconds held at the slowest speed before easing back. */
+const BOSS_KILL_HOLD = 0.35;
+/** Real seconds spent easing from the slowest speed back to normal. */
+const BOSS_KILL_EASE = 1.5;
+
+/** How close a relic must lie for the tutorial to point it out, in world units. */
+const TUTORIAL_RELIC_SIGHT = 520;
+
+/** Lessons whose wording differs on a touchscreen (they name a key otherwise). */
+const TOUCH_WORDED_LESSONS = new Set(['move', 'attack', 'dash']);
+function hasTouchVariant(id: string): boolean {
+  return TOUCH_WORDED_LESSONS.has(id);
+}
 /** Seconds of total inactivity after which a room is force-cleared. */
 const STALL_TIMEOUT = 45;
 
@@ -216,6 +251,10 @@ export class Game {
   private hordeTargetSeconds = 0;
   /** Which tab and scroll offset the Horde level-select screen is showing. */
   private readonly hordeMenuView = { scroll: 0 };
+  /** Whether the Horde run just scored beat an earlier attempt on its arena. */
+  private hordeNewRecord = false;
+  /** Scroll offset of the chronicle when it stacks into one column. */
+  private readonly lifetimeView = { scroll: 0 };
 
   private marketOffers: MarketOffer[] = [];
   private cursedOffers: CursedOffer[] = [];
@@ -233,7 +272,12 @@ export class Game {
    * someone who gets it in three seconds shouldn't have it hanging around for
    * fourteen, and someone still fumbling at fourteen shouldn't lose it either.
    */
-  private controlsHintClearedAt: number | null = null;
+  /** The tutorial lesson on screen, with what it needs to judge "done". */
+  private lesson: Lesson | null = null;
+  private lessonShownFor = 0;
+  private lessonBase: LessonBaseline | null = null;
+  /** Seconds left on the "done" confirmation of the lesson just finished. */
+  private lessonDoneFor = 0;
   private exitReady = false;
   /** Whether this room's reinforcement wave (if it rolled one) has already marched in. */
   private reinforcementsSpawned = false;
@@ -260,6 +304,10 @@ export class Game {
   private cardAdRerollUsed = false;
 
   private hurtFlash = 0;
+  /** Real seconds since the last boss fell, or null outside the boss-kill beat. */
+  private bossKillElapsed: number | null = null;
+  private bossKillName = '';
+  private bossKillColor = '#ffe9a8';
   private lastHp = 0;
   private menuTime = 0;
   /** Which tab and scroll offset the lair screen is showing. */
@@ -422,7 +470,9 @@ export class Game {
     this.cardAdRerollUsed = false;
     Object.assign(this.mapView, initMapViewState());
     this.hurtFlash = 0;
-    this.controlsHintClearedAt = null;
+    this.bossKillElapsed = null;
+    this.lesson = null;
+    this.lessonDoneFor = 0;
     this.reviveAdUsed = false;
     this.reviveView.phase = 'offer';
     this.roomProgress = null;
@@ -721,7 +771,72 @@ export class Game {
 
     world.onHumanKilled = (human, ctx) => {
       this.applyOnKillEffects(human, ctx.sourceLabel);
+      if (human.archetype.role === 'boss') this.beginBossKill(human);
     };
+  }
+
+  /**
+   * The moment a boss dies. Everything here is feel, not rules: the room still
+   * clears the ordinary way once the last defender is down.
+   *
+   * Time slows (see `bossKillTimeScale`), the camera takes the hardest hit it
+   * ever takes, the body bursts in its own colours, and whoever is still
+   * standing breaks and runs — their leader just died in front of them.
+   */
+  private beginBossKill(boss: Human): void {
+    const world = this.world;
+    this.bossKillElapsed = 0;
+    this.bossKillName = boss.archetype.name;
+    this.bossKillColor = boss.archetype.accent;
+
+    world.camera.shake(16, 2.2);
+    world.camera.freeze(0.14);
+    this.sound.bossSlain();
+
+    world.particles.ring(boss.x, boss.y, '#ffffff', 60, 0.35);
+    world.particles.ring(boss.x, boss.y, boss.archetype.accent, 160, 0.8);
+    world.particles.ring(boss.x, boss.y, boss.archetype.tunic, 260, 1.2);
+    world.particles.emit({
+      count: 48,
+      x: boss.x,
+      y: boss.y,
+      color: boss.archetype.accent,
+      shape: 'blob',
+      speed: [120, 520],
+      size: [2, 5],
+      life: [0.5, 1.2],
+      gravity: 160,
+    });
+    world.particles.emit({
+      count: 36,
+      x: boss.x,
+      y: boss.y,
+      color: '#8f1c22',
+      shape: 'blob',
+      speed: [60, 340],
+      size: [2, 4.5],
+      life: [0.4, 1],
+      gravity: 260,
+    });
+
+    for (const human of world.humans) {
+      if (!human.alive || human === boss) continue;
+      human.statuses.apply({ id: 'fear', duration: 4, sourceLabel: t('bossSlain.verdict') });
+      human.witnessDeath(1);
+    }
+  }
+
+  /**
+   * Simulation speed during the boss-kill beat: held at its slowest for a
+   * moment, then eased back with a smoothstep so normal speed returns without
+   * a visible lurch.
+   */
+  private bossKillTimeScale(): number {
+    const elapsed = this.bossKillElapsed;
+    if (elapsed === null || elapsed < BOSS_KILL_HOLD) return elapsed === null ? 1 : BOSS_KILL_MIN_TIME_SCALE;
+    const x = clamp((elapsed - BOSS_KILL_HOLD) / BOSS_KILL_EASE, 0, 1);
+    const eased = x * x * (3 - 2 * x);
+    return BOSS_KILL_MIN_TIME_SCALE + (1 - BOSS_KILL_MIN_TIME_SCALE) * eased;
   }
 
   private applyOnKillEffects(human: Human, sourceLabel: string): void {
@@ -826,6 +941,8 @@ export class Game {
   private enterArena(plan: RoomPlan, index: number): void {
     this.roomIndex = index;
     this.activePlan = plan;
+    // A boss-kill beat still playing from the last room must not slow the next one.
+    this.bossKillElapsed = null;
 
     this.world.reset(plan.bounds, plan.wallThickness);
     this.renderer.terrain.build(plan);
@@ -1070,10 +1187,16 @@ export class Game {
     // places a Horde run can end landed it here — death, a declined revive, or
     // reaching the target duration (the only place `outcome` is actually set to
     // 'victory' for Horde; see `checkHordeProgress`).
-    if (this.hordeLevel !== null) {
-      this.meta.recordHordeResult(this.hordeLevel, this.tracker.outcome === 'victory');
-    }
-    this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun });
+    const horde = this.hordeLevel !== null ? { level: this.hordeLevel, wave: this.hordeWaveNumber } : undefined;
+    this.hordeNewRecord = horde
+      ? this.meta.recordHordeResult(horde.level, {
+          survived: this.tracker.outcome === 'victory',
+          seconds: Math.min(this.hordeElapsed, this.hordeTargetSeconds),
+          wave: horde.wave,
+          kills: this.tracker.totalKills,
+        })
+      : false;
+    this.earnedTrials = this.meta.recordRun(this.tracker, earned, { daily: this.isDailyRun, horde });
     this.reportRunEnd(earned);
     this.resultsView.scroll = 0;
     this.state = 'results';
@@ -1282,7 +1405,11 @@ export class Game {
     // Captured up front: `step()` can change `this.state` itself (death, a level
     // banked mid-fight), and the loop must stop the instant it does either way.
     const activeState = this.state;
-    this.accumulator += delta;
+    this.accumulator += delta * this.bossKillTimeScale();
+    if (this.bossKillElapsed !== null) {
+      this.bossKillElapsed += delta;
+      if (this.bossKillElapsed >= BOSS_KILL_DURATION) this.bossKillElapsed = null;
+    }
     let steps = 0;
 
     while (this.accumulator >= FIXED_STEP && steps < MAX_STEPS_PER_FRAME) {
@@ -1334,14 +1461,6 @@ export class Game {
 
     world.time += simDt;
     this.tracker.tick(simDt);
-    if (
-      this.controlsHintClearedAt === null &&
-      this.roomIndex === 0 &&
-      this.tracker.distanceTravelled > 60 &&
-      this.tracker.hitsLanded > 0
-    ) {
-      this.controlsHintClearedAt = this.tracker.elapsed;
-    }
     world.rebuildGrid();
 
     this.monster.handleInput(this.input, world, simDt);
@@ -1395,8 +1514,104 @@ export class Game {
     // never between one fixed step and the next.
     this.bossAlive = world.humans.some((h) => h.alive && h.archetype.role === 'boss');
 
+    this.updateTutorial(simDt);
+
     if (this.hordeLevel !== null) this.checkHordeProgress(simDt);
     else this.checkRoomProgress();
+  }
+
+  /** What the tutorial needs to know about the run this step. */
+  private tutorialContext(): TutorialContext {
+    const world = this.world;
+    const monster = this.monster;
+    const sight = TUTORIAL_RELIC_SIGHT * TUTORIAL_RELIC_SIGHT;
+    return {
+      shownFor: this.lessonShownFor,
+      distanceTravelled: this.tracker.distanceTravelled,
+      totalKills: this.tracker.totalKills,
+      dashesUsed: this.tracker.dashesUsed,
+      buildingsDestroyed: this.tracker.buildingsDestroyed,
+      buildingsStanding: world.buildings.filter((b) => b.alive).length,
+      soulsCollected: this.tracker.soulsCollected,
+      healthFraction: monster.healthFraction,
+      relicInSight: world.pickups.some(
+        (p) => p.alive && p.kind === 'boon' && (p.x - monster.x) ** 2 + (p.y - monster.y) ** 2 < sight,
+      ),
+      relicsTaken: monster.boonsTaken,
+      bossAlive: world.humans.some((h) => h.alive && h.archetype.role === 'boss'),
+      humansAlive: world.livingHumans,
+    };
+  }
+
+  /**
+   * Advance the tutorial one simulation step: finish the lesson on screen if the
+   * player has done it, otherwise pick the next one whose moment has come. Runs
+   * on simulation time, so a paused game or an open card draft doesn't count as
+   * time spent reading.
+   */
+  private updateTutorial(dt: number): void {
+    if (!this.meta.settings.tips || this.cinema.active) {
+      this.lesson = null;
+      return;
+    }
+
+    if (this.lessonDoneFor > 0) {
+      this.lessonDoneFor = Math.max(0, this.lessonDoneFor - dt);
+      if (this.lessonDoneFor > 0) return;
+      this.lesson = null;
+    }
+
+    const ctx = this.tutorialContext();
+
+    if (this.lesson && this.lessonBase) {
+      this.lessonShownFor += dt;
+      ctx.shownFor = this.lessonShownFor;
+      if (!lessonComplete(this.lesson, relativeTo(ctx, this.lessonBase))) return;
+
+      this.meta.tutorial.add(this.lesson.id);
+      this.meta.save();
+      // Only steps earn the confirmation beat — a tip that simply timed out was
+      // never something the player did, and ticking it off would read as praise.
+      if (this.lesson.kind === 'step') {
+        this.lessonDoneFor = LESSON_DONE_SECONDS;
+        this.sound.cardPick();
+        return;
+      }
+      this.lesson = null;
+    }
+
+    const next = nextLesson(ctx, this.meta.tutorial);
+    if (!next) return;
+    this.lesson = next;
+    this.lessonShownFor = 0;
+    this.lessonBase = baselineOf(ctx);
+  }
+
+  /** The tutorial card as the HUD should draw it this frame, or null. */
+  private coachCard(): CoachCard | null {
+    const lesson = this.lesson;
+    if (!lesson) return null;
+
+    const touch = this.touchActive();
+    const done = this.lessonDoneFor > 0;
+    const stepIndex = STEPS.indexOf(lesson);
+    const fadeIn = clamp(this.lessonShownFor / 0.35, 0, 1);
+    const fadeOut = done ? clamp(this.lessonDoneFor / 0.3, 0, 1) : 1;
+
+    const moveKeys = (['up', 'left', 'down', 'right'] as const)
+      .map((action) => keyLabel(this.input.codesFor(action)[0]))
+      .join(' ');
+    const dashKey = keyLabel(this.input.codesFor('dash')[0]);
+    const variant = touch && hasTouchVariant(lesson.id) ? 'touch' : 'body';
+
+    return {
+      title: t(`tutorial.${lesson.id}.title`),
+      body: t(`tutorial.${lesson.id}.${variant}`, { keys: moveKeys, key: dashKey }),
+      step: stepIndex >= 0 ? stepIndex + 1 : null,
+      steps: STEPS.length,
+      alpha: Math.min(fadeIn, fadeOut),
+      done,
+    };
   }
 
   /**
@@ -1457,7 +1672,9 @@ export class Game {
       // are experience now, so losing track of them would silently cost levels.
       for (const pickup of world.pickups) pickup.forceAttract();
 
-      world.texts.add(
+      // The boss-kill banner already says it, larger — a second line on top of it
+      // would only collide with it.
+      if (this.bossKillElapsed === null) world.texts.add(
         this.monster.x,
         this.monster.y - 60,
         t('text.settlementFallen'),
@@ -1577,7 +1794,10 @@ export class Game {
       if (action === 'start') this.beginRun();
       if (action === 'daily') this.beginRun(dailySeed(), true);
       if (action === 'horde') this.state = 'hordeMenu';
-      if (action === 'stats') this.state = 'lifetime';
+      if (action === 'stats') {
+        this.lifetimeView.scroll = 0;
+        this.state = 'lifetime';
+      }
       if (action === 'lair') this.state = 'lair';
       if (action === 'trials') this.state = 'trials';
       if (action === 'settings') {
@@ -1632,7 +1852,7 @@ export class Game {
 
     if (this.state === 'lifetime') {
       drawMenuBackdrop(this.ui, this.menuTime);
-      const action = drawLifetime(this.ui, this.meta);
+      const action = drawLifetime(this.ui, this.input, this.meta, this.lifetimeView);
       if (action === 'back') this.state = 'menu';
       if (action === 'reset') {
         this.meta.reset();
@@ -1672,7 +1892,7 @@ export class Game {
         skills: this.skillPool.takenList,
         hurtFlash: this.hurtFlash,
         elapsed: this.tracker.elapsed,
-        hintClearedAt: this.controlsHintClearedAt,
+        coach: this.cinema.hideHud ? null : this.coachCard(),
         bossName: boss ? boss.archetype.name : null,
         bossHealth: boss ? boss.healthFraction : 0,
         touchActive: this.touchActive(),
@@ -1688,9 +1908,13 @@ export class Game {
             : undefined,
       });
 
-      if (this.roomIntroTimer > 0 && !this.cinema.hideHud) {
+      if (this.roomIntroTimer > 0 && this.bossKillElapsed === null && !this.cinema.hideHud) {
         const progress = 1 - this.roomIntroTimer / ROOM_INTRO_DURATION;
         drawRoomIntro(this.ui, plan.name, this.roomIndex, progress);
+      }
+
+      if (this.bossKillElapsed !== null && !this.cinema.hideHud) {
+        drawBossSlain(this.ui, this.bossKillName, this.bossKillElapsed / BOSS_KILL_DURATION, this.bossKillColor);
       }
     }
 
@@ -1752,7 +1976,10 @@ export class Game {
         const action = drawResults(this.ui, this.input, this.tracker, this.soulsAtRunStart, this.meta, {
           daily: this.isDailyRun,
           earned: this.earnedTrials,
-          horde: this.hordeLevel !== null ? { level: this.hordeLevel, wave: this.hordeWaveNumber } : undefined,
+          horde:
+            this.hordeLevel !== null
+              ? { level: this.hordeLevel, wave: this.hordeWaveNumber, newRecord: this.hordeNewRecord }
+              : undefined,
         }, this.resultsView);
         // "Again" after a daily replays the same day's seed — that is the whole
         // point of a daily: the run stays fixed, only you change. "Again" after a
@@ -2209,6 +2436,22 @@ export class Game {
     this.beginHordeRun(level);
   }
 
+  /**
+   * Dev: wind the Horde clock forward, leaving `seconds` of it still to run. The
+   * end itself is still reached through `checkHordeProgress` on a stepped frame,
+   * so a test can score a survival without hand-stepping twelve minutes of waves.
+   */
+  debugSkipHordeClock(secondsLeft = 1): void {
+    if (this.hordeLevel === null) return;
+    this.hordeElapsed = Math.max(this.hordeElapsed, this.hordeTargetSeconds - secondsLeft);
+  }
+
+  /** Dev: open one of the menu screens that has no run behind it. */
+  debugOpenScreen(screen: 'lifetime' | 'hordeMenu' | 'trials' | 'menu'): void {
+    this.lifetimeView.scroll = 0;
+    this.state = screen;
+  }
+
   /** Dev: what the profile has earned, and where today's daily stands. */
   debugTrialReport(): Record<string, unknown> {
     return {
@@ -2218,6 +2461,14 @@ export class Game {
       rewardedSouls: this.meta.achievementSouls,
       dailySeed: dailySeed(),
       today: this.meta.todaysDaily(),
+      horde: {
+        unlocked: this.meta.hordeLevelUnlocked,
+        records: this.meta.hordeRecords,
+        runs: this.meta.lifetime.hordeRuns,
+        victories: this.meta.lifetime.hordeVictories,
+        campaignVictories: this.meta.lifetime.victories,
+        newRecord: this.hordeNewRecord,
+      },
     };
   }
 

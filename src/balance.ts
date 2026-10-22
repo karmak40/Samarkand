@@ -653,6 +653,72 @@ export const HUMAN_ARCHETYPES: Record<HumanId, HumanArchetype> = {
     relicChance: 1,
     courage: 1,
   },
+
+  /**
+   * The Martyr: the Cathedral's second possible finale. Fragile for a boss and
+   * happy to keep her distance — the threat is the floor (Stigmata) and the sky
+   * (Ascension), plus a choir of flagellants that buys her time. A ranged build
+   * that out-trades the Anchorite at a distance gets punished here instead.
+   */
+  martyr: {
+    id: 'martyr',
+    get name() { return t('enemy.martyr.name'); },
+    role: 'boss',
+    enabled: true,
+    hp: 1950,
+    armor: 32,
+    resist: { holy: 0.9, physical: 0.1, unholy: 0.15 },
+    speed: 128,
+    radius: 22,
+    damage: [{ type: 'holy', amount: 28 }],
+    attackRange: 400,
+    preferredRange: 270,
+    attackCooldown: 1.6,
+    windup: 0.6,
+    recover: 0.5,
+    souls: 100,
+    knockbackResist: 10,
+    tunic: '#d9cfc0',
+    accent: '#b3262e',
+    onHitStatuses: [{ id: 'bleed', duration: 5, stacks: 2, power: 3, get sourceLabel() { return t('effect.stigmata'); } }],
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
+
+  /**
+   * The Bellringer: the Cathedral's third possible finale, and its brute. Slow,
+   * the heaviest armour in the game, and every ability is about rhythm — rings
+   * that come in two beats, bells that land where you were a second ago.
+   */
+  bellringer: {
+    id: 'bellringer',
+    get name() { return t('enemy.bellringer.name'); },
+    role: 'boss',
+    enabled: true,
+    hp: 2500,
+    armor: 72,
+    resist: { physical: 0.25, holy: 0.6, frost: 0.2 },
+    speed: 118,
+    radius: 26,
+    damage: [{ type: 'physical', amount: 38 }],
+    attackRange: 86,
+    preferredRange: 78,
+    attackCooldown: 1.7,
+    windup: 0.7,
+    recover: 0.6,
+    souls: 105,
+    knockbackResist: 16,
+    tunic: '#4a4038',
+    accent: '#b08d57',
+    spawnWeight: 0,
+    minDepth: 99,
+    bloodChance: 1,
+    relicChance: 1,
+    courage: 1,
+  },
 };
 
 /** Point cost of each unit when filling a room's enemy spawn budget (roomgen.ts). */
@@ -677,6 +743,8 @@ export const SPAWN_COST: Record<HumanId, number> = {
   exorcist: 6,
   paladin: 8,
   anchorite: 0,
+  martyr: 0,
+  bellringer: 0,
 };
 
 // ===========================================================================
@@ -1075,6 +1143,74 @@ export const SPECIES: readonly Species[] = [
       aura: 'void',
     },
     price: 850,
+  },
+  {
+    id: 'brood',
+    get name() { return t('species.brood.name'); },
+    get tagline() { return t('species.brood.tag'); },
+    get description() { return t('species.brood.desc'); },
+    // Fights through its young: familiars from the first room, a weak poisoned
+    // spit of its own. The bite is the familiars' — the body just has to live.
+    stats: {
+      maxHp: 136,
+      moveSpeed: 196,
+      damage: 12,
+      attackSpeed: 1.5,
+      convPoison: 0.35,
+      statusDuration: 1.2,
+      pickupRadius: 135,
+    },
+    body: {
+      coreRadius: 21,
+      lobes: 11,
+      eyes: 6,
+      tails: 0,
+      limbs: 6,
+      sacs: 5,
+      maw: 0.2,
+      bulk: 1.06,
+      bodyColor: '#25281a',
+      accentColor: '#4d5a26',
+      glowColor: '#b9d45a',
+      glowStrength: 0.6,
+      aura: 'poison',
+    },
+    behaviors: ['orbitingSpawn'],
+    price: 750,
+  },
+  {
+    id: 'ghoul',
+    get name() { return t('species.ghoul.name'); },
+    get tagline() { return t('species.ghoul.tag'); },
+    get description() { return t('species.ghoul.desc'); },
+    // Short reach and a long appetite: every kill drops blood, and lifesteal
+    // tops up the rest. Wins by staying in the crowd, loses by leaving it.
+    stats: {
+      maxHp: 110,
+      moveSpeed: 224,
+      damage: 19,
+      attackSpeed: 1.85,
+      lifesteal: 0.05,
+      range: 320,
+      critDamage: 0.7,
+      healingReceived: 1.1,
+    },
+    body: {
+      coreRadius: 18,
+      lobes: 6,
+      eyes: 2,
+      tails: 1,
+      limbs: 4,
+      tendrils: 4,
+      maw: 0.58,
+      bulk: 0.94,
+      bodyColor: '#2a1416',
+      accentColor: '#6e1a22',
+      glowColor: '#ff4a4a',
+      glowStrength: 0.55,
+    },
+    behaviors: ['devourCorpses'],
+    price: 750,
   },
 ];
 
@@ -1828,6 +1964,82 @@ export const MUTATIONS: readonly Mutation[] = [
       b.eyes += 2;
     },
   },
+
+  // ---- shapes that change the silhouette and how a fight is played ------------
+  {
+    id: 'chitin-carapace',
+    get name() { return t('mutation.chitin-carapace.name'); },
+    get description() { return t('mutation.chitin-carapace.description'); },
+    enabled: true,
+    tier: 0,
+    modifiers: [
+      { key: 'armor', flat: 30 },
+      { key: 'resPhysical', flat: 0.15 },
+      { key: 'moveSpeed', mult: -0.06 },
+    ],
+    mutate: (b: MonsterBody) => {
+      b.plates += 5;
+      b.accentColor = '#5a4a2e';
+    },
+  },
+  {
+    id: 'crown-of-tendrils',
+    get name() { return t('mutation.crown-of-tendrils.name'); },
+    get description() { return t('mutation.crown-of-tendrils.description'); },
+    enabled: true,
+    tier: 0,
+    modifiers: [
+      { key: 'pierce', flat: 1 },
+      { key: 'range', mult: 0.12 },
+      { key: 'statusDuration', mult: 0.3 },
+    ],
+    mutate: (b: MonsterBody) => {
+      b.tendrils += 5;
+    },
+  },
+  {
+    id: 'brood-sacs',
+    get name() { return t('mutation.brood-sacs.name'); },
+    get description() { return t('mutation.brood-sacs.description'); },
+    enabled: true,
+    tier: 0,
+    modifiers: [{ key: 'maxHp', flat: 40 }],
+    behaviors: ['orbitingSpawn'],
+    mutate: (b: MonsterBody) => {
+      b.sacs += 4;
+      b.bulk += 0.06;
+    },
+  },
+  {
+    id: 'grave-hunger',
+    get name() { return t('mutation.grave-hunger.name'); },
+    get description() { return t('mutation.grave-hunger.description'); },
+    enabled: true,
+    tier: 0,
+    modifiers: [
+      { key: 'soulGain', mult: 0.15 },
+      { key: 'hpRegen', flat: 1 },
+    ],
+    behaviors: ['devourCorpses'],
+    mutate: (b: MonsterBody) => {
+      b.maw = Math.min(0.72, b.maw + 0.14);
+      b.accentColor = '#5a1a1e';
+    },
+  },
+  {
+    id: 'dread-visage',
+    get name() { return t('mutation.dread-visage.name'); },
+    get description() { return t('mutation.dread-visage.description'); },
+    enabled: true,
+    tier: 0,
+    modifiers: [{ key: 'critDamage', flat: 0.35 }],
+    behaviors: ['terrorAura'],
+    mutate: (b: MonsterBody) => {
+      b.eyes += 3;
+      b.horns += 1;
+      b.glowStrength += 0.25;
+    },
+  },
 ];
 
 // ===========================================================================
@@ -2463,8 +2675,16 @@ export const BIOME_1_BOSS_WEIGHTS: Record<BossId, number> = {
   pyromancer: 1,
 };
 export const WARCAMP_BOSS_ID: HumanId = 'khagan';
-/** Biome 3's finale — a pool of one, same reasoning as `WARCAMP_BOSS_ID`. */
-export const CATHEDRAL_BOSS_ID: HumanId = 'anchorite';
+/**
+ * Biome 3's finale is drawn from this pool, same as the first biome's. The
+ * Cathedral is the end of the whole campaign, so repeat clears are where a run
+ * most needs the last fight to be different from the one before it.
+ */
+export const CATHEDRAL_BOSS_WEIGHTS: Partial<Record<HumanId, number>> = {
+  anchorite: 1,
+  martyr: 1,
+  bellringer: 1,
+};
 
 /**
  * Ground the Cathedral turns against the monster — the biome's one real
@@ -2489,6 +2709,75 @@ export const CATHEDRAL_WARD = {
 // Each boss cycles through three abilities round-robin (`specialIndex`). Every
 // damage/dps number here is a *base* value the caster still multiplies by its own
 // `damageScale` (tier-scaled) at the call site — this file only holds the base.
+
+/**
+ * The Martyr's three: the floor bleeds under you, the faithful come, the sky
+ * falls. Stigmata and Ascension are both telegraphed — what they punish is
+ * standing still for the second after the warning, not bad luck.
+ */
+export const MARTYR_ABILITIES = {
+  /** Three wounds opening under and beside the monster, lingering as holy ground. */
+  stigmata: {
+    count: 3,
+    offset: 120,
+    telegraphSeconds: 0.75,
+    hazardRadius: 72,
+    life: 5,
+    dps: 24,
+  },
+  /** Flagellants pour in around her, with an exorcist to keep the pressure ranged. */
+  choir: {
+    flagellants: 4,
+    exorcists: 1,
+    spawnRadius: 90,
+  },
+  /** Holy strikes rain on random points around the monster, one after another. */
+  ascension: {
+    strikes: 7,
+    scatter: 220,
+    staggerSeconds: 0.16,
+    telegraphSeconds: 0.7,
+    radius: 70,
+    damage: 30,
+    shake: 5,
+  },
+};
+
+/**
+ * The Bellringer's three: a two-beat ring, bells dropped where you stand, and
+ * a paladin escort. Everything comes in a rhythm, so it's learnable — and
+ * punishing to anyone who dashes on the first beat instead of the second.
+ */
+export const BELLRINGER_ABILITIES = {
+  /** Two rings of bronze, the second offset by half a step so a gap never lines up. */
+  toll: {
+    count: 20,
+    beatSeconds: 0.45,
+    spawnRadius: 32,
+    speed: 280,
+    damage: 22,
+    projectileRadius: 9,
+    range: 720,
+    knockback: 80,
+    shake: 8,
+  },
+  /** Three bells fall in a line across the monster's position. */
+  bellDrop: {
+    count: 3,
+    spacing: 130,
+    telegraphSeconds: 0.9,
+    radius: 115,
+    damage: 44,
+    knockback: 260,
+    shake: 12,
+  },
+  /** Two paladins step out from behind him. */
+  escort: {
+    count: 2,
+    spawnRadius: 85,
+    angleSpread: 0.9,
+  },
+};
 
 export const WARLORD_ABILITIES = {
   /** A telegraphed leap; the landing is what hurts, so it can be walked out of. */

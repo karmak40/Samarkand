@@ -1,11 +1,13 @@
 import {
   ANCHORITE_ABILITIES,
+  BELLRINGER_ABILITIES,
   EARLY_ROOM_DIFFICULTY,
   earlyRoomDifficultyFraction,
   ENEMY_TIER_SCALING,
   HUMAN_ARCHETYPES,
   INQUISITOR_ABILITIES,
   KHAGAN_ABILITIES,
+  MARTYR_ABILITIES,
   PYROMANCER_ABILITIES,
   WARLORD_ABILITIES,
 } from '../balance';
@@ -67,7 +69,9 @@ export type HumanId =
   | 'flagellant'
   | 'exorcist'
   | 'paladin'
-  | 'anchorite';
+  | 'anchorite'
+  | 'martyr'
+  | 'bellringer';
 
 /** Every boss the first biome's run can end on. One is drawn per run from the seed. */
 export const BOSS_IDS = ['inquisitor', 'warlord', 'pyromancer'] as const;
@@ -642,6 +646,12 @@ export class Human extends Combatant {
       case 'anchorite':
         this.castAnchorite(world);
         return;
+      case 'martyr':
+        this.castMartyr(world);
+        return;
+      case 'bellringer':
+        this.castBellringer(world);
+        return;
       default:
         this.castInquisitor(world);
     }
@@ -1007,6 +1017,168 @@ export class Human extends Combatant {
         world.particles.ring(this.x, this.y, '#ffffff', cfg.radius, 0.4);
         world.camera.shake(6);
         world.texts.add(this.x, this.y - 40, t('text.radianceBurst'), '#ffffff', 18);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Stigmata, Choir, Ascension — see `MARTYR_ABILITIES`. Two of the three are
+   * ground the player has to leave in time; the third fills the arena with
+   * bodies that make leaving it harder.
+   */
+  private castMartyr(world: World): void {
+    const monster = world.monster;
+    const power = this.damageScale;
+
+    switch (this.specialIndex) {
+      case 0: {
+        // Wounds open in a line across where the monster stands, perpendicular to
+        // her — sidestepping along the line doesn't help, stepping off it does.
+        const cfg = MARTYR_ABILITIES.stigmata;
+        const across = Math.atan2(monster.y - this.y, monster.x - this.x) + Math.PI / 2;
+        for (let i = 0; i < cfg.count; i++) {
+          const along = (i - (cfg.count - 1) / 2) * cfg.offset;
+          const tx = monster.x + Math.cos(across) * along;
+          const ty = monster.y + Math.sin(across) * along;
+          world.particles.ring(tx, ty, '#b3262e', cfg.hazardRadius, cfg.telegraphSeconds, true);
+          world.scheduleDelayed?.(cfg.telegraphSeconds, (w) => {
+            if (!this.alive) return;
+            w.addGroundHazard({
+              x: tx,
+              y: ty,
+              radius: cfg.hazardRadius,
+              life: cfg.life,
+              dps: cfg.dps * power,
+              type: 'holy',
+              color: '#b3262e',
+              sourceLabel: t('effect.stigmata'),
+            });
+          });
+        }
+        world.texts.add(this.x, this.y - 40, t('text.stigmataOpen'), '#ff8a8a', 18);
+        break;
+      }
+      case 1: {
+        const cfg = MARTYR_ABILITIES.choir;
+        const total = cfg.flagellants + cfg.exorcists;
+        for (let i = 0; i < total; i++) {
+          const a = (i / total) * TAU + world.rng.next() * 0.4;
+          world.spawnHuman?.(
+            i < cfg.flagellants ? 'flagellant' : 'exorcist',
+            this.x + Math.cos(a) * cfg.spawnRadius,
+            this.y + Math.sin(a) * cfg.spawnRadius,
+            this.tier,
+          );
+        }
+        world.particles.ring(this.x, this.y, '#efe7d2', 120, 0.6);
+        world.texts.add(this.x, this.y - 40, t('text.martyrChoir'), '#efe7d2', 18);
+        break;
+      }
+      default: {
+        // Each strike is aimed at where the monster is *when it is called*, not
+        // where it was when the volley began — moving keeps you ahead of it.
+        const cfg = MARTYR_ABILITIES.ascension;
+        for (let i = 0; i < cfg.strikes; i++) {
+          world.scheduleDelayed?.(i * cfg.staggerSeconds, (w) => {
+            if (!this.alive) return;
+            const tx = w.monster.x + (w.rng.next() - 0.5) * 2 * cfg.scatter;
+            const ty = w.monster.y + (w.rng.next() - 0.5) * 2 * cfg.scatter;
+            w.particles.ring(tx, ty, '#ffe9a8', cfg.radius, cfg.telegraphSeconds, true);
+            w.scheduleDelayed?.(cfg.telegraphSeconds, (w2) => {
+              w2.explode(
+                tx,
+                ty,
+                cfg.radius,
+                [{ type: 'holy', amount: cfg.damage * power }],
+                t('effect.ascension'),
+                { color: '#ffe9a8', hurtsBuildings: false, shake: cfg.shake },
+              );
+            });
+          });
+        }
+        world.texts.add(this.x, this.y - 40, t('text.ascension'), '#ffe9a8', 18);
+        break;
+      }
+    }
+  }
+
+  /**
+   * Toll, Bell Drop, Escort — see `BELLRINGER_ABILITIES`. A slow brute whose
+   * whole kit runs on a beat: learn the rhythm and he is a wall of armour,
+   * miss it and every ability lands at once.
+   */
+  private castBellringer(world: World): void {
+    const monster = world.monster;
+    const angle = Math.atan2(monster.y - this.y, monster.x - this.x);
+    const power = this.damageScale;
+
+    switch (this.specialIndex) {
+      case 0: {
+        const cfg = BELLRINGER_ABILITIES.toll;
+        const ring = (w: World, phase: number): void => {
+          for (let i = 0; i < cfg.count; i++) {
+            const a = ((i + phase) / cfg.count) * TAU;
+            w.spawnProjectile({
+              x: this.x + Math.cos(a) * cfg.spawnRadius,
+              y: this.y + Math.sin(a) * cfg.spawnRadius,
+              angle: a,
+              speed: cfg.speed,
+              packets: [{ type: 'physical', amount: cfg.damage * power }],
+              faction: 'human',
+              sourceLabel: t('effect.toll'),
+              radius: cfg.projectileRadius,
+              range: cfg.range,
+              color: '#b08d57',
+              glow: '#ffe2a8',
+              shape: 'orb',
+              owner: this,
+              knockback: cfg.knockback,
+              ignoresWalls: true,
+            });
+          }
+          w.particles.ring(this.x, this.y, '#b08d57', 90, 0.5);
+          w.camera.shake(cfg.shake);
+        };
+        ring(world, 0);
+        world.scheduleDelayed?.(cfg.beatSeconds, (w) => {
+          if (this.alive) ring(w, 0.5);
+        });
+        world.texts.add(this.x, this.y - 40, t('text.toll'), '#e8c98a', 18);
+        break;
+      }
+      case 1: {
+        // A line of bells across the monster, perpendicular to the boss, so the
+        // way out is toward or away from him — never sideways.
+        const cfg = BELLRINGER_ABILITIES.bellDrop;
+        const across = angle + Math.PI / 2;
+        world.sound.enemyWindup(this, cfg.telegraphSeconds);
+        for (let i = 0; i < cfg.count; i++) {
+          const along = (i - (cfg.count - 1) / 2) * cfg.spacing;
+          const tx = monster.x + Math.cos(across) * along;
+          const ty = monster.y + Math.sin(across) * along;
+          world.particles.ring(tx, ty, '#b08d57', cfg.radius, cfg.telegraphSeconds, true);
+          world.scheduleDelayed?.(cfg.telegraphSeconds, (w) => {
+            if (!this.alive) return;
+            w.explode(
+              tx,
+              ty,
+              cfg.radius,
+              [{ type: 'physical', amount: cfg.damage * power }],
+              t('effect.bellDrop'),
+              { color: '#b08d57', knockback: cfg.knockback, shake: cfg.shake },
+            );
+          });
+        }
+        break;
+      }
+      default: {
+        const cfg = BELLRINGER_ABILITIES.escort;
+        for (let i = 0; i < cfg.count; i++) {
+          const a = angle + Math.PI + (i - (cfg.count - 1) / 2) * cfg.angleSpread;
+          world.spawnHuman?.('paladin', this.x + Math.cos(a) * cfg.spawnRadius, this.y + Math.sin(a) * cfg.spawnRadius, this.tier);
+        }
+        world.texts.add(this.x, this.y - 40, t('text.bellEscort'), '#d4af37', 18);
         break;
       }
     }
@@ -1715,6 +1887,13 @@ export class Human extends Combatant {
       case 'anchorite':
         this.drawStaff(ctx);
         break;
+      case 'martyr':
+        this.drawHolySymbol(ctx);
+        this.drawBleedingHalo(ctx);
+        break;
+      case 'bellringer':
+        this.drawBellHammer(ctx);
+        break;
       default:
         // Plain civilians carry nothing worth drawing.
         break;
@@ -1906,6 +2085,53 @@ export class Human extends Combatant {
     ctx.arc(headX, headY, 14, 0, TAU);
     ctx.fill();
     ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /** The Martyr's mark: a thin crown of red light over her symbol. */
+  private drawBleedingHalo(ctx: CanvasRenderingContext2D): void {
+    ctx.globalCompositeOperation = 'lighter';
+    ctx.strokeStyle = hexAlpha(this.archetype.accent, 0.8);
+    ctx.lineWidth = 2;
+    ctx.beginPath();
+    ctx.arc(-this.radius * 0.2, 0, this.radius * 0.95, -2.4, 2.4);
+    ctx.stroke();
+    ctx.globalCompositeOperation = 'source-over';
+  }
+
+  /** A long haft with a bronze bell for a head — he rings it, and hits with it. */
+  private drawBellHammer(ctx: CanvasRenderingContext2D): void {
+    const headX = this.radius * 1.75;
+    ctx.strokeStyle = '#3a2a1e';
+    ctx.lineWidth = 3.5;
+    ctx.beginPath();
+    ctx.moveTo(-8, 0);
+    ctx.lineTo(headX, 0);
+    ctx.stroke();
+
+    // Bell: a rounded crown on the haft, a waist, then a flared lip facing out —
+    // and the clapper hanging just past the mouth.
+    const mouth = headX + 17;
+    ctx.fillStyle = this.archetype.accent;
+    ctx.strokeStyle = shade(this.archetype.accent, -0.4);
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.moveTo(headX + 2, -6);
+    ctx.quadraticCurveTo(headX + 10, -6, mouth - 2, -11);
+    ctx.lineTo(mouth, -12);
+    ctx.lineTo(mouth, 12);
+    ctx.lineTo(mouth - 2, 11);
+    ctx.quadraticCurveTo(headX + 10, 6, headX + 2, 6);
+    ctx.arc(headX + 2, 0, 6, Math.PI / 2, Math.PI * 1.5);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+
+    ctx.fillStyle = shade(this.archetype.accent, 0.3);
+    ctx.fillRect(headX + 4, -5, 3, 3);
+    ctx.fillStyle = shade(this.archetype.accent, -0.5);
+    ctx.beginPath();
+    ctx.arc(mouth + 2, 0, 2.5, 0, TAU);
+    ctx.fill();
   }
 
   private drawOverlays(ctx: CanvasRenderingContext2D, world: World): void {

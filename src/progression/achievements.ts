@@ -1,3 +1,4 @@
+import { HORDE_LEVELS } from '../balance';
 import type { DamageType } from '../combat/damage';
 import { BOSS_IDS } from '../entities/human';
 import { t } from '../i18n';
@@ -30,13 +31,26 @@ export interface LifetimeSnapshot {
   totalKills: number;
   totalBuildings: number;
   dailyRuns: number;
+  /** Horde attempts, ever — kept apart from `runs`' campaign meaning nowhere else. */
+  hordeRuns: number;
   killsByEnemy: Record<string, number>;
+}
+
+/** What a finished Horde run adds on top of its `RunStats`. */
+export interface HordeRunSnapshot {
+  level: number;
+  /** Waves that had landed when the run ended. */
+  wave: number;
 }
 
 export interface AchievementContext {
   /** The run that just ended. Null when the trials screen asks about lifetime ones. */
   run: RunStats | null;
+  /** Set when `run` was a Horde run; null for the campaign, a daily, or no run. */
+  horde: HordeRunSnapshot | null;
   lifetime: LifetimeSnapshot;
+  /** Horde arenas survived at least once, from the permanent ladder. */
+  hordeLevelsBeaten: number;
   /** Content owned, for the completionist trial. */
   unlockedContent: number;
   unlockableContent: number;
@@ -69,7 +83,14 @@ function share(run: RunStats, type: DamageType): number {
  */
 const PURITY = 0.7;
 
-/** A run-scoped trial: pass or fail on the run that just ended. */
+/**
+ * A run-scoped trial: pass or fail on the campaign run that just ended.
+ *
+ * Horde runs are never judged here. The tracker calls surviving an arena a
+ * 'victory', but twelve minutes against a clock is not the hunt "win in fifteen
+ * minutes" or "win on fire alone" describes — counted, it handed out the
+ * campaign's hardest trials for an arena-1 survival. Horde has its own below.
+ */
 function runTrial(
   id: string,
   reward: number,
@@ -81,8 +102,37 @@ function runTrial(
     scope: 'run',
     reward,
     target: 1,
-    measure: (ctx) => (ctx.run && test(ctx.run) ? 1 : 0),
+    measure: (ctx) => (ctx.run && !ctx.horde && test(ctx.run) ? 1 : 0),
     vars,
+  };
+}
+
+/** The Horde counterpart of `runTrial`: judges only a Horde run that just ended. */
+function hordeTrial(
+  id: string,
+  reward: number,
+  test: (run: RunStats, horde: HordeRunSnapshot) => boolean,
+  vars?: Record<string, number>,
+): AchievementDef {
+  return {
+    id,
+    scope: 'run',
+    reward,
+    target: 1,
+    measure: (ctx) => (ctx.run && ctx.horde && test(ctx.run, ctx.horde) ? 1 : 0),
+    vars,
+  };
+}
+
+/** Climbing the Horde ladder: arenas survived at least once, from the meta ladder. */
+function hordeLadderTrial(id: string, reward: number, target: number): AchievementDef {
+  return {
+    id,
+    scope: 'life',
+    reward,
+    target,
+    measure: (ctx) => ctx.hordeLevelsBeaten,
+    vars: { n: target },
   };
 }
 
@@ -162,6 +212,20 @@ export const ACHIEVEMENTS: readonly AchievementDef[] = [
 
   lifeTrial('daily-hunt', 20, 1, (l) => l.dailyRuns),
   lifeTrial('daily-devotion', 90, 7, (l) => l.dailyRuns),
+
+  hordeTrial('horde-survivor', 40, (run) => run.outcome === 'victory'),
+  hordeTrial('horde-massacre', 60, (run) => run.totalKills >= 500, { n: 500 }),
+  // Never below half health for a whole arena: the Horde's version of "unscathed",
+  // softened because waves from four edges make a zero-damage arena luck, not skill.
+  hordeTrial(
+    'horde-steadfast',
+    120,
+    (run) => run.outcome === 'victory' && run.lowestHealthFraction >= 0.5,
+    { n: 50 },
+  ),
+  lifeTrial('horde-regular', 40, 10, (l) => l.hordeRuns),
+  hordeLadderTrial('horde-halfway', 90, Math.ceil(HORDE_LEVELS.length / 2)),
+  hordeLadderTrial('horde-ladder', 200, HORDE_LEVELS.length),
 
   {
     id: 'curator',

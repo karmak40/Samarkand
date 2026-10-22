@@ -1,5 +1,8 @@
 import { describe, expect, it } from 'vitest';
+import { CATHEDRAL_BOSS_WEIGHTS } from '../balance';
+import { RNG } from '../core/rng';
 import { HUMAN_ARCHETYPES, BOSS_IDS, type HumanId } from '../entities/human';
+import { generateRoom } from '../world/roomgen';
 import { ACHIEVEMENTS, type LifetimeSnapshot } from './achievements';
 import { BOONS } from './boons';
 import { CURSES } from './curses';
@@ -43,6 +46,24 @@ describe('enemy archetypes', () => {
       expect(archetype).toBeDefined();
       expect(archetype.role).toBe('boss');
     }
+  });
+
+  it('every Cathedral finale is a real boss', () => {
+    for (const id of Object.keys(CATHEDRAL_BOSS_WEIGHTS) as HumanId[]) {
+      expect(HUMAN_ARCHETYPES[id].role).toBe('boss');
+    }
+  });
+
+  it('the Cathedral boss room draws every finale in its pool across seeds', () => {
+    const pool = new Set(Object.keys(CATHEDRAL_BOSS_WEIGHTS));
+    const seen = new Set<string>();
+    for (let seed = 1; seed <= 60 && seen.size < pool.size; seed++) {
+      const plan = generateRoom(35, new RNG(seed), 'boss', 3);
+      for (const spawn of plan.spawns) {
+        if (HUMAN_ARCHETYPES[spawn.id].role === 'boss') seen.add(spawn.id);
+      }
+    }
+    expect(seen).toEqual(pool);
   });
 
   it('bosses are never rolled into an ordinary settlement', () => {
@@ -174,13 +195,16 @@ describe('trials', () => {
       totalKills: 0,
       totalBuildings: 0,
       dailyRuns: 0,
+      hordeRuns: 0,
       killsByEnemy: kills,
     });
 
     const measure = (kills: Record<string, number>): number =>
       trial.measure({
         run: null,
+        horde: null,
         lifetime: lifetimeWith(kills),
+        hordeLevelsBeaten: 0,
         unlockedContent: 0,
         unlockableContent: 0,
       });

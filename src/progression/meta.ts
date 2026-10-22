@@ -1,3 +1,4 @@
+import { HORDE_LEVELS } from '../balance';
 import { DAMAGE_TYPES, type DamageType } from '../combat/damage';
 import { type RunStats } from '../stats/tracker';
 import {
@@ -5,21 +6,25 @@ import {
   type AchievementContext,
   type AchievementDef,
   evaluateAchievements,
+  type HordeRunSnapshot,
   getAchievement,
 } from './achievements';
 import { dailyKey } from './daily';
 import { type ContentGate, type UnlockCategory } from './gate';
 import { defaultSettings, sanitizeSettings, type Settings } from './settings';
 import { DEFAULT_SPECIES_ID, getSpecies, resolveSpecies, type Species } from './species';
+import { getLesson, LESSONS } from './tutorial';
 import { getUnlock, isContentAvailable, UNLOCKS } from './unlocks';
 
 const SAVE_KEY = 'samarkand.save.v1';
-const SAVE_VERSION = 5;
+const SAVE_VERSION = 6;
 
 
 /** Aggregated numbers across every run ever played. */
 export interface LifetimeStats {
+  /** Every run, campaign and Horde alike. */
   runs: number;
+  /** Campaign victories only — a survived Horde arena counts in `hordeVictories`. */
   victories: number;
   deaths: number;
   totalKills: number;
@@ -28,6 +33,11 @@ export interface LifetimeStats {
   totalDamageTaken: number;
   totalBuildings: number;
   totalPlaytime: number;
+  /**
+   * The run-length bests are campaign-only: twelve minutes of waves out-kill any
+   * hunt, so a single Horde run would bury the campaign's records for good. Horde
+   * keeps its own, per arena, in `MetaProgress.hordeRecords`.
+   */
   deepestRoom: number;
   bestKills: number;
   bestDps: number;
@@ -41,6 +51,46 @@ export interface LifetimeStats {
   deathsBySource: Record<string, number>;
   /** Runs played on a daily seed, ever. */
   dailyRuns: number;
+  /** Horde attempts and arenas survived, ever. */
+  hordeRuns: number;
+  hordeVictories: number;
+}
+
+/** Personal bests on one Horde arena. */
+export interface HordeLevelRecord {
+  attempts: number;
+  /** Longest stand, in seconds — tops out at the arena's target on a survival. */
+  bestSeconds: number;
+  bestWave: number;
+  bestKills: number;
+}
+
+/** How one Horde attempt went, as `recordHordeResult` is told it. */
+export interface HordeAttempt {
+  survived: boolean;
+  seconds: number;
+  wave: number;
+  kills: number;
+}
+
+/** A save is editable text — keep only well-formed records for arenas that exist. */
+function sanitizeHordeRecords(raw: unknown): Record<number, HordeLevelRecord> {
+  const out: Record<number, HordeLevelRecord> = {};
+  if (!raw || typeof raw !== 'object') return out;
+  const count = (value: unknown): number =>
+    typeof value === 'number' && Number.isFinite(value) && value > 0 ? value : 0;
+  for (const [key, value] of Object.entries(raw as Record<string, unknown>)) {
+    const level = Number(key);
+    if (!HORDE_LEVELS.some((l) => l.level === level) || !value || typeof value !== 'object') continue;
+    const r = value as Partial<HordeLevelRecord>;
+    out[level] = {
+      attempts: Math.floor(count(r.attempts)),
+      bestSeconds: count(r.bestSeconds),
+      bestWave: Math.floor(count(r.bestWave)),
+      bestKills: Math.floor(count(r.bestKills)),
+    };
+  }
+  return out;
 }
 
 /**
@@ -127,6 +177,8 @@ function emptyLifetime(): LifetimeStats {
     mutationPicks: {},
     deathsBySource: {},
     dailyRuns: 0,
+    hordeRuns: 0,
+    hordeVictories: 0,
   };
 }
 
@@ -138,6 +190,8 @@ export interface SaveData {
   lifetime: LifetimeStats;
   /** Ids of trials already earned; rewards are paid once. */
   achievements: string[];
+  /** Tutorial lessons already taught (see `progression/tutorial.ts`). */
+  tutorial?: string[];
   daily: DailyRecord;
   /** Id of the body the next run starts in. */
   speciesId: string;
@@ -147,6 +201,8 @@ export interface SaveData {
   selectedStartBiome: number;
   /** Highest Horde arena level unlocked. Ratchets up only. */
   hordeLevelUnlocked: number;
+  /** Personal bests per Horde arena, keyed by level. */
+  hordeRecords?: Record<number, HordeLevelRecord>;
   /** Where the next run starts if the last one didn't end in victory. */
   checkpointBiome: number;
   checkpointDepth: number;
@@ -206,8 +262,13 @@ export class MetaProgress implements ContentGate {
    */
   hordeLevelUnlocked = 1;
 
+  /** Personal bests per Horde arena, keyed by level. Absent until first attempted. */
+  hordeRecords: Record<number, HordeLevelRecord> = {};
+
   /** Trials earned. Their soul reward is paid on the frame they land, once. */
   readonly achievements = new Set<string>();
+  /** Tutorial lessons already taught — each is shown once per profile. */
+  readonly tutorial = new Set<string>();
 
   /** Today's daily result, or a stale day's until the next daily run is played. */
   daily: DailyRecord = emptyDaily(dailyKey());
@@ -316,15 +377,48 @@ export class MetaProgress implements ContentGate {
   // ---- horde mode ------------------------------------------------------------
 
   /**
-   * Permanently unlock the next Horde arena level.
+   * Score a finished Horde attempt: fold it into the arena's bests and, on
+   * survival, permanently unlock the next level. Dying on a later attempt never
+   * takes an unlock back.
    *
-   * Called on survival, not on run end generically — dying to the wave that
-   * follows must not cost the player the unlock they already earned.
+   * Returns whether the attempt beat an earlier one — a longer stand or more kills.
+   * A first attempt is the baseline, not a record: "new record" on the very first
+   * try would be noise the player learns to ignore.
    */
-  recordHordeResult(level: number, survived: boolean): void {
-    if (!survived || level < this.hordeLevelUnlocked) return;
-    this.hordeLevelUnlocked = level + 1;
+  recordHordeResult(level: number, attempt: HordeAttempt): boolean {
+    if (attempt.survived && level >= this.hordeLevelUnlocked) this.hordeLevelUnlocked = level + 1;
+
+    const prev = this.hordeRecords[level];
+    const improved =
+      prev !== undefined &&
+      prev.attempts > 0 &&
+      (attempt.seconds > prev.bestSeconds || attempt.kills > prev.bestKills);
+
+    this.hordeRecords[level] = {
+      attempts: (prev?.attempts ?? 0) + 1,
+      bestSeconds: Math.max(prev?.bestSeconds ?? 0, attempt.seconds),
+      bestWave: Math.max(prev?.bestWave ?? 0, attempt.wave),
+      bestKills: Math.max(prev?.bestKills ?? 0, attempt.kills),
+    };
+
     this.save();
+    return improved;
+  }
+
+  /** Arenas survived at least once — what the ladder trials count. */
+  get hordeLevelsBeaten(): number {
+    return Math.min(this.hordeLevelUnlocked - 1, HORDE_LEVELS.length);
+  }
+
+  /** The best showing across every arena, for the chronicle. Zeros before any attempt. */
+  hordeBest(): { seconds: number; wave: number; kills: number } {
+    const best = { seconds: 0, wave: 0, kills: 0 };
+    for (const record of Object.values(this.hordeRecords)) {
+      best.seconds = Math.max(best.seconds, record.bestSeconds);
+      best.wave = Math.max(best.wave, record.bestWave);
+      best.kills = Math.max(best.kills, record.bestKills);
+    }
+    return best;
   }
 
   // ---- checkpoint ------------------------------------------------------------
@@ -394,10 +488,12 @@ export class MetaProgress implements ContentGate {
   // ---- trials --------------------------------------------------------------
 
   /** What the trials are judged against. `run` is null outside a finished run. */
-  achievementContext(run: RunStats | null): AchievementContext {
+  achievementContext(run: RunStats | null, horde: HordeRunSnapshot | null = null): AchievementContext {
     return {
       run,
+      horde,
       lifetime: this.lifetime,
+      hordeLevelsBeaten: this.hordeLevelsBeaten,
       unlockedContent: this.unlockedCount,
       unlockableContent: this.unlockableCount,
     };
@@ -420,8 +516,8 @@ export class MetaProgress implements ContentGate {
    * very run that finished it. Rewards are banked immediately — a trial that pays
    * out only on the next launch would feel broken.
    */
-  private claimAchievements(run: RunStats | null): AchievementDef[] {
-    const fresh = evaluateAchievements(this.achievementContext(run), this.achievements);
+  private claimAchievements(run: RunStats | null, horde: HordeRunSnapshot | null = null): AchievementDef[] {
+    const fresh = evaluateAchievements(this.achievementContext(run, horde), this.achievements);
     for (const def of fresh) {
       this.achievements.add(def.id);
       this.souls += def.reward;
@@ -452,12 +548,23 @@ export class MetaProgress implements ContentGate {
    * Fold a finished run into the lifetime record and bank its souls.
    *
    * Returns the trials the run just earned, so the results screen can show them.
+   * A Horde run passes `horde`; call `recordHordeResult` first, so a ladder trial
+   * can be earned by the very survival that climbed the rung.
    */
-  recordRun(run: RunStats, soulsEarned: number, options: { daily?: boolean } = {}): AchievementDef[] {
+  recordRun(
+    run: RunStats,
+    soulsEarned: number,
+    options: { daily?: boolean; horde?: HordeRunSnapshot } = {},
+  ): AchievementDef[] {
     const l = this.lifetime;
+    const horde = options.horde ?? null;
 
     l.runs++;
-    if (run.outcome === 'victory') l.victories++;
+    if (horde) {
+      l.hordeRuns++;
+      if (run.outcome === 'victory') l.hordeVictories++;
+      else l.deaths++;
+    } else if (run.outcome === 'victory') l.victories++;
     else l.deaths++;
 
     l.totalKills += run.totalKills;
@@ -467,10 +574,13 @@ export class MetaProgress implements ContentGate {
     l.totalBuildings += run.buildingsDestroyed;
     l.totalPlaytime += run.elapsed;
 
-    if (run.roomsCleared > l.deepestRoom) l.deepestRoom = run.roomsCleared;
-    if (run.totalKills > l.bestKills) l.bestKills = run.totalKills;
+    if (!horde) {
+      if (run.roomsCleared > l.deepestRoom) l.deepestRoom = run.roomsCleared;
+      if (run.totalKills > l.bestKills) l.bestKills = run.totalKills;
+      if (soulsEarned > l.bestSoulsInRun) l.bestSoulsInRun = soulsEarned;
+    }
+    // A rate and a single hit don't grow with run length, so either mode can set them.
     if (run.averageDps > l.bestDps) l.bestDps = run.averageDps;
-    if (soulsEarned > l.bestSoulsInRun) l.bestSoulsInRun = soulsEarned;
     if (run.largestHit > l.largestHit) l.largestHit = run.largestHit;
 
     for (const type of DAMAGE_TYPES) l.damageByType[type] += run.damageDealtByType[type];
@@ -494,7 +604,7 @@ export class MetaProgress implements ContentGate {
       this.recordDaily(run, soulsEarned);
     }
 
-    const earned = this.claimAchievements(run);
+    const earned = this.claimAchievements(run, horde);
     this.save();
     return earned;
   }
@@ -528,12 +638,14 @@ export class MetaProgress implements ContentGate {
       deepestBiomeReached: this.deepestBiomeReached,
       selectedStartBiome: this.selectedStartBiome,
       hordeLevelUnlocked: this.hordeLevelUnlocked,
+      hordeRecords: this.hordeRecords,
       checkpointBiome: this.checkpointBiome,
       checkpointDepth: this.checkpointDepth,
       checkpointBuild: this.checkpointBuild,
       settings: this.settings,
       lifetime: this.lifetime,
       achievements: [...this.achievements],
+      tutorial: [...this.tutorial],
       daily: this.daily,
       volume: this.volume,
       muted: this.muted,
@@ -596,6 +708,7 @@ export class MetaProgress implements ContentGate {
         typeof data.hordeLevelUnlocked === 'number' && data.hordeLevelUnlocked >= 1
           ? Math.floor(data.hordeLevelUnlocked)
           : 1;
+      this.hordeRecords = sanitizeHordeRecords(data.hordeRecords);
 
       // Missing on any save older than this feature — defaults to no checkpoint,
       // same as a profile that has never died mid-run.
@@ -615,6 +728,16 @@ export class MetaProgress implements ContentGate {
         // Drop ids for trials this build no longer has, so a removed trial can't
         // keep occupying a slot in the count forever.
         if (typeof id === 'string' && getAchievement(id)) this.achievements.add(id);
+      }
+
+      this.tutorial.clear();
+      if (Array.isArray(data.tutorial)) {
+        for (const id of data.tutorial) if (typeof id === 'string' && getLesson(id)) this.tutorial.add(id);
+      } else if ((data.lifetime?.runs ?? 0) > 0) {
+        // A save from before the tutorial existed, belonging to someone who has
+        // already played: they learned all of this the hard way, and being walked
+        // through "move with WASD" on their next run would be patronising.
+        for (const lesson of LESSONS) this.tutorial.add(lesson.id);
       }
 
       const daily = data.daily;
@@ -640,6 +763,7 @@ export class MetaProgress implements ContentGate {
    *
    * v2 knew nothing of trials. Rather than ask a veteran to re-earn what their
    * record already proves, every lifetime trial they satisfy is granted on load.
+   * The same pass grants v6's Horde ladder trials to anyone already up the ladder.
    */
   private migrate(data: Partial<LegacySaveData>): void {
     this.claimAchievements(null);
@@ -663,12 +787,15 @@ export class MetaProgress implements ContentGate {
     this.speciesId = DEFAULT_SPECIES_ID;
     this.deepestBiomeReached = 1;
     this.selectedStartBiome = 1;
+    this.hordeLevelUnlocked = 1;
+    this.hordeRecords = {};
     this.checkpointBiome = 1;
     this.checkpointDepth = 0;
     this.checkpointBuild = null;
     this.settings = defaultSettings();
     this.unlocked.clear();
     this.achievements.clear();
+    this.tutorial.clear();
     this.daily = emptyDaily(dailyKey());
     this.lifetime = emptyLifetime();
     this.isNewProfile = true;

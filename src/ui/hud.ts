@@ -5,6 +5,7 @@ import type { Monster } from '../entities/monster';
 import { t } from '../i18n';
 import { RARITY, type SkillCard } from '../progression/skills';
 import type { RunStats } from '../stats/tracker';
+import { type CoachCard, drawCoach } from './tutorial';
 import { formatNumber, formatTime, PALETTE, rect, type Ui } from './widgets';
 
 export interface HudState {
@@ -19,10 +20,10 @@ export interface HudState {
   skills: Array<{ card: SkillCard; stacks: number }>;
   /** 0..1, drives the red screen edge when hurt. */
   hurtFlash: number;
-  /** Seconds since the run started, for the tutorial hint. */
+  /** Seconds since the run started, for anything on the HUD that pulses. */
   elapsed: number;
-  /** `elapsed` when the opening hint's message was first demonstrated, or null. */
-  hintClearedAt: number | null;
+  /** The tutorial lesson on screen this frame, if any. */
+  coach: CoachCard | null;
   bossName: string | null;
   bossHealth: number;
   /** Whether the player is on the on-screen stick rather than a keyboard. */
@@ -68,7 +69,7 @@ export function drawHud(ui: Ui, state: HudState): void {
   drawBoons(ui, state);
   drawBuild(ui, state);
   if (state.bossName) drawBossBar(ui, state);
-  drawHints(ui, state);
+  if (state.coach) drawCoach(ui, state.coach, state.touchActive);
 }
 
 /**
@@ -832,67 +833,6 @@ function drawBossBar(ui: Ui, state: HudState): void {
     color: '#b5252d',
     background: 'rgba(0,0,0,0.7)',
   });
-}
-
-/** Never dismissed before this even if the player got it instantly. */
-const HINT_MIN_VISIBLE = 6;
-/** Always dismissed by this even if `hintClearedAt` never arrives. */
-const HINT_HARD_MAX = 20;
-/** Read-time kept after the player demonstrates they understood the hint. */
-const HINT_GRACE = 1.5;
-
-function drawHints(ui: Ui, state: HudState): void {
-  // The core mechanic needs saying exactly once, early — true on touch as much as on
-  // a keyboard, only the wording of how to move changes.
-  if (state.roomIndex > 0) return;
-
-  // Moving a real distance and landing a hit is the player acting out both halves
-  // of the hint themselves — proof it landed, better than any fixed timer. Someone
-  // who gets there in three seconds doesn't need it lingering for fourteen; someone
-  // still fumbling at fourteen shouldn't lose it either, so the hard cap only bites
-  // when the softer, demonstrated one never fires at all.
-  const dismissAt = clamp(
-    state.hintClearedAt !== null ? state.hintClearedAt + HINT_GRACE : HINT_HARD_MAX,
-    HINT_MIN_VISIBLE,
-    HINT_HARD_MAX,
-  );
-  if (state.elapsed > dismissAt) return;
-
-  const fadeOutStart = Math.max(2, dismissAt - 3);
-  const alpha =
-    state.elapsed < 2 ? state.elapsed / 2 : state.elapsed > fadeOutStart ? (dismissAt - state.elapsed) / (dismissAt - fadeOutStart) : 1;
-
-  // On touch, the right edge is the on-screen stick's button column — centre the
-  // hint in whatever's left of the screen instead of letting it run underneath them.
-  // `rightClearance` of 16 (the same margin as the left) reduces to the old
-  // full-width centring exactly when there is no touch column to dodge.
-  const rightClearance = state.touchActive ? 150 : 16;
-  const centerX = (16 + (ui.width - rightClearance)) / 2;
-  const maxWidth = ui.width - rightClearance - 16;
-
-  ui.fittedText(t('hint.autoAttackTitle'), centerX, ui.height - 120, {
-    size: 16,
-    color: PALETTE.gold,
-    align: 'center',
-    baseline: 'middle',
-    letterSpacing: 3,
-    alpha: clamp(alpha, 0, 1),
-    outline: true,
-    maxWidth,
-  });
-  ui.fittedText(
-    state.touchActive ? t('hint.autoAttackSubTouch') : t('hint.autoAttackSub'),
-    centerX,
-    ui.height - 98,
-    {
-      size: 12,
-      color: PALETTE.muted,
-      align: 'center',
-      baseline: 'middle',
-      alpha: clamp(alpha, 0, 1),
-      maxWidth,
-    },
-  );
 }
 
 /** Colour for a damage type, exported for other screens. */

@@ -34,13 +34,13 @@ export function newSettingsView(): SettingsView {
  * board is 'Z' under a French layout. Showing the code trimmed is honest about that
  * without pretending to know the layout, which the web platform will not tell us.
  */
-function keyLabel(code: string | undefined): string {
+export function keyLabel(code: string | undefined): string {
   if (!code) return '—';
   if (code.startsWith('Key')) return code.slice(3);
   if (code.startsWith('Digit')) return code.slice(5);
   if (code.startsWith('Numpad')) return `Num ${code.slice(6)}`;
   if (code.startsWith('Arrow')) return code.slice(5).toUpperCase();
-  if (code === 'Space') return 'SPACE';
+  if (code === 'Space') return t('key.space');
   if (code === 'ShiftLeft') return 'L SHIFT';
   if (code === 'ShiftRight') return 'R SHIFT';
   if (code === 'ControlLeft') return 'L CTRL';
@@ -144,6 +144,21 @@ export function drawSettings(
     labelOf: (value) => t(value ? 'common.on' : 'common.off'),
     onPick: (value) => {
       settings.damageNumbers = value;
+      commit();
+    },
+  });
+
+  y = choiceRow<boolean>(ui, x, y, panelW, {
+    label: t('settings.tips'),
+    hint: t('settings.tips.hint'),
+    options: [true, false],
+    current: settings.tips,
+    labelOf: (value) => t(value ? 'common.on' : 'common.off'),
+    onPick: (value) => {
+      settings.tips = value;
+      // Switching tips back on is the "teach me again" button: a player who asks
+      // for them wants the lessons they already saw, not just the ones left.
+      if (value) meta.tutorial.clear();
       commit();
     },
   });

@@ -21,7 +21,7 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Гарнизон', 'Дозор', 'Ставка', 'Караул'],
       boss: ['Собор', 'Оплот', 'Твердыня'],
     },
-    bossSuffix: { inquisitor: 'Инквизиции', warlord: 'Воеводы', pyromancer: 'Огнедержицы', khagan: 'Хагана', anchorite: 'Анахорета' },
+    bossSuffix: { inquisitor: 'Инквизиции', warlord: 'Воеводы', pyromancer: 'Огнедержицы', khagan: 'Хагана', anchorite: 'Анахорета', martyr: 'Мученицы', bellringer: 'Звонаря' },
   },
   en: {
     prefixes: ['Quiet', 'Grey', 'Old', 'Far', 'Wet', 'Crooked', 'Wolf', 'Ashen', 'Deaf', 'Last'],
@@ -39,6 +39,8 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       pyromancer: 'of the Pyromancer',
       khagan: 'of the Khagan',
       anchorite: 'of the Anchorite',
+      martyr: 'of the Martyr',
+      bellringer: 'of the Bellringer',
     },
   },
   de: {
@@ -57,6 +59,8 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       pyromancer: 'der Feuerherrin',
       khagan: 'des Khagans',
       anchorite: 'des Anachoreten',
+      martyr: 'der Märtyrerin',
+      bellringer: 'des Glöckners',
     },
   },
   uk: {
@@ -69,7 +73,7 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       elite: ['Гарнізон', 'Дозор', 'Ставка', 'Караул'],
       boss: ['Собор', 'Бастіон', 'Твердиня'],
     },
-    bossSuffix: { inquisitor: 'Інквізиції', warlord: 'Воєводи', pyromancer: 'Вогнетримачки', khagan: 'Хагана', anchorite: 'Анахорита' },
+    bossSuffix: { inquisitor: 'Інквізиції', warlord: 'Воєводи', pyromancer: 'Вогнетримачки', khagan: 'Хагана', anchorite: 'Анахорита', martyr: 'Мучениці', bellringer: 'Дзвонаря' },
   },
   fr: {
     prefixes: ['Silencieux', 'Gris', 'Vieux', 'Lointain', 'Humide', 'Tordu', 'Loup', 'Cendré', 'Sourd', 'Dernier'],
@@ -87,6 +91,8 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       pyromancer: 'de la Pyromancienne',
       khagan: 'du Khagan',
       anchorite: "de l'Anachorète",
+      martyr: 'de la Martyre',
+      bellringer: 'du Sonneur',
     },
   },
   it: {
@@ -105,6 +111,8 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       pyromancer: 'della Piromante',
       khagan: 'del Khagan',
       anchorite: "dell'Anacoreta",
+      martyr: 'della Martire',
+      bellringer: 'del Campanaro',
     },
   },
   hr: {
@@ -123,6 +131,8 @@ const ROOM_NAMES: Record<Locale, RoomNameSet> = {
       pyromancer: 'Piromantkinje',
       khagan: 'Kagana',
       anchorite: 'Anahorete',
+      martyr: 'Mučenice',
+      bellringer: 'Zvonara',
     },
   },
 };

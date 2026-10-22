@@ -24,6 +24,12 @@ export interface MonsterBody {
   wings: number;
   /** Ambulatory tendrils. */
   limbs: number;
+  /** Overlapping chitin plates riding the upper rim of the body. */
+  plates: number;
+  /** Writhing feelers around the maw, reaching toward wherever it aims. */
+  tendrils: number;
+  /** Glowing pustules swelling under the skin. */
+  sacs: number;
   /** 0..1 — how much of the body is taken up by the maw. */
   maw: number;
   bulk: number;
@@ -51,6 +57,9 @@ export function createBaseBody(): MonsterBody {
     tails: 1,
     wings: 0,
     limbs: 4,
+    plates: 0,
+    tendrils: 0,
+    sacs: 0,
     maw: 0.32,
     bulk: 1,
     bodyColor: '#2b1f2e',

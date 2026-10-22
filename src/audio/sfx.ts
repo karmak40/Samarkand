@@ -380,6 +380,36 @@ export class SoundBank {
     this.engine.noise({ duration: 0.8, gain: 0.1, freq: 300, freqEnd: 4000, filter: 'bandpass' });
   }
 
+  /**
+   * A boss falls. Unplaced on purpose — this is the run's stinger, not a sound
+   * in the room: a deep impact, a long bell struck twice, and a low swell under
+   * both that carries the slow-motion out.
+   */
+  bossSlain(): void {
+    this.engine.noise({ duration: 1.4, gain: 0.26, freq: 1400, freqEnd: 50, filter: 'lowpass', q: 0.7 });
+    this.engine.tone({ freq: 62, freqEnd: 28, type: 'sine', duration: 1.6, gain: 0.3 });
+    // A bell: a fundamental plus inharmonic partials, each decaying on its own.
+    for (const [delay, base] of [
+      [0.05, 196],
+      [0.55, 147],
+    ] as const) {
+      for (const [ratio, gain] of [
+        [1, 0.12],
+        [2.76, 0.05],
+        [5.4, 0.025],
+      ] as const) {
+        this.engine.tone({ freq: base * ratio, type: 'sine', duration: 2.4, gain, attack: 0.005, delay });
+      }
+    }
+    for (const [freq, detune] of [
+      [98, -7],
+      [98, 9],
+      [147, 4],
+    ] as const) {
+      this.engine.tone({ freq, detune, type: 'sawtooth', duration: 2.6, gain: 0.05, attack: 0.6, lowpass: 600, delay: 0.3 });
+    }
+  }
+
   death(): void {
     [220, 165, 110, 55].forEach((freq, i) => {
       this.engine.tone({

@@ -71,8 +71,11 @@ export function drawMonster(ctx: CanvasRenderingContext2D, monster: Monster, wor
   ctx.rotate(-travelAngle);
 
   drawBlob(ctx, body, r, t);
+  drawSacs(ctx, body, r, t);
+  drawPlates(ctx, body, r, t);
   drawSpikes(ctx, body, r, t);
   drawHorns(ctx, body, r, monster.aim);
+  drawTendrils(ctx, body, r, monster.aim, t, monster.attackAnim);
   drawMaw(ctx, body, r, monster.aim, monster.attackAnim, t);
   drawEyes(ctx, body, r, monster.aim, t, monster.attackAnim);
 
@@ -174,8 +177,11 @@ export function drawBodyPortrait(
 
   drawLimbs(ctx, body, r, t * 2, 0, 0);
   drawBlob(ctx, body, r, t);
+  drawSacs(ctx, body, r, t);
+  drawPlates(ctx, body, r, t);
   drawSpikes(ctx, body, r, t);
   drawHorns(ctx, body, r, aim);
+  drawTendrils(ctx, body, r, aim, t, 0);
   drawMaw(ctx, body, r, aim, 0, t);
   drawEyes(ctx, body, r, aim, t, 0);
 
@@ -215,6 +221,122 @@ function drawBlob(ctx: CanvasRenderingContext2D, body: MonsterBody, r: number, t
   ctx.strokeStyle = hexAlpha(body.glowColor, 0.35);
   ctx.lineWidth = 1.6;
   ctx.stroke();
+}
+
+/**
+ * Pustules under the skin. Positions come from a fixed spiral rather than a
+ * random roll, so the same body always grows its sacs in the same places and a
+ * portrait matches the creature in the arena.
+ */
+function drawSacs(ctx: CanvasRenderingContext2D, body: MonsterBody, r: number, t: number): void {
+  if (body.sacs <= 0) return;
+
+  for (let i = 0; i < body.sacs; i++) {
+    const a = i * 2.39996 + 0.6;
+    const d = r * (0.32 + ((i * 0.37) % 0.42));
+    const x = Math.cos(a) * d;
+    const y = Math.sin(a) * d;
+    const pulse = 1 + Math.sin(t * 3.1 + i * 1.3) * 0.12;
+    const size = r * (0.15 + (i % 3) * 0.035) * pulse;
+
+    ctx.fillStyle = shade(body.accentColor, -0.25);
+    ctx.beginPath();
+    ctx.arc(x, y, size * 1.15, 0, TAU);
+    ctx.fill();
+
+    const grad = ctx.createRadialGradient(x - size * 0.3, y - size * 0.3, 0, x, y, size);
+    grad.addColorStop(0, hexAlpha('#ffffff', 0.7));
+    grad.addColorStop(0.35, hexAlpha(body.glowColor, 0.85));
+    grad.addColorStop(1, hexAlpha(body.glowColor, 0.15));
+    ctx.fillStyle = grad;
+    ctx.beginPath();
+    ctx.arc(x, y, size, 0, TAU);
+    ctx.fill();
+  }
+}
+
+/** Chitin plates overlapping like a woodlouse's back along the upper rim. */
+function drawPlates(ctx: CanvasRenderingContext2D, body: MonsterBody, r: number, t: number): void {
+  if (body.plates <= 0) return;
+
+  const base = shade(body.accentColor, 0.05);
+  const edge = shade(body.accentColor, -0.45);
+  for (let i = 0; i < body.plates; i++) {
+    // Spread across the top arc, back to front, so each plate overlaps the last.
+    const k = body.plates === 1 ? 0.5 : i / (body.plates - 1);
+    const a = -Math.PI * (0.88 - k * 0.76);
+    const sway = Math.sin(t * 1.6 + i * 0.7) * 0.015;
+    const d = r * 0.78;
+    const x = Math.cos(a + sway) * d;
+    const y = Math.sin(a + sway) * d;
+
+    ctx.save();
+    ctx.translate(x, y);
+    ctx.rotate(a + Math.PI / 2);
+    const grad = ctx.createLinearGradient(0, -r * 0.3, 0, r * 0.2);
+    grad.addColorStop(0, shade(base, 0.25));
+    grad.addColorStop(1, shade(base, -0.2));
+    ctx.fillStyle = grad;
+    ctx.strokeStyle = edge;
+    ctx.lineWidth = 1.2;
+    ctx.beginPath();
+    ctx.ellipse(0, 0, r * 0.36, r * 0.24, 0, Math.PI, TAU);
+    ctx.closePath();
+    ctx.fill();
+    ctx.stroke();
+    ctx.restore();
+  }
+}
+
+/**
+ * Feelers fanned around the maw, pointing where the creature aims. They curl
+ * independently at rest and straighten toward the target on an attack, so the
+ * lunge reads as the whole face reaching out.
+ */
+function drawTendrils(
+  ctx: CanvasRenderingContext2D,
+  body: MonsterBody,
+  r: number,
+  aim: number,
+  t: number,
+  attackAnim: number,
+): void {
+  if (body.tendrils <= 0) return;
+
+  ctx.save();
+  ctx.rotate(aim);
+  ctx.lineCap = 'round';
+  const fan = 1.5;
+  for (let i = 0; i < body.tendrils; i++) {
+    const k = body.tendrils === 1 ? 0.5 : i / (body.tendrils - 1);
+    const a = (k - 0.5) * fan;
+    const rootX = Math.cos(a) * r * 0.8;
+    const rootY = Math.sin(a) * r * 0.8;
+    const length = r * (0.95 + (i % 2) * 0.3) * (1 + attackAnim * 0.35);
+    const curl = (1 - attackAnim) * 0.55;
+    const segments = 6;
+
+    ctx.strokeStyle = shade(body.accentColor, -0.15);
+    ctx.beginPath();
+    ctx.moveTo(rootX, rootY);
+    let x = rootX;
+    let y = rootY;
+    for (let s = 1; s <= segments; s++) {
+      const p = s / segments;
+      const bend = a * 0.6 + Math.sin(t * 3.4 - p * 3 + i * 1.9) * curl * p;
+      x = rootX + Math.cos(bend) * length * p;
+      y = rootY + Math.sin(bend) * length * p;
+      ctx.lineWidth = r * 0.13 * (1 - p * 0.75);
+      ctx.lineTo(x, y);
+    }
+    ctx.stroke();
+
+    ctx.fillStyle = hexAlpha(body.glowColor, 0.85);
+    ctx.beginPath();
+    ctx.arc(x, y, r * 0.06, 0, TAU);
+    ctx.fill();
+  }
+  ctx.restore();
 }
 
 function drawSpikes(ctx: CanvasRenderingContext2D, body: MonsterBody, r: number, t: number): void {

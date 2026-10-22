@@ -89,14 +89,27 @@ export function drawHordeMenu(
       baseline: 'middle',
       bold: true,
     });
-    ui.text(t('horde.targetTime', { time: formatTime(entry.targetSeconds) }), bounds.x + 20, bounds.y + 52, {
+    const targetW = ui.text(t('horde.targetTime', { time: formatTime(entry.targetSeconds) }), bounds.x + 20, bounds.y + 52, {
       size: 13,
       color: unlockedRow ? PALETTE.muted : PALETTE.dim,
       baseline: 'middle',
     });
 
+    // A personal best turns the status into the top line and sits under it, level
+    // with the target it's measured against.
+    const record = meta.hordeRecords[entry.level];
+    const statusY = record ? bounds.y + 26 : bounds.y + bounds.h / 2;
+    if (record) {
+      ui.text(
+        t('horde.best', { time: formatTime(record.bestSeconds), wave: record.bestWave, kills: record.bestKills }),
+        bounds.x + bounds.w - 20,
+        bounds.y + 52,
+        { size: 12, color: '#cfeaff', align: 'right', baseline: 'middle', maxWidth: bounds.w - targetW - 56 },
+      );
+    }
+
     if (beaten) {
-      ui.text(t('lair.owned'), bounds.x + bounds.w - 20, bounds.y + bounds.h / 2, {
+      ui.text(t('horde.beaten'), bounds.x + bounds.w - 20, statusY, {
         size: 12,
         color: PALETTE.good,
         align: 'right',
