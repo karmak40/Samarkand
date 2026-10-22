@@ -63,6 +63,11 @@ function watchForErrors(page: Page): string[] {
 
 async function openGame(page: Page): Promise<void> {
   await page.goto(DEV);
+  // Locally Playwright reuses whatever already listens on the dev port. When that is
+  // another project's server, waiting for the debug handle just times out in silence.
+  await expect(page.locator('canvas#stage'), `${DEV} is not serving Samarkand — free the port`).toHaveCount(1, {
+    timeout: 10_000,
+  });
   await page.waitForFunction(() => 'samarkand' in window, null, { timeout: 20_000 });
   await expect(page.locator('#boot')).toHaveClass(/gone/, { timeout: 15_000 });
 }
